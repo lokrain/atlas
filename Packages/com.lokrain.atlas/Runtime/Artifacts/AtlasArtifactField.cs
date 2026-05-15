@@ -5,7 +5,8 @@
 //
 // Purpose
 // - Represent one durable field-payload table entry inside an Atlas artifact.
-// - Preserve field identity, slot, role, storage format, resolved shape, and payload byte range.
+// - Preserve field identity, slot, role, storage format, shape domain, resolved shape, and payload byte range.
+// - Distinguish logical byte length, allocation byte capacity, and serialized payload byte length.
 // - Represent optional per-field content hash without reserving zero as invalid.
 // - Keep artifact field metadata separate from workspace memory ownership.
 //
@@ -19,6 +20,12 @@
 // - default(AtlasArtifactField) is not a concrete artifact field.
 // - Missing/unwritten state is represented by IsConcrete, not by magic sentinels.
 // - ByteOffset is artifact-payload-relative, not process memory address.
+// - ByteLength is resolved logical content byte length.
+// - ByteCapacity is resolved allocated storage byte capacity.
+// - PayloadByteLength is the number of bytes serialized into the artifact payload.
+// - ByteEndOffset is ByteOffset + PayloadByteLength.
+// - Existing Create(...) overloads serialize capacity bytes for source compatibility.
+// - Logical artifact capture should use CreateLogicalPayload(...) or CreateWithPayloadByteLength(...).
 
 using System;
 using System.Globalization;
@@ -38,20 +45,19 @@ namespace Lokrain.Atlas.Artifacts
     /// <remarks>
     /// <para>
     /// <see cref="AtlasArtifactField"/> describes one field payload written into an artifact:
-    /// its stable field identity, Contract-table slot, resolved storage shape, byte range, and
-    /// optional content hash.
+    /// stable field identity, Contract-table slot, field role, shape domain, declared shape,
+    /// storage format, resolved sizing, serialized payload byte range, and optional content hash.
     /// </para>
     ///
     /// <para>
-    /// This value is intentionally metadata only. It must not own workspace memory, expose native
-    /// containers, schedule jobs, or depend on rendering/debug systems. Artifact writers use this
-    /// entry to describe where each workspace field was serialized into the durable payload.
+    /// Logical content length and allocated capacity are separate from serialized artifact payload
+    /// length. This lets artifact capture preserve allocation metadata while serializing only logical
+    /// content bytes when required by durable artifact semantics.
     /// </para>
     ///
     /// <para>
-    /// The per-field content hash is optional because the early vertical slice can write useful
-    /// artifact metadata and payloads before final field-content hashing is complete. Because zero
-    /// is a valid hash value, <see cref="HasContentHash"/> owns hash presence.
+    /// The per-field content hash is optional. Zero is a valid hash value, so
+    /// <see cref="HasContentHash"/> owns hash presence.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
@@ -70,10 +76,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Artifact field-table index.
         /// </summary>
-        /// <remarks>
-        /// This is the row index inside the artifact field table. For the canonical Contract-table
-        /// order used by the first artifact writer, this should match <see cref="Slot"/>.<c>Index</c>.
-        /// </remarks>
         public readonly int FieldIndex;
 
         /// <summary>
@@ -95,6 +97,11 @@ namespace Lokrain.Atlas.Artifacts
         /// Physical storage format of the serialized field payload.
         /// </summary>
         public readonly StorageFormat StorageFormat;
+
+        /// <summary>
+        /// Semantic shape domain used to interpret resolved length and capacity.
+        /// </summary>
+        public readonly AtlasShapeDomain ShapeDomain;
 
         /// <summary>
         /// Declared symbolic shape from the Contract table.
@@ -127,16 +134,22 @@ namespace Lokrain.Atlas.Artifacts
         public readonly long ByteCapacity;
 
         /// <summary>
-        /// Payload-relative byte offset where this field's bytes begin.
+        /// Number of bytes serialized for this field into the artifact payload.
+        /// </summary>
+        /// <remarks>
+        /// For logical-content artifacts this equals <see cref="ByteLength"/>. For capacity
+        /// snapshots this equals <see cref="ByteCapacity"/>.
+        /// </remarks>
+        public readonly long PayloadByteLength;
+
+        /// <summary>
+        /// Payload-relative byte offset where this field's serialized bytes begin.
         /// </summary>
         public readonly long ByteOffset;
 
         /// <summary>
-        /// Optional deterministic hash of this field's serialized content bytes.
+        /// Optional deterministic hash of this field's serialized payload bytes.
         /// </summary>
-        /// <remarks>
-        /// Zero is valid. Use <see cref="HasContentHash"/> to check presence.
-        /// </remarks>
         public readonly ulong ContentHash;
 
         private AtlasArtifactField(
@@ -145,12 +158,14 @@ namespace Lokrain.Atlas.Artifacts
             AtlasFieldSlot slot,
             AtlasFieldRole role,
             StorageFormat storageFormat,
+            AtlasShapeDomain shapeDomain,
             LengthShape declaredShape,
             FixedString64Bytes debugName,
             int length,
             int capacity,
             long byteLength,
             long byteCapacity,
+            long payloadByteLength,
             long byteOffset,
             ulong contentHash,
             bool hasContentHash)
@@ -161,11 +176,14 @@ namespace Lokrain.Atlas.Artifacts
                 slot,
                 role,
                 storageFormat,
+                shapeDomain,
                 declaredShape,
+                debugName,
                 length,
                 capacity,
                 byteLength,
                 byteCapacity,
+                payloadByteLength,
                 byteOffset);
 
             FieldIndex = fieldIndex;
@@ -173,12 +191,14 @@ namespace Lokrain.Atlas.Artifacts
             Slot = slot;
             Role = role;
             StorageFormat = storageFormat;
+            ShapeDomain = shapeDomain;
             DeclaredShape = declaredShape;
             DebugName = debugName;
             Length = length;
             Capacity = capacity;
             ByteLength = byteLength;
             ByteCapacity = byteCapacity;
+            PayloadByteLength = payloadByteLength;
             ByteOffset = byteOffset;
             ContentHash = contentHash;
             _contentHashState = hasContentHash ? ContentHashPresent : ContentHashAbsent;
@@ -218,11 +238,11 @@ namespace Lokrain.Atlas.Artifacts
         public long ByteEndOffset
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => checked(ByteOffset + ByteCapacity);
+            get => checked(ByteOffset + PayloadByteLength);
         }
 
         /// <summary>
-        /// Gets whether this field payload has zero allocated bytes.
+        /// Gets whether this field has zero allocated bytes.
         /// </summary>
         public bool IsZeroCapacity
         {
@@ -231,7 +251,7 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Gets whether this field payload has capacity bytes beyond logical bytes.
+        /// Gets whether this field has capacity bytes beyond logical bytes.
         /// </summary>
         public bool HasCapacitySlack
         {
@@ -240,11 +260,35 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a resolved shape.
+        /// Gets whether this artifact field serializes logical content bytes.
         /// </summary>
-        /// <param name="shape">Resolved shape represented by this artifact field.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <returns>A concrete artifact field entry without content hash.</returns>
+        public bool SerializesLogicalContent
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => PayloadByteLength == ByteLength;
+        }
+
+        /// <summary>
+        /// Gets whether this artifact field serializes the full allocated capacity bytes.
+        /// </summary>
+        public bool SerializesCapacity
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => PayloadByteLength == ByteCapacity;
+        }
+
+        /// <summary>
+        /// Gets whether this artifact field serializes capacity slack bytes beyond logical content.
+        /// </summary>
+        public bool SerializesCapacitySlack
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => PayloadByteLength > ByteLength;
+        }
+
+        /// <summary>
+        /// Creates a capacity-payload artifact field entry from a resolved shape.
+        /// </summary>
         public static AtlasArtifactField Create(
             AtlasResolvedShape shape,
             long byteOffset)
@@ -258,16 +302,153 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a resolved shape and explicit field-table index.
+        /// Creates a capacity-payload artifact field entry from a resolved shape and explicit field-table index.
         /// </summary>
-        /// <param name="fieldIndex">Artifact field-table index.</param>
-        /// <param name="shape">Resolved shape represented by this artifact field.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <returns>A concrete artifact field entry without content hash.</returns>
         public static AtlasArtifactField Create(
             int fieldIndex,
             AtlasResolvedShape shape,
             long byteOffset)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteCapacity);
+        }
+
+        /// <summary>
+        /// Creates a capacity-payload artifact field entry from a resolved shape and content hash.
+        /// </summary>
+        public static AtlasArtifactField Create(
+            AtlasResolvedShape shape,
+            long byteOffset,
+            ulong contentHash)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return Create(
+                fieldIndex: shape.Slot.Index,
+                shape,
+                byteOffset,
+                contentHash);
+        }
+
+        /// <summary>
+        /// Creates a capacity-payload artifact field entry from a resolved shape, explicit field-table index, and content hash.
+        /// </summary>
+        public static AtlasArtifactField Create(
+            int fieldIndex,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            ulong contentHash)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteCapacity,
+                contentHash);
+        }
+
+        /// <summary>
+        /// Creates a logical-content artifact field entry from a resolved shape.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            AtlasResolvedShape shape,
+            long byteOffset)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex: shape.Slot.Index,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteLength);
+        }
+
+        /// <summary>
+        /// Creates a logical-content artifact field entry from a resolved shape and explicit field-table index.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            int fieldIndex,
+            AtlasResolvedShape shape,
+            long byteOffset)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteLength);
+        }
+
+        /// <summary>
+        /// Creates a logical-content artifact field entry from a resolved shape and content hash.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            AtlasResolvedShape shape,
+            long byteOffset,
+            ulong contentHash)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex: shape.Slot.Index,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteLength,
+                contentHash);
+        }
+
+        /// <summary>
+        /// Creates a logical-content artifact field entry from a resolved shape, explicit field-table index, and content hash.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            int fieldIndex,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            ulong contentHash)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex,
+                shape,
+                byteOffset,
+                payloadByteLength: shape.ByteLength,
+                contentHash);
+        }
+
+        /// <summary>
+        /// Creates an artifact field entry with explicit serialized payload byte length.
+        /// </summary>
+        public static AtlasArtifactField CreateWithPayloadByteLength(
+            AtlasResolvedShape shape,
+            long byteOffset,
+            long payloadByteLength)
+        {
+            shape.ValidateOrThrow(nameof(shape));
+
+            return CreateWithPayloadByteLength(
+                fieldIndex: shape.Slot.Index,
+                shape,
+                byteOffset,
+                payloadByteLength);
+        }
+
+        /// <summary>
+        /// Creates an artifact field entry with explicit field-table index and serialized payload byte length.
+        /// </summary>
+        public static AtlasArtifactField CreateWithPayloadByteLength(
+            int fieldIndex,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            long payloadByteLength)
         {
             shape.ValidateOrThrow(nameof(shape));
 
@@ -277,50 +458,46 @@ namespace Lokrain.Atlas.Artifacts
                 shape.Slot,
                 shape.Role,
                 shape.StorageFormat,
+                shape.ShapeDomain,
                 shape.DeclaredShape,
                 shape.DebugName,
                 shape.Length,
                 shape.Capacity,
                 shape.ByteLength,
                 shape.ByteCapacity,
+                payloadByteLength,
                 byteOffset,
                 contentHash: 0UL,
                 hasContentHash: false);
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a resolved shape and content hash.
+        /// Creates an artifact field entry with explicit serialized payload byte length and content hash.
         /// </summary>
-        /// <param name="shape">Resolved shape represented by this artifact field.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <param name="contentHash">Deterministic field-content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact field entry with content hash.</returns>
-        public static AtlasArtifactField Create(
+        public static AtlasArtifactField CreateWithPayloadByteLength(
             AtlasResolvedShape shape,
             long byteOffset,
+            long payloadByteLength,
             ulong contentHash)
         {
             shape.ValidateOrThrow(nameof(shape));
 
-            return Create(
+            return CreateWithPayloadByteLength(
                 fieldIndex: shape.Slot.Index,
                 shape,
                 byteOffset,
+                payloadByteLength,
                 contentHash);
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a resolved shape, explicit field-table index, and content hash.
+        /// Creates an artifact field entry with explicit field-table index, serialized payload byte length, and content hash.
         /// </summary>
-        /// <param name="fieldIndex">Artifact field-table index.</param>
-        /// <param name="shape">Resolved shape represented by this artifact field.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <param name="contentHash">Deterministic field-content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact field entry with content hash.</returns>
-        public static AtlasArtifactField Create(
+        public static AtlasArtifactField CreateWithPayloadByteLength(
             int fieldIndex,
             AtlasResolvedShape shape,
             long byteOffset,
+            long payloadByteLength,
             ulong contentHash)
         {
             shape.ValidateOrThrow(nameof(shape));
@@ -331,24 +508,22 @@ namespace Lokrain.Atlas.Artifacts
                 shape.Slot,
                 shape.Role,
                 shape.StorageFormat,
+                shape.ShapeDomain,
                 shape.DeclaredShape,
                 shape.DebugName,
                 shape.Length,
                 shape.Capacity,
                 shape.ByteLength,
                 shape.ByteCapacity,
+                payloadByteLength,
                 byteOffset,
                 contentHash,
                 hasContentHash: true);
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a Contract row and matching resolved shape.
+        /// Creates a capacity-payload artifact field entry from a Contract row and matching resolved shape.
         /// </summary>
-        /// <param name="contract">Source Contract row.</param>
-        /// <param name="shape">Resolved shape matching <paramref name="contract"/>.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <returns>A concrete artifact field entry without content hash.</returns>
         public static AtlasArtifactField Create(
             AtlasContract contract,
             AtlasResolvedShape shape,
@@ -365,13 +540,8 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates an artifact field entry from a Contract row, matching resolved shape, and content hash.
+        /// Creates a capacity-payload artifact field entry from a Contract row, matching resolved shape, and content hash.
         /// </summary>
-        /// <param name="contract">Source Contract row.</param>
-        /// <param name="shape">Resolved shape matching <paramref name="contract"/>.</param>
-        /// <param name="byteOffset">Payload-relative byte offset.</param>
-        /// <param name="contentHash">Deterministic field-content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact field entry with content hash.</returns>
         public static AtlasArtifactField Create(
             AtlasContract contract,
             AtlasResolvedShape shape,
@@ -390,9 +560,88 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
+        /// Creates a logical-content artifact field entry from a Contract row and matching resolved shape.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            AtlasContract contract,
+            AtlasResolvedShape shape,
+            long byteOffset)
+        {
+            ValidateContractMatchesShapeOrThrow(
+                contract,
+                shape);
+
+            return CreateLogicalPayload(
+                contract.Slot.Index,
+                shape,
+                byteOffset);
+        }
+
+        /// <summary>
+        /// Creates a logical-content artifact field entry from a Contract row, matching resolved shape, and content hash.
+        /// </summary>
+        public static AtlasArtifactField CreateLogicalPayload(
+            AtlasContract contract,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            ulong contentHash)
+        {
+            ValidateContractMatchesShapeOrThrow(
+                contract,
+                shape);
+
+            return CreateLogicalPayload(
+                contract.Slot.Index,
+                shape,
+                byteOffset,
+                contentHash);
+        }
+
+        /// <summary>
+        /// Creates an artifact field entry from a Contract row, matching resolved shape, and explicit payload byte length.
+        /// </summary>
+        public static AtlasArtifactField CreateWithPayloadByteLength(
+            AtlasContract contract,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            long payloadByteLength)
+        {
+            ValidateContractMatchesShapeOrThrow(
+                contract,
+                shape);
+
+            return CreateWithPayloadByteLength(
+                contract.Slot.Index,
+                shape,
+                byteOffset,
+                payloadByteLength);
+        }
+
+        /// <summary>
+        /// Creates an artifact field entry from a Contract row, matching resolved shape, explicit payload byte length, and content hash.
+        /// </summary>
+        public static AtlasArtifactField CreateWithPayloadByteLength(
+            AtlasContract contract,
+            AtlasResolvedShape shape,
+            long byteOffset,
+            long payloadByteLength,
+            ulong contentHash)
+        {
+            ValidateContractMatchesShapeOrThrow(
+                contract,
+                shape);
+
+            return CreateWithPayloadByteLength(
+                contract.Slot.Index,
+                shape,
+                byteOffset,
+                payloadByteLength,
+                contentHash);
+        }
+
+        /// <summary>
         /// Validates that this artifact field entry is concrete and internally consistent.
         /// </summary>
-        /// <param name="parameterName">Parameter name used by thrown exceptions.</param>
         public void ValidateOrThrow(
             string parameterName = null)
         {
@@ -411,11 +660,14 @@ namespace Lokrain.Atlas.Artifacts
                 Slot,
                 Role,
                 StorageFormat,
+                ShapeDomain,
                 DeclaredShape,
+                DebugName,
                 Length,
                 Capacity,
                 ByteLength,
                 ByteCapacity,
+                PayloadByteLength,
                 ByteOffset,
                 name);
         }
@@ -423,8 +675,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a copy of this artifact field with a content hash.
         /// </summary>
-        /// <param name="contentHash">Deterministic field-content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact field entry with the supplied content hash.</returns>
         public AtlasArtifactField WithContentHash(
             ulong contentHash)
         {
@@ -436,22 +686,91 @@ namespace Lokrain.Atlas.Artifacts
                 Slot,
                 Role,
                 StorageFormat,
+                ShapeDomain,
                 DeclaredShape,
                 DebugName,
                 Length,
                 Capacity,
                 ByteLength,
                 ByteCapacity,
+                PayloadByteLength,
                 ByteOffset,
                 contentHash,
                 hasContentHash: true);
         }
 
         /// <summary>
+        /// Returns a copy of this artifact field without a content hash.
+        /// </summary>
+        public AtlasArtifactField WithoutContentHash()
+        {
+            ValidateOrThrow(nameof(AtlasArtifactField));
+
+            return new AtlasArtifactField(
+                FieldIndex,
+                StableId,
+                Slot,
+                Role,
+                StorageFormat,
+                ShapeDomain,
+                DeclaredShape,
+                DebugName,
+                Length,
+                Capacity,
+                ByteLength,
+                ByteCapacity,
+                PayloadByteLength,
+                ByteOffset,
+                contentHash: 0UL,
+                hasContentHash: false);
+        }
+
+        /// <summary>
+        /// Returns a copy of this artifact field with a different serialized payload byte length.
+        /// </summary>
+        public AtlasArtifactField WithPayloadByteLength(
+            long payloadByteLength)
+        {
+            ValidateOrThrow(nameof(AtlasArtifactField));
+
+            return new AtlasArtifactField(
+                FieldIndex,
+                StableId,
+                Slot,
+                Role,
+                StorageFormat,
+                ShapeDomain,
+                DeclaredShape,
+                DebugName,
+                Length,
+                Capacity,
+                ByteLength,
+                ByteCapacity,
+                payloadByteLength,
+                ByteOffset,
+                ContentHash,
+                HasContentHash);
+        }
+
+        /// <summary>
+        /// Returns a logical-content payload variant of this artifact field.
+        /// </summary>
+        public AtlasArtifactField AsLogicalPayload()
+        {
+            return WithPayloadByteLength(ByteLength);
+        }
+
+        /// <summary>
+        /// Returns a capacity-payload variant of this artifact field.
+        /// </summary>
+        public AtlasArtifactField AsCapacityPayload()
+        {
+            return WithPayloadByteLength(ByteCapacity);
+        }
+
+        /// <summary>
         /// Determines whether this artifact field equals another artifact field.
         /// </summary>
-        /// <param name="other">Artifact field to compare.</param>
-        /// <returns><c>true</c> when both entries contain identical metadata.</returns>
         public bool Equals(
             AtlasArtifactField other)
         {
@@ -462,12 +781,14 @@ namespace Lokrain.Atlas.Artifacts
                    Slot == other.Slot &&
                    Role == other.Role &&
                    StorageFormat == other.StorageFormat &&
+                   ShapeDomain == other.ShapeDomain &&
                    DeclaredShape == other.DeclaredShape &&
                    DebugName.Equals(other.DebugName) &&
                    Length == other.Length &&
                    Capacity == other.Capacity &&
                    ByteLength == other.ByteLength &&
                    ByteCapacity == other.ByteCapacity &&
+                   PayloadByteLength == other.PayloadByteLength &&
                    ByteOffset == other.ByteOffset &&
                    ContentHash == other.ContentHash;
         }
@@ -475,8 +796,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Determines whether this artifact field equals another object.
         /// </summary>
-        /// <param name="obj">Object to compare.</param>
-        /// <returns><c>true</c> when <paramref name="obj"/> is an equal artifact field.</returns>
         public override bool Equals(
             object obj)
         {
@@ -487,7 +806,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a deterministic managed hash code.
         /// </summary>
-        /// <returns>A deterministic hash code.</returns>
         public override int GetHashCode()
         {
             unchecked
@@ -500,12 +818,14 @@ namespace Lokrain.Atlas.Artifacts
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Slot.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ (int)Role;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ StorageFormat.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ShapeDomain.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ DeclaredShape.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ DebugName.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Length;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Capacity;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteLength.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteCapacity.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ PayloadByteLength.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteOffset.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ContentHash.GetHashCode();
                 return hash;
@@ -515,7 +835,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a diagnostic representation of this artifact field.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
             if (!IsConcrete)
@@ -529,16 +848,18 @@ namespace Lokrain.Atlas.Artifacts
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "AtlasArtifactField(Index={0}, Name={1}, StableId={2}, Slot={3}, Role={4}, Storage={5}, Length={6}, Capacity={7}, Offset={8}, Bytes={9}/{10}, ContentHash={11})",
+                "AtlasArtifactField(Index={0}, Name={1}, StableId={2}, Slot={3}, Role={4}, Domain={5}, Storage={6}, Length={7}, Capacity={8}, Offset={9}, PayloadBytes={10}, Bytes={11}/{12}, ContentHash={13})",
                 FieldIndex,
                 DebugName,
                 StableId,
                 Slot,
                 Role,
+                ShapeDomain,
                 StorageFormat.Kind,
                 Length,
                 Capacity,
                 ByteOffset,
+                PayloadByteLength,
                 ByteLength,
                 ByteCapacity,
                 contentHashText);
@@ -575,6 +896,7 @@ namespace Lokrain.Atlas.Artifacts
                 contract.Slot != shape.Slot ||
                 contract.Role != shape.Role ||
                 contract.StorageFormat != shape.StorageFormat ||
+                contract.ShapeDomain != shape.ShapeDomain ||
                 contract.LengthShape != shape.DeclaredShape ||
                 !contract.DebugName.Equals(shape.DebugName))
             {
@@ -590,11 +912,14 @@ namespace Lokrain.Atlas.Artifacts
             AtlasFieldSlot slot,
             AtlasFieldRole role,
             StorageFormat storageFormat,
+            AtlasShapeDomain shapeDomain,
             LengthShape declaredShape,
+            FixedString64Bytes debugName,
             int length,
             int capacity,
             long byteLength,
             long byteCapacity,
+            long payloadByteLength,
             long byteOffset,
             string parameterName = null)
         {
@@ -610,8 +935,24 @@ namespace Lokrain.Atlas.Artifacts
 
             stableId.ValidateOrThrow(name);
             slot.ValidateOrThrow(name);
+
+            if (role == AtlasFieldRole.None)
+            {
+                throw new ArgumentException(
+                    "Artifact field must declare a concrete field role.",
+                    name);
+            }
+
             storageFormat.ValidateOrThrow(name);
+            shapeDomain.ValidateOrThrow(name);
             declaredShape.ValidateOrThrow(name);
+
+            if (debugName.IsEmpty)
+            {
+                throw new ArgumentException(
+                    "Artifact field must declare a non-empty diagnostic name.",
+                    name);
+            }
 
             if (length < 0)
             {
@@ -645,6 +986,30 @@ namespace Lokrain.Atlas.Artifacts
                     "Artifact field byte capacity must be greater than or equal to logical byte length.");
             }
 
+            if (payloadByteLength < 0L)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(payloadByteLength),
+                    payloadByteLength,
+                    "Artifact field payload byte length must be non-negative.");
+            }
+
+            if (payloadByteLength > byteCapacity)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(payloadByteLength),
+                    payloadByteLength,
+                    "Artifact field payload byte length must be less than or equal to allocated byte capacity.");
+            }
+
+            if (payloadByteLength < byteLength)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(payloadByteLength),
+                    payloadByteLength,
+                    "Artifact field payload byte length must be greater than or equal to logical byte length.");
+            }
+
             if (byteOffset < 0L)
             {
                 throw new ArgumentOutOfRangeException(
@@ -670,8 +1035,7 @@ namespace Lokrain.Atlas.Artifacts
                     name);
             }
 
-            _ = role;
-            _ = checked(byteOffset + byteCapacity);
+            _ = checked(byteOffset + payloadByteLength);
         }
 
         private static string FormatHex(

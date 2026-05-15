@@ -7,7 +7,8 @@
 // - Store one resolved shape per Contract-table field slot.
 // - Preserve Contract-table canonical order.
 // - Validate that resolved shapes exactly match the Contract table.
-// - Provide linear lookup by slot, StableDataId, or typed field declaration.
+// - Preserve semantic shape-domain identity across the compiler/workspace/artifact boundary.
+// - Provide linear lookup by slot, StableDataId, typed field declaration, or shape domain.
 // - Remain managed compiler metadata only; no native memory ownership, allocation layout, or jobs.
 //
 // Design notes
@@ -16,6 +17,8 @@
 // - The set keeps the Contract table reference by design, matching compiled-plan metadata style.
 // - No dictionaries are needed here. Contract-table and shape-set sizes are compiler metadata scale.
 // - Shape rows must be in canonical Contract-table slot order.
+// - Shape-domain identity is validated against the source Contract table.
+// - Jobs should receive resolved containers/views, not query this set.
 
 using System;
 using System.Collections;
@@ -33,14 +36,14 @@ namespace Lokrain.Atlas.Compilation
     /// <remarks>
     /// <para>
     /// <see cref="AtlasResolvedShapeSet"/> is produced after plan validation and before workspace
-    /// memory layout. It contains concrete length, capacity, and byte-size metadata for every
-    /// Contract-table field.
+    /// memory layout. It contains concrete length, capacity, byte-size, and semantic shape-domain
+    /// metadata for every Contract-table field.
     /// </para>
     ///
     /// <para>
     /// This type deliberately does not allocate field storage, calculate memory offsets, schedule
     /// operations, or produce artifact data. Later passes should consume this set to build memory
-    /// layout and workspace bindings.
+    /// layout, workspace bindings, artifacts, and debug exports.
     /// </para>
     ///
     /// <para>
@@ -70,7 +73,9 @@ namespace Lokrain.Atlas.Compilation
         {
             Name = name;
             Contracts = contracts ?? throw new ArgumentNullException(nameof(contracts));
-            _shapes = BuildCanonicalShapeArray(contracts, shapes);
+            _shapes = BuildCanonicalShapeArray(
+                contracts,
+                shapes);
         }
 
         /// <summary>
@@ -158,6 +163,63 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Gets whether at least one resolved shape belongs to a dense-grid domain.
+        /// </summary>
+        public bool HasDenseGridDomain
+        {
+            get
+            {
+                for (var i = 0; i < _shapes.Length; i++)
+                {
+                    if (_shapes[i].IsDenseGrid)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether at least one resolved shape belongs to a variable-payload domain.
+        /// </summary>
+        public bool HasVariablePayloadDomain
+        {
+            get
+            {
+                for (var i = 0; i < _shapes.Length; i++)
+                {
+                    if (_shapes[i].IsVariablePayload)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether at least one resolved shape belongs to an external domain.
+        /// </summary>
+        public bool HasExternalDomain
+        {
+            get
+            {
+                for (var i = 0; i < _shapes.Length; i++)
+                {
+                    if (_shapes[i].ShapeDomain.IsExternal)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Gets a resolved shape by canonical set index.
         /// </summary>
         /// <param name="index">Zero-based shape index.</param>
@@ -224,7 +286,9 @@ namespace Lokrain.Atlas.Compilation
         /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool Contains(StableDataId stableId)
         {
-            return TryGetShape(stableId, out _);
+            return TryGetShape(
+                stableId,
+                out _);
         }
 
         /// <summary>
@@ -238,6 +302,53 @@ namespace Lokrain.Atlas.Compilation
             where TElement : unmanaged
         {
             return Contains(AtlasField.StableId<TField, TElement>());
+        }
+
+        /// <summary>
+        /// Determines whether this set contains at least one shape in the supplied domain.
+        /// </summary>
+        /// <param name="shapeDomain">Concrete shape domain.</param>
+        /// <returns><c>true</c> when at least one matching shape exists.</returns>
+        public bool ContainsDomain(AtlasShapeDomain shapeDomain)
+        {
+            return TryGetFirstShape(
+                shapeDomain,
+                out _);
+        }
+
+        /// <summary>
+        /// Determines whether this set contains at least one shape in the supplied domain kind.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <returns><c>true</c> when at least one matching shape exists.</returns>
+        public bool ContainsDomainKind(AtlasShapeDomainKind kind)
+        {
+            return CountDomainKind(kind) > 0;
+        }
+
+        /// <summary>
+        /// Counts resolved shapes in the supplied domain kind.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <returns>The number of matching shapes.</returns>
+        public int CountDomainKind(AtlasShapeDomainKind kind)
+        {
+            if (kind == AtlasShapeDomainKind.None)
+            {
+                return 0;
+            }
+
+            var count = 0;
+
+            for (var i = 0; i < _shapes.Length; i++)
+            {
+                if (_shapes[i].ShapeDomain.Kind == kind)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         /// <summary>
@@ -309,6 +420,68 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Attempts to get the first shape in the supplied concrete shape domain.
+        /// </summary>
+        /// <param name="shapeDomain">Concrete shape domain.</param>
+        /// <param name="shape">
+        /// The first matching resolved shape when this method returns <c>true</c>; otherwise, default payload.
+        /// </param>
+        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
+        public bool TryGetFirstShape(
+            AtlasShapeDomain shapeDomain,
+            out AtlasResolvedShape shape)
+        {
+            if (!shapeDomain.IsConcrete)
+            {
+                shape = default;
+                return false;
+            }
+
+            for (var i = 0; i < _shapes.Length; i++)
+            {
+                if (_shapes[i].ShapeDomain == shapeDomain)
+                {
+                    shape = _shapes[i];
+                    return true;
+                }
+            }
+
+            shape = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Attempts to get the first shape in the supplied shape-domain kind.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <param name="shape">
+        /// The first matching resolved shape when this method returns <c>true</c>; otherwise, default payload.
+        /// </param>
+        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
+        public bool TryGetFirstShape(
+            AtlasShapeDomainKind kind,
+            out AtlasResolvedShape shape)
+        {
+            if (kind == AtlasShapeDomainKind.None)
+            {
+                shape = default;
+                return false;
+            }
+
+            for (var i = 0; i < _shapes.Length; i++)
+            {
+                if (_shapes[i].ShapeDomain.Kind == kind)
+                {
+                    shape = _shapes[i];
+                    return true;
+                }
+            }
+
+            shape = default;
+            return false;
+        }
+
+        /// <summary>
         /// Gets a required shape by canonical Contract-table slot.
         /// </summary>
         /// <param name="slot">Canonical field slot. Slot zero/default is valid.</param>
@@ -358,6 +531,40 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Gets the first required shape in the supplied concrete shape domain.
+        /// </summary>
+        /// <param name="shapeDomain">Concrete shape domain.</param>
+        /// <returns>The first matching resolved shape.</returns>
+        public AtlasResolvedShape GetRequiredFirstShape(AtlasShapeDomain shapeDomain)
+        {
+            if (TryGetFirstShape(shapeDomain, out var shape))
+            {
+                return shape;
+            }
+
+            throw new ArgumentException(
+                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain shape domain '{shapeDomain}'.",
+                nameof(shapeDomain));
+        }
+
+        /// <summary>
+        /// Gets the first required shape in the supplied shape-domain kind.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <returns>The first matching resolved shape.</returns>
+        public AtlasResolvedShape GetRequiredFirstShape(AtlasShapeDomainKind kind)
+        {
+            if (TryGetFirstShape(kind, out var shape))
+            {
+                return shape;
+            }
+
+            throw new ArgumentException(
+                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain shape-domain kind '{kind}'.",
+                nameof(kind));
+        }
+
+        /// <summary>
         /// Copies all shapes into a caller-provided destination array.
         /// </summary>
         /// <param name="destination">Destination array.</param>
@@ -375,7 +582,10 @@ namespace Lokrain.Atlas.Compilation
                     nameof(destination));
             }
 
-            Array.Copy(_shapes, destination, _shapes.Length);
+            Array.Copy(
+                _shapes,
+                destination,
+                _shapes.Length);
         }
 
         /// <summary>
@@ -434,7 +644,55 @@ namespace Lokrain.Atlas.Compilation
                     nameof(length));
             }
 
-            Array.Copy(_shapes, sourceIndex, destination, destinationIndex, length);
+            Array.Copy(
+                _shapes,
+                sourceIndex,
+                destination,
+                destinationIndex,
+                length);
+        }
+
+        /// <summary>
+        /// Copies all shapes matching the supplied shape-domain kind into a caller-provided destination array.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <param name="destination">Destination array.</param>
+        /// <returns>The number of copied shapes.</returns>
+        public int CopyDomainKindTo(
+            AtlasShapeDomainKind kind,
+            AtlasResolvedShape[] destination)
+        {
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+
+            if (kind == AtlasShapeDomainKind.None)
+            {
+                return 0;
+            }
+
+            var count = CountDomainKind(kind);
+
+            if (destination.Length < count)
+            {
+                throw new ArgumentException(
+                    $"Destination array length '{destination.Length}' is smaller than matching domain shape count '{count}'.",
+                    nameof(destination));
+            }
+
+            var writeIndex = 0;
+
+            for (var i = 0; i < _shapes.Length; i++)
+            {
+                if (_shapes[i].ShapeDomain.Kind == kind)
+                {
+                    destination[writeIndex] = _shapes[i];
+                    writeIndex++;
+                }
+            }
+
+            return writeIndex;
         }
 
         /// <summary>
@@ -444,7 +702,34 @@ namespace Lokrain.Atlas.Compilation
         public AtlasResolvedShape[] ToArray()
         {
             var copy = new AtlasResolvedShape[_shapes.Length];
-            Array.Copy(_shapes, copy, _shapes.Length);
+
+            Array.Copy(
+                _shapes,
+                copy,
+                _shapes.Length);
+
+            return copy;
+        }
+
+        /// <summary>
+        /// Creates a managed copy of all shapes matching the supplied shape-domain kind.
+        /// </summary>
+        /// <param name="kind">Concrete shape-domain kind.</param>
+        /// <returns>A new array containing matching shapes in canonical shape order.</returns>
+        public AtlasResolvedShape[] ToArray(AtlasShapeDomainKind kind)
+        {
+            var count = CountDomainKind(kind);
+            var copy = new AtlasResolvedShape[count];
+
+            if (count == 0)
+            {
+                return copy;
+            }
+
+            CopyDomainKindTo(
+                kind,
+                copy);
+
             return copy;
         }
 
@@ -516,7 +801,7 @@ namespace Lokrain.Atlas.Compilation
         public override string ToString()
         {
             return
-                $"AtlasResolvedShapeSet(Name={GetDiagnosticName()}, Count={Count}, ByteLength={TotalByteLength}, ByteCapacity={TotalByteCapacity})";
+                $"AtlasResolvedShapeSet(Name={GetDiagnosticName()}, Count={Count}, ByteLength={TotalByteLength}, ByteCapacity={TotalByteCapacity}, DenseGrid={HasDenseGridDomain}, VariablePayload={HasVariablePayloadDomain}, External={HasExternalDomain})";
         }
 
         private static AtlasResolvedShape[] BuildCanonicalShapeArray(
@@ -539,7 +824,12 @@ namespace Lokrain.Atlas.Compilation
                 nameof(shapes));
 
             var copy = new AtlasResolvedShape[shapes.Length];
-            Array.Copy(shapes, copy, shapes.Length);
+
+            Array.Copy(
+                shapes,
+                copy,
+                shapes.Length);
+
             return copy;
         }
 
@@ -619,6 +909,13 @@ namespace Lokrain.Atlas.Compilation
             {
                 throw new ArgumentException(
                     $"Resolved shape '{shape.GetDiagnosticName()}' has storage format '{shape.StorageFormat}', but Contract expects '{contract.StorageFormat}'.",
+                    parameterName);
+            }
+
+            if (shape.ShapeDomain != contract.ShapeDomain)
+            {
+                throw new ArgumentException(
+                    $"Resolved shape '{shape.GetDiagnosticName()}' has shape domain '{shape.ShapeDomain}', but Contract expects '{contract.ShapeDomain}'.",
                     parameterName);
             }
 

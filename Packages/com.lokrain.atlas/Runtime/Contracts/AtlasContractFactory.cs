@@ -1,4 +1,4 @@
-// Runtime/Contracts/AtlasContractFactory.cs
+// Packages/com.lokrain.atlas/Runtime/Contracts/AtlasContractFactory.cs
 //
 // Package: com.lokrain.atlas
 // Namespace: Lokrain.Atlas.Contracts
@@ -7,6 +7,7 @@
 // - Provide the canonical factory surface for Atlas field contracts.
 // - Create unslotted contracts from typed field declarations.
 // - Create slotted contracts from typed field declarations or explicit schema metadata.
+// - Require semantic shape-domain identity at explicit contract construction boundaries.
 // - Validate contract metadata at construction boundaries.
 // - Preserve zero-valid identifier and slot semantics.
 //
@@ -14,6 +15,8 @@
 // - StableDataId default/zero is valid.
 // - AtlasFieldSlot default/zero is valid and represents slot zero.
 // - Unslotted/slotted state is represented by AtlasContract.HasAssignedSlot.
+// - ShapeDomain is required ABI metadata.
+// - LengthShape is required resolution metadata.
 // - This factory does not use invalid sentinels.
 // - Try-style or lookup APIs must represent missing state with a bool, not with default payloads.
 // - This factory is setup/authoring/compiler code, not hot-loop job code.
@@ -31,14 +34,20 @@ namespace Lokrain.Atlas.Contracts
     /// <remarks>
     /// <para>
     /// Field contracts are schema metadata. They describe stable identity, semantic role, storage
-    /// format, ownership, lifetime, length shape, flags, hash participation, and diagnostic name for
-    /// a field. They do not own memory and they are not job execution bindings.
+    /// format, ownership, lifetime, shape domain, length shape, flags, hash participation, and
+    /// diagnostic name for a field. They do not own memory and they are not job execution bindings.
     /// </para>
     ///
     /// <para>
     /// Contracts are first created as unslotted declarations. A contract table then assigns canonical
     /// zero-based slots. Slot zero is valid, so slot assignment must be represented by an explicit
     /// presence flag on <see cref="AtlasContract"/>, not by reserving a slot value as invalid.
+    /// </para>
+    ///
+    /// <para>
+    /// Explicit contract creation requires <see cref="AtlasShapeDomain"/> because numeric length is
+    /// not enough shape identity. A field with length <c>N</c> may represent cells, vertices, chunks,
+    /// graph nodes, graph edges, component rows, records, or external rows.
     /// </para>
     ///
     /// <para>
@@ -59,7 +68,8 @@ namespace Lokrain.Atlas.Contracts
         /// </returns>
         /// <remarks>
         /// The returned contract has no assigned slot. This is the correct state before the contract
-        /// is inserted into an <see cref="AtlasContractTable"/>.
+        /// is inserted into an <see cref="AtlasContractTable"/>. Shape-domain identity is read from
+        /// the field declaration.
         /// </remarks>
         public static AtlasContract Of<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -119,6 +129,7 @@ namespace Lokrain.Atlas.Contracts
         /// <param name="storageFormat">The physical unmanaged storage format.</param>
         /// <param name="ownership">The allocation and disposal ownership policy.</param>
         /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="shapeDomain">The semantic domain used to interpret resolved shape.</param>
         /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
         /// <param name="flags">The field behavior flags.</param>
         /// <param name="hashParticipation">The hash participation policy.</param>
@@ -134,6 +145,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -145,6 +157,7 @@ namespace Lokrain.Atlas.Contracts
                 storageFormat,
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,
@@ -163,6 +176,7 @@ namespace Lokrain.Atlas.Contracts
         /// <param name="storageFormat">The physical unmanaged storage format.</param>
         /// <param name="ownership">The allocation and disposal ownership policy.</param>
         /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="shapeDomain">The semantic domain used to interpret resolved shape.</param>
         /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
         /// <param name="flags">The field behavior flags.</param>
         /// <param name="hashParticipation">The hash participation policy.</param>
@@ -178,6 +192,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -190,6 +205,7 @@ namespace Lokrain.Atlas.Contracts
                 storageFormat,
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,
@@ -208,6 +224,7 @@ namespace Lokrain.Atlas.Contracts
         /// <param name="storageKind">The physical native storage family.</param>
         /// <param name="ownership">The allocation and disposal ownership policy.</param>
         /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="shapeDomain">The semantic domain used to interpret resolved shape.</param>
         /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
         /// <param name="flags">The field behavior flags.</param>
         /// <param name="hashParticipation">The hash participation policy.</param>
@@ -223,6 +240,7 @@ namespace Lokrain.Atlas.Contracts
             StorageKind storageKind,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -235,6 +253,7 @@ namespace Lokrain.Atlas.Contracts
                 StorageFormat.Create<TElement>(storageKind),
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,
@@ -251,6 +270,7 @@ namespace Lokrain.Atlas.Contracts
         /// <param name="storageKind">The physical native storage family.</param>
         /// <param name="ownership">The allocation and disposal ownership policy.</param>
         /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="shapeDomain">The semantic domain used to interpret resolved shape.</param>
         /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
         /// <param name="flags">The field behavior flags.</param>
         /// <param name="hashParticipation">The hash participation policy.</param>
@@ -268,6 +288,7 @@ namespace Lokrain.Atlas.Contracts
             StorageKind storageKind,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -281,6 +302,7 @@ namespace Lokrain.Atlas.Contracts
                 StorageFormat.Create<TElement>(storageKind),
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,

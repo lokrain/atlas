@@ -2,13 +2,19 @@
 //
 // Package: com.lokrain.atlas
 // Namespace: Lokrain.Atlas.Fields
-// Purpose:
+//
+// Purpose
 // - Centralize allocation-free metadata reads for typed Atlas field declarations.
 // - Validate declaration-level invariants before contracts are built.
+// - Carry shape-domain identity from field declarations into the contract/compiler ABI.
 // - Keep jobs independent from field declaration APIs by requiring compiled/resolved storage.
 //
-// Design notes:
+// Design notes
 // - This is a setup/validation helper, not a hot-loop job API.
+// - Field declarations are expected to be empty immutable value types.
+// - Field metadata must be readable from default(TField).
+// - ShapeDomain describes what resolved length/capacity means.
+// - LengthShape describes how length/capacity is resolved.
 // - Burst jobs should receive resolved native containers, typed slices, or compiled addresses.
 // - This file intentionally preserves the current Lokrain.Atlas namespace/package identity.
 
@@ -27,30 +33,27 @@ using AtlasStorageKind = Lokrain.Atlas.Contracts.StorageKind;
 namespace Lokrain.Atlas.Fields
 {
     /// <summary>
-    /// Provides allocation-free helpers for reading typed Atlas Field declarations.
+    /// Provides allocation-free helpers for reading typed Atlas field declarations.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Atlas Field declarations are expected to be empty immutable value types. Their metadata
+    /// Atlas field declarations are expected to be empty immutable value types. Their metadata
     /// must be readable from <c>default(TField)</c>. This type centralizes that convention so
-    /// Contract factories, validators, storage allocators, plan compilers, and resolvers use the
+    /// contract factories, validators, storage allocators, plan compilers, and resolvers use the
     /// same declaration path.
     /// </para>
     ///
     /// <para>
-    /// These helpers are intended for setup, validation, Contract construction, and storage
-    /// resolution. Burst jobs should receive resolved native containers and should not call Field
+    /// These helpers are intended for setup, validation, contract construction, and storage
+    /// resolution. Burst jobs should receive resolved native containers and should not call field
     /// declaration APIs.
     /// </para>
     /// </remarks>
     public static class AtlasField
     {
         /// <summary>
-        /// Returns the default value of a Field declaration type.
+        /// Returns the default value of a field declaration type.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>The default Field declaration value used as the source of stable metadata.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static TField Declaration<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -60,7 +63,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the stable identifier from a Field declaration type.
+        /// Reads the stable identifier from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static StableDataId StableId<TField, TElement>()
@@ -71,7 +74,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the semantic role from a Field declaration type.
+        /// Reads the semantic role from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasFieldRole Role<TField, TElement>()
@@ -82,7 +85,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the storage kind from a Field declaration type.
+        /// Reads the storage kind from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasStorageKind StorageKind<TField, TElement>()
@@ -93,7 +96,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the ownership policy from a Field declaration type.
+        /// Reads the ownership policy from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasOwnershipPolicy Ownership<TField, TElement>()
@@ -104,7 +107,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the lifetime policy from a Field declaration type.
+        /// Reads the lifetime policy from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasLifetimePolicy Lifetime<TField, TElement>()
@@ -115,7 +118,18 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the length shape from a Field declaration type.
+        /// Reads the semantic shape domain from a field declaration type.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static AtlasShapeDomain ShapeDomain<TField, TElement>()
+            where TField : struct, IAtlasField<TElement>
+            where TElement : unmanaged
+        {
+            return default(TField).ShapeDomain;
+        }
+
+        /// <summary>
+        /// Reads the length shape from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasLengthShape LengthShape<TField, TElement>()
@@ -126,7 +140,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads Field flags from a Field declaration type.
+        /// Reads field flags from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasFieldFlags Flags<TField, TElement>()
@@ -137,7 +151,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads hash participation from a Field declaration type.
+        /// Reads hash participation from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AtlasHashParticipation HashParticipation<TField, TElement>()
@@ -148,7 +162,7 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Reads the diagnostic name from a Field declaration type.
+        /// Reads the diagnostic name from a field declaration type.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FixedString64Bytes DebugName<TField, TElement>()
@@ -159,11 +173,8 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Creates a Contract from a Field declaration type.
+        /// Creates a contract from a field declaration type.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>An unslotted validated Contract for the Field declaration.</returns>
         public static AtlasContract Contract<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -172,16 +183,10 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Validates the declaration-level invariants of a Field type.
+        /// Validates the declaration-level invariants of a field type.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <exception cref="AtlasException">
-        /// Thrown when the declaration has an invalid stable identifier, role, debug name,
-        /// storage kind, ownership policy, lifetime policy, length shape, hash policy, or flags.
-        /// </exception>
         /// <remarks>
-        /// This validation does not verify Contract-table ordering, slot uniqueness, storage
+        /// This validation does not verify contract-table ordering, slot uniqueness, storage
         /// allocation compatibility, operation access compatibility, stage ordering, or compiled
         /// plan validity. Those checks belong to table, compiler, storage, and plan validators.
         /// </remarks>
@@ -197,18 +202,17 @@ namespace Lokrain.Atlas.Fields
             ValidateStorageKindOrThrow(field.StorageKind, diagnosticName);
             ValidateOwnershipOrThrow(field.Ownership, diagnosticName);
             ValidateLifetimeOrThrow(field.Lifetime, diagnosticName);
+            ValidateShapeDomainOrThrow(field.ShapeDomain, diagnosticName);
             ValidateLengthShapeOrThrow(field.LengthShape, diagnosticName);
             ValidateDebugNameOrThrow<TField, TElement>(field.DebugName);
             ValidateFlagsOrThrow(field.Flags, field.StorageKind, field.Ownership, diagnosticName);
             ValidateRolePolicyOrThrow(field.Role, field.Ownership, field.HashParticipation, diagnosticName);
+            ValidateDomainPolicyOrThrow(field.ShapeDomain, field.StorageKind, field.Ownership, diagnosticName);
         }
 
         /// <summary>
-        /// Creates a managed diagnostic name for a Field declaration type.
+        /// Creates a managed diagnostic name for a field declaration type.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>The declared debug name when present; otherwise, the Field declaration type name.</returns>
         /// <remarks>
         /// This method allocates when converting the fixed string or type name to a managed string.
         /// It should only be used for diagnostics, exceptions, editor tooling, and tests.
@@ -227,7 +231,9 @@ namespace Lokrain.Atlas.Fields
             return typeof(TField).FullName ?? typeof(TField).Name;
         }
 
-        private static void ValidateStableIdOrThrow(StableDataId stableId, string diagnosticName)
+        private static void ValidateStableIdOrThrow(
+            StableDataId stableId,
+            string diagnosticName)
         {
             if (stableId.IsValid)
             {
@@ -235,11 +241,13 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{diagnosticName}' declares an invalid stable id. " +
-                "A Field stable id must have a non-zero identity and a non-zero version.");
+                $"Atlas field '{diagnosticName}' declares an invalid stable id. " +
+                "A field stable id must have a non-zero identity and a non-zero version.");
         }
 
-        private static void ValidateRoleOrThrow(AtlasFieldRole role, string diagnosticName)
+        private static void ValidateRoleOrThrow(
+            AtlasFieldRole role,
+            string diagnosticName)
         {
             if (role != AtlasFieldRole.None)
             {
@@ -247,10 +255,12 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{diagnosticName}' declares no Field role.");
+                $"Atlas field '{diagnosticName}' declares no field role.");
         }
 
-        private static void ValidateStorageKindOrThrow(AtlasStorageKind storageKind, string diagnosticName)
+        private static void ValidateStorageKindOrThrow(
+            AtlasStorageKind storageKind,
+            string diagnosticName)
         {
             if (storageKind != AtlasStorageKind.None)
             {
@@ -258,10 +268,12 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{diagnosticName}' declares no storage kind.");
+                $"Atlas field '{diagnosticName}' declares no storage kind.");
         }
 
-        private static void ValidateOwnershipOrThrow(AtlasOwnershipPolicy ownership, string diagnosticName)
+        private static void ValidateOwnershipOrThrow(
+            AtlasOwnershipPolicy ownership,
+            string diagnosticName)
         {
             if (ownership != AtlasOwnershipPolicy.None)
             {
@@ -269,10 +281,12 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{diagnosticName}' declares no ownership policy.");
+                $"Atlas field '{diagnosticName}' declares no ownership policy.");
         }
 
-        private static void ValidateLifetimeOrThrow(AtlasLifetimePolicy lifetime, string diagnosticName)
+        private static void ValidateLifetimeOrThrow(
+            AtlasLifetimePolicy lifetime,
+            string diagnosticName)
         {
             if (lifetime != AtlasLifetimePolicy.None)
             {
@@ -280,10 +294,28 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{diagnosticName}' declares no lifetime policy.");
+                $"Atlas field '{diagnosticName}' declares no lifetime policy.");
         }
 
-        private static void ValidateLengthShapeOrThrow(AtlasLengthShape lengthShape, string diagnosticName)
+        private static void ValidateShapeDomainOrThrow(
+            AtlasShapeDomain shapeDomain,
+            string diagnosticName)
+        {
+            try
+            {
+                shapeDomain.ValidateOrThrow(nameof(shapeDomain));
+            }
+            catch (Exception exception)
+            {
+                throw new AtlasException(
+                    $"Atlas field '{diagnosticName}' declares an invalid shape domain '{shapeDomain}'.",
+                    exception);
+            }
+        }
+
+        private static void ValidateLengthShapeOrThrow(
+            AtlasLengthShape lengthShape,
+            string diagnosticName)
         {
             try
             {
@@ -292,12 +324,13 @@ namespace Lokrain.Atlas.Fields
             catch (Exception exception)
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares an invalid length shape '{lengthShape}'.",
+                    $"Atlas field '{diagnosticName}' declares an invalid length shape '{lengthShape}'.",
                     exception);
             }
         }
 
-        private static void ValidateDebugNameOrThrow<TField, TElement>(FixedString64Bytes debugName)
+        private static void ValidateDebugNameOrThrow<TField, TElement>(
+            FixedString64Bytes debugName)
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
         {
@@ -307,7 +340,7 @@ namespace Lokrain.Atlas.Fields
             }
 
             throw new AtlasException(
-                $"Atlas Field '{typeof(TField).FullName ?? typeof(TField).Name}' declares an empty debug name.");
+                $"Atlas field '{typeof(TField).FullName ?? typeof(TField).Name}' declares an empty debug name.");
         }
 
         private static void ValidateFlagsOrThrow(
@@ -319,7 +352,7 @@ namespace Lokrain.Atlas.Fields
             if (flags.HasAll(AtlasFieldFlags.ClearOnAcquire | AtlasFieldFlags.PreserveContent))
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares both " +
+                    $"Atlas field '{diagnosticName}' declares both " +
                     $"{nameof(AtlasFieldFlags.ClearOnAcquire)} and {nameof(AtlasFieldFlags.PreserveContent)}.");
             }
 
@@ -327,7 +360,7 @@ namespace Lokrain.Atlas.Fields
                 flags.HasNone(AtlasFieldFlags.DiscardBeforeWrite))
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares " +
+                    $"Atlas field '{diagnosticName}' declares " +
                     $"{nameof(AtlasFieldFlags.AllowsUninitializedMemory)} without " +
                     $"{nameof(AtlasFieldFlags.DiscardBeforeWrite)}.");
             }
@@ -336,14 +369,14 @@ namespace Lokrain.Atlas.Fields
                 !IsExternalCompatibleOwnership(ownership))
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' allows external aliasing with incompatible ownership policy '{ownership}'.");
+                    $"Atlas field '{diagnosticName}' allows external aliasing with incompatible ownership policy '{ownership}'.");
             }
 
             if (storageKind == AtlasStorageKind.External &&
                 !IsExternalCompatibleOwnership(ownership))
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' uses external storage with incompatible ownership policy '{ownership}'.");
+                    $"Atlas field '{diagnosticName}' uses external storage with incompatible ownership policy '{ownership}'.");
             }
         }
 
@@ -357,21 +390,56 @@ namespace Lokrain.Atlas.Fields
                 !IsExternalCompatibleOwnership(ownership))
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares external Field role with incompatible ownership policy '{ownership}'.");
+                    $"Atlas field '{diagnosticName}' declares external field role with incompatible ownership policy '{ownership}'.");
             }
 
             if (role == AtlasFieldRole.Canonical &&
                 hashParticipation == AtlasHashParticipation.None)
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares canonical Field role but opts out of all hash participation.");
+                    $"Atlas field '{diagnosticName}' declares canonical field role but opts out of all hash participation.");
             }
 
             if (role == AtlasFieldRole.Payload &&
                 hashParticipation == AtlasHashParticipation.None)
             {
                 throw new AtlasException(
-                    $"Atlas Field '{diagnosticName}' declares payload Field role but opts out of all hash participation.");
+                    $"Atlas field '{diagnosticName}' declares payload field role but opts out of all hash participation.");
+            }
+        }
+
+        private static void ValidateDomainPolicyOrThrow(
+            AtlasShapeDomain shapeDomain,
+            AtlasStorageKind storageKind,
+            AtlasOwnershipPolicy ownership,
+            string diagnosticName)
+        {
+            if (shapeDomain.Kind == AtlasShapeDomainKind.External &&
+                storageKind != AtlasStorageKind.External)
+            {
+                throw new AtlasException(
+                    $"Atlas field '{diagnosticName}' declares external shape domain with non-external storage kind '{storageKind}'.");
+            }
+
+            if (storageKind == AtlasStorageKind.External &&
+                shapeDomain.Kind != AtlasShapeDomainKind.External)
+            {
+                throw new AtlasException(
+                    $"Atlas field '{diagnosticName}' declares external storage with non-external shape domain '{shapeDomain.Kind}'.");
+            }
+
+            if (shapeDomain.Kind == AtlasShapeDomainKind.External &&
+                !IsExternalCompatibleOwnership(ownership))
+            {
+                throw new AtlasException(
+                    $"Atlas field '{diagnosticName}' declares external shape domain with incompatible ownership policy '{ownership}'.");
+            }
+
+            if (shapeDomain.Kind == AtlasShapeDomainKind.Scalar &&
+                shapeDomain.HasSourceField)
+            {
+                throw new AtlasException(
+                    $"Atlas field '{diagnosticName}' declares scalar shape domain with a source field.");
             }
         }
 

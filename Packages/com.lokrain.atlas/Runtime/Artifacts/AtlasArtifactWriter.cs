@@ -6,6 +6,7 @@
 // Purpose
 // - Write AtlasArtifact instances to deterministic binary streams or files.
 // - Provide convenience capture-and-write APIs from completed execution contexts.
+// - Preserve artifact header, field table, shape-domain metadata, payload byte lengths, and payload bytes.
 // - Keep disk serialization separate from workspace memory ownership and operation execution.
 //
 // Design notes
@@ -18,6 +19,8 @@
 // - Binary output is explicitly little-endian.
 // - Strings are written as UTF-8 byte length followed by bytes.
 // - Payload bytes are written exactly as stored by AtlasArtifact.
+// - Writer schema version is bumped because field rows now include ShapeDomain and PayloadByteLength.
+// - Logical artifacts and capacity snapshots are both supported by field.PayloadByteLength.
 
 using System;
 using System.IO;
@@ -36,16 +39,16 @@ namespace Lokrain.Atlas.Artifacts
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasArtifactWriter"/> is the first durable disk boundary for Atlas generated
-    /// output. It writes an already captured <see cref="AtlasArtifact"/> into a deterministic
-    /// binary stream, preserving the artifact header, field table, and payload bytes.
+    /// <see cref="AtlasArtifactWriter"/> is the durable disk boundary for Atlas generated output.
+    /// It writes an already captured <see cref="AtlasArtifact"/> into a deterministic binary stream,
+    /// preserving the artifact header, field table, shape-domain metadata, payload-byte ranges,
+    /// and payload bytes.
     /// </para>
     ///
     /// <para>
     /// This writer intentionally accepts <see cref="AtlasArtifact"/> as its primary input.
-    /// Workspace capture is available as convenience APIs, but artifact construction remains
-    /// separate from stream serialization. This keeps execution, memory ownership, and durable
-    /// output as distinct boundaries.
+    /// Workspace capture is exposed only as convenience APIs. This keeps execution, memory
+    /// ownership, artifact capture, and stream serialization as distinct boundaries.
     /// </para>
     ///
     /// <para>
@@ -56,8 +59,18 @@ namespace Lokrain.Atlas.Artifacts
     public static class AtlasArtifactWriter
     {
         private const uint WriterFormatMarker = 0x41544631U; // "ATF1"
-        private const ushort WriterSchemaVersion = 1;
-        private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
+
+        /// <summary>
+        /// Writer schema version.
+        /// </summary>
+        /// <remarks>
+        /// Version 2 adds field-table ShapeDomain metadata and field.PayloadByteLength.
+        /// </remarks>
+        private const ushort WriterSchemaVersion = 2;
+
+        private static readonly Encoding Utf8 = new UTF8Encoding(
+            encoderShouldEmitUTF8Identifier: false,
+            throwOnInvalidBytes: true);
 
         /// <summary>
         /// Writes an artifact to a file.
@@ -96,7 +109,7 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Captures an artifact from a completed execution context and writes it to a file.
+        /// Captures a logical-content artifact from a completed execution context and writes it to a file.
         /// </summary>
         /// <param name="context">Execution context whose workspace should be captured.</param>
         /// <param name="filePath">Destination file path.</param>
@@ -127,7 +140,7 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Captures an artifact from a compiled plan and completed workspace, then writes it to a file.
+        /// Captures a logical-content artifact from a compiled plan and completed workspace, then writes it to a file.
         /// </summary>
         /// <param name="plan">Compiled plan that produced the workspace contents.</param>
         /// <param name="workspace">Workspace to capture.</param>
@@ -143,6 +156,39 @@ namespace Lokrain.Atlas.Artifacts
             bool computeContentHashes = true)
         {
             var artifact = AtlasArtifact.Capture(
+                plan,
+                workspace,
+                computeContentHashes);
+
+            WriteToFile(
+                artifact,
+                filePath,
+                overwrite);
+
+            return artifact;
+        }
+
+        /// <summary>
+        /// Captures a capacity-snapshot artifact from a compiled plan and completed workspace, then writes it to a file.
+        /// </summary>
+        /// <param name="plan">Compiled plan that produced the workspace contents.</param>
+        /// <param name="workspace">Workspace to capture.</param>
+        /// <param name="filePath">Destination file path.</param>
+        /// <param name="overwrite">Whether an existing file may be overwritten.</param>
+        /// <param name="computeContentHashes">Whether artifact capture should compute payload hashes.</param>
+        /// <returns>The captured capacity-snapshot artifact that was written.</returns>
+        /// <remarks>
+        /// This method serializes full allocated field capacity. Use it for diagnostics and memory
+        /// snapshots. Durable production artifact output should normally use logical-content capture.
+        /// </remarks>
+        public static AtlasArtifact CaptureCapacitySnapshotAndWriteToFile(
+            AtlasCompiledPlan plan,
+            AtlasWorkspace workspace,
+            string filePath,
+            bool overwrite = true,
+            bool computeContentHashes = true)
+        {
+            var artifact = AtlasArtifact.CaptureCapacitySnapshot(
                 plan,
                 workspace,
                 computeContentHashes);
@@ -178,7 +224,7 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Captures an artifact from a completed execution context and writes it to a stream.
+        /// Captures a logical-content artifact from a completed execution context and writes it to a stream.
         /// </summary>
         /// <param name="context">Execution context whose workspace should be captured.</param>
         /// <param name="stream">Destination stream.</param>
@@ -209,7 +255,7 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Captures an artifact from a compiled plan and completed workspace, then writes it to a stream.
+        /// Captures a logical-content artifact from a compiled plan and completed workspace, then writes it to a stream.
         /// </summary>
         /// <param name="plan">Compiled plan that produced the workspace contents.</param>
         /// <param name="workspace">Workspace to capture.</param>
@@ -226,6 +272,35 @@ namespace Lokrain.Atlas.Artifacts
             bool computeContentHashes = true)
         {
             var artifact = AtlasArtifact.Capture(
+                plan,
+                workspace,
+                computeContentHashes);
+
+            WriteToStream(
+                artifact,
+                stream);
+
+            return artifact;
+        }
+
+        /// <summary>
+        /// Captures a capacity-snapshot artifact from a compiled plan and completed workspace, then writes it to a stream.
+        /// </summary>
+        /// <param name="plan">Compiled plan that produced the workspace contents.</param>
+        /// <param name="workspace">Workspace to capture.</param>
+        /// <param name="stream">Destination stream.</param>
+        /// <param name="computeContentHashes">Whether artifact capture should compute payload hashes.</param>
+        /// <returns>The captured capacity-snapshot artifact that was written.</returns>
+        /// <remarks>
+        /// The stream remains open after writing.
+        /// </remarks>
+        public static AtlasArtifact CaptureCapacitySnapshotAndWriteToStream(
+            AtlasCompiledPlan plan,
+            AtlasWorkspace workspace,
+            Stream stream,
+            bool computeContentHashes = true)
+        {
+            var artifact = AtlasArtifact.CaptureCapacitySnapshot(
                 plan,
                 workspace,
                 computeContentHashes);
@@ -285,7 +360,9 @@ namespace Lokrain.Atlas.Artifacts
 
             for (var i = 0; i < artifact.FieldCount; i++)
             {
-                WriteField(stream, artifact[i]);
+                WriteField(
+                    stream,
+                    artifact[i]);
             }
         }
 
@@ -300,6 +377,7 @@ namespace Lokrain.Atlas.Artifacts
             WriteFieldSlot(stream, field.Slot);
             WriteInt32(stream, (int)field.Role);
             WriteStorageFormat(stream, field.StorageFormat);
+            WriteShapeDomain(stream, field.ShapeDomain);
             WriteLengthShape(stream, field.DeclaredShape);
             WriteFixedString64(stream, field.DebugName);
 
@@ -307,6 +385,7 @@ namespace Lokrain.Atlas.Artifacts
             WriteInt32(stream, field.Capacity);
             WriteInt64(stream, field.ByteLength);
             WriteInt64(stream, field.ByteCapacity);
+            WriteInt64(stream, field.PayloadByteLength);
             WriteInt64(stream, field.ByteOffset);
 
             WriteBool(stream, field.HasContentHash);
@@ -368,6 +447,18 @@ namespace Lokrain.Atlas.Artifacts
             WriteUInt64(stream, format.ElementTypeHash);
         }
 
+        private static void WriteShapeDomain(
+            Stream stream,
+            AtlasShapeDomain domain)
+        {
+            domain.ValidateOrThrow(nameof(domain));
+
+            WriteInt32(stream, (int)domain.Kind);
+            WriteFixedString64(stream, domain.Name);
+            WriteBool(stream, domain.HasSourceField);
+            WriteStableDataId(stream, domain.SourceFieldId);
+        }
+
         private static void WriteLengthShape(
             Stream stream,
             LengthShape shape)
@@ -377,13 +468,7 @@ namespace Lokrain.Atlas.Artifacts
             WriteInt32(stream, (int)shape.Kind);
             WriteInt32(stream, shape.FixedLength);
             WriteStableDataId(stream, shape.SourceFieldId);
-
-            WriteInt32(stream, shape.Name.Length);
-            for (var i = 0; i < shape.Name.Length; i++)
-            {
-                stream.WriteByte(shape.Name[i]);
-            }
-
+            WriteFixedString64(stream, shape.Name);
             WriteInt32(stream, shape.CapacityMultiplierNumerator);
             WriteInt32(stream, shape.CapacityMultiplierDenominator);
             WriteInt32(stream, shape.CapacityPadding);

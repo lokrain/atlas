@@ -6,6 +6,7 @@
 // Purpose
 // - Resolve contract-table LengthShape metadata into concrete AtlasResolvedShape rows.
 // - Produce one resolved shape per contract-table slot.
+// - Preserve contract ShapeDomain metadata through resolved compiler metadata.
 // - Resolve only shapes that can be computed from the contract table itself.
 // - Reject resolver-input-dependent shapes until explicit resolver context exists.
 //
@@ -20,6 +21,18 @@
 // - ChunkCount
 // - PrefixSumPayload
 // - External
+//
+// Design notes
+// - This is a managed compiler pass.
+// - This type does not allocate workspace memory.
+// - This type does not calculate byte offsets.
+// - This type does not schedule jobs.
+// - Field-relative shapes are resolved recursively, so source order in the contract table does not matter.
+// - Cyclic field-relative shape dependencies are rejected deterministically.
+// - CapacityFromField preserves integer-rational capacity derivation.
+// - ShapeDomain is copied from AtlasContract into AtlasResolvedShape.
+// - LengthShape decides resolved length/capacity.
+// - ShapeDomain decides what resolved length/capacity means.
 
 using System;
 using System.Globalization;
@@ -152,6 +165,18 @@ namespace Lokrain.Atlas.Compilation
             }
         }
 
+        /// <summary>
+        /// Returns whether the supplied contract can be resolved from a contract table alone.
+        /// </summary>
+        /// <param name="contract">Contract to inspect.</param>
+        /// <returns><c>true</c> when this resolver can resolve the contract's shape rule.</returns>
+        public static bool CanResolveFromContractTableOnly(
+            AtlasContract contract)
+        {
+            return contract.IsTableReady &&
+                   CanResolveFromContractTableOnly(contract.LengthShape.Kind);
+        }
+
         private static AtlasResolvedShape ResolveIndex(
             AtlasContractTable contracts,
             int index,
@@ -203,12 +228,16 @@ namespace Lokrain.Atlas.Compilation
             switch (shape.Kind)
             {
                 case LengthShapeKind.Scalar:
+                    ValidateScalarDomainOrThrow(contract);
+
                     return AtlasResolvedShape.Create(
                         contract,
                         length: 1,
                         capacity: 1);
 
                 case LengthShapeKind.Fixed:
+                    ValidateFixedDomainOrThrow(contract);
+
                     return AtlasResolvedShape.Create(
                         contract,
                         length: shape.FixedLength,
@@ -255,6 +284,10 @@ namespace Lokrain.Atlas.Compilation
                 shapes,
                 states);
 
+            ValidateFieldRelativeDomainOrThrow(
+                contract,
+                source);
+
             return AtlasResolvedShape.Create(
                 contract,
                 length: source.Length,
@@ -272,6 +305,10 @@ namespace Lokrain.Atlas.Compilation
                 contract,
                 shapes,
                 states);
+
+            ValidateFieldRelativeDomainOrThrow(
+                contract,
+                source);
 
             var capacity = ResolveDerivedCapacityValue(
                 source.Capacity,
@@ -378,14 +415,90 @@ namespace Lokrain.Atlas.Compilation
             return checked((value + divisor - 1L) / divisor);
         }
 
+        private static void ValidateScalarDomainOrThrow(
+            AtlasContract contract)
+        {
+            if (contract.ShapeDomain.Kind == AtlasShapeDomainKind.Scalar ||
+                contract.ShapeDomain.Kind == AtlasShapeDomainKind.FixedVector)
+            {
+                return;
+            }
+
+            throw new ArgumentException(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Contract '{0}' declares scalar length shape with incompatible shape domain '{1}'.",
+                    contract.GetDiagnosticName(),
+                    contract.ShapeDomain.Kind),
+                nameof(contract));
+        }
+
+        private static void ValidateFixedDomainOrThrow(
+            AtlasContract contract)
+        {
+            if (contract.ShapeDomain.Kind != AtlasShapeDomainKind.External &&
+                contract.ShapeDomain.Kind != AtlasShapeDomainKind.PrefixSumPayload)
+            {
+                return;
+            }
+
+            throw new ArgumentException(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Contract '{0}' declares fixed length shape with resolver-input-dependent shape domain '{1}'.",
+                    contract.GetDiagnosticName(),
+                    contract.ShapeDomain.Kind),
+                nameof(contract));
+        }
+
+        private static void ValidateFieldRelativeDomainOrThrow(
+            AtlasContract target,
+            AtlasResolvedShape source)
+        {
+            if (target.ShapeDomain.Kind == AtlasShapeDomainKind.External)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' declares field-relative length shape with external shape domain.",
+                        target.GetDiagnosticName()),
+                    nameof(target));
+            }
+
+            if (target.ShapeDomain.Kind == AtlasShapeDomainKind.PrefixSumPayload)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' declares field-relative length shape '{1}', but prefix-sum payload domains require explicit prefix-sum resolver context.",
+                        target.GetDiagnosticName(),
+                        target.LengthShape.Kind),
+                    nameof(target));
+            }
+
+            if (target.ShapeDomain.HasSourceField &&
+                target.ShapeDomain.SourceFieldId != source.StableId)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' declares shape-domain source field '{1}', but resolved length source is '{2}'.",
+                        target.GetDiagnosticName(),
+                        target.ShapeDomain.SourceFieldId,
+                        source.StableId),
+                    nameof(target));
+            }
+        }
+
         private static string CreateUnsupportedShapeMessage(
             AtlasContract contract)
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Contract '{0}' declares length shape '{1}', which cannot be resolved from a contract table alone. Provide an explicit resolver context before resolving QueryCount, ChunkCount, PrefixSumPayload, or External shapes.",
+                "Contract '{0}' declares length shape '{1}' with shape domain '{2}', which cannot be resolved from a contract table alone. Provide an explicit resolver context before resolving QueryCount, ChunkCount, PrefixSumPayload, or External shapes.",
                 contract.GetDiagnosticName(),
-                contract.LengthShape);
+                contract.LengthShape,
+                contract.ShapeDomain);
         }
 
         private static string CreateCycleMessage(

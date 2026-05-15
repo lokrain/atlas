@@ -4,16 +4,20 @@
 // Namespace: Lokrain.Atlas.Contracts
 //
 // Purpose
-// - Represent semantic shape-domain identity for field contracts and resolved shapes.
+// - Represent the semantic identity of a resolved field shape.
 // - Distinguish equal numeric lengths that belong to different interpretation domains.
-// - Preserve zero-valid StableDataId semantics by using domain kind/name as presence metadata.
+// - Preserve zero-valid StableDataId semantics by using explicit source-field presence.
+// - Provide stable metadata for contracts, resolved shapes, artifacts, debug-map export, and validators.
 //
 // Design notes
 // - This is schema/compilation metadata, not runtime storage.
-// - Jobs should not branch on this type in hot loops.
-// - Validators, artifact writers, debug exporters, and executor policy use this type.
-// - default(AtlasShapeDomain) is a valid value object but not a concrete domain.
-// - The all-zero StableDataId remains valid and must not be used as missing state.
+// - This type does not own memory.
+// - This type does not describe byte format.
+// - This type does not describe allocator ownership.
+// - Jobs should receive resolved numeric shape/layout data, not branch on this type in hot loops.
+// - default(AtlasShapeDomain) is a valid value object, but not a concrete domain.
+// - StableDataId default/zero is valid and must not represent "missing" by itself.
+// - Source-field presence is represented by HasSourceField.
 
 using System;
 using System.Globalization;
@@ -25,7 +29,7 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Contracts
 {
     /// <summary>
-    /// Describes the semantic domain used to interpret a field's resolved shape.
+    /// Describes the semantic domain used to interpret a field's resolved length and capacity.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct AtlasShapeDomain :
@@ -33,6 +37,9 @@ namespace Lokrain.Atlas.Contracts
     {
         private const int HashSeed = 17;
         private const int HashMultiplier = 397;
+
+        private const byte NoSourceField = 0;
+        private const byte HasSourceFieldValue = 1;
 
         /// <summary>
         /// Default non-concrete domain payload.
@@ -48,31 +55,32 @@ namespace Lokrain.Atlas.Contracts
         /// Gets the stable diagnostic domain name.
         /// </summary>
         /// <remarks>
-        /// Domain names are not field identity. They are stable ABI/debug metadata used by
-        /// validation reports, tooling, artifacts, and derived export policy.
+        /// This name is ABI/debug metadata. It is not field identity and must not replace
+        /// <see cref="StableDataId"/>.
         /// </remarks>
         public readonly FixedString64Bytes Name;
 
         /// <summary>
-        /// Gets the optional source field identity for field-derived domains.
+        /// Gets the optional source field id for field-derived domains.
         /// </summary>
         /// <remarks>
-        /// Zero/default is valid. Source presence is owned by <see cref="HasSourceField"/>.
+        /// Zero/default is a valid stable id. Source presence is represented by
+        /// <see cref="HasSourceField"/>.
         /// </remarks>
         public readonly StableDataId SourceFieldId;
 
-        private readonly byte _hasSourceField;
+        private readonly byte _sourceFieldPresence;
 
         private AtlasShapeDomain(
             AtlasShapeDomainKind kind,
             FixedString64Bytes name,
             StableDataId sourceFieldId,
-            bool hasSourceField)
+            byte sourceFieldPresence)
         {
             Kind = kind;
             Name = name;
             SourceFieldId = sourceFieldId;
-            _hasSourceField = hasSourceField ? (byte)1 : (byte)0;
+            _sourceFieldPresence = sourceFieldPresence;
         }
 
         /// <summary>
@@ -82,11 +90,12 @@ namespace Lokrain.Atlas.Contracts
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => Kind != AtlasShapeDomainKind.None &&
-                   !Name.IsEmpty;
+                   !Name.IsEmpty &&
+                   IsSourceFieldPresenceValid();
         }
 
         /// <summary>
-        /// Gets whether this value is not a concrete shape domain.
+        /// Gets whether this value does not describe a concrete shape domain.
         /// </summary>
         public bool IsEmpty
         {
@@ -100,11 +109,11 @@ namespace Lokrain.Atlas.Contracts
         public bool HasSourceField
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _hasSourceField != 0;
+            get => _sourceFieldPresence == HasSourceFieldValue;
         }
 
         /// <summary>
-        /// Gets whether this domain is dense grid-like data.
+        /// Gets whether this domain represents dense grid data.
         /// </summary>
         public bool IsDenseGrid
         {
@@ -115,7 +124,7 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets whether this domain is row-like variable topology data.
+        /// Gets whether this domain represents topology row data.
         /// </summary>
         public bool IsTopologyRows
         {
@@ -126,7 +135,17 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets whether this domain is externally owned.
+        /// Gets whether this domain represents variable-length or compacted payload data.
+        /// </summary>
+        public bool IsVariablePayload
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Kind == AtlasShapeDomainKind.RecordStream ||
+                   Kind == AtlasShapeDomainKind.PrefixSumPayload;
+        }
+
+        /// <summary>
+        /// Gets whether this domain represents externally owned rows.
         /// </summary>
         public bool IsExternal
         {
@@ -142,6 +161,26 @@ namespace Lokrain.Atlas.Contracts
             return Create(
                 AtlasShapeDomainKind.Scalar,
                 name.IsEmpty ? new FixedString64Bytes("scalar") : name);
+        }
+
+        /// <summary>
+        /// Creates a fixed-vector shape domain.
+        /// </summary>
+        public static AtlasShapeDomain FixedVector(FixedString64Bytes name)
+        {
+            return Create(
+                AtlasShapeDomainKind.FixedVector,
+                name);
+        }
+
+        /// <summary>
+        /// Creates a linear-row shape domain.
+        /// </summary>
+        public static AtlasShapeDomain LinearRows(FixedString64Bytes name)
+        {
+            return Create(
+                AtlasShapeDomainKind.LinearRows,
+                name);
         }
 
         /// <summary>
@@ -195,7 +234,7 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a component-set shape domain.
+        /// Creates a connected-component-set shape domain.
         /// </summary>
         public static AtlasShapeDomain ComponentSet(FixedString64Bytes name = default)
         {
@@ -248,6 +287,16 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
+        /// Creates a sparse-index-set shape domain.
+        /// </summary>
+        public static AtlasShapeDomain SparseIndexSet(FixedString64Bytes name)
+        {
+            return Create(
+                AtlasShapeDomainKind.SparseIndexSet,
+                name);
+        }
+
+        /// <summary>
         /// Creates an external shape domain.
         /// </summary>
         public static AtlasShapeDomain External(FixedString64Bytes name)
@@ -258,7 +307,7 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a shape domain from explicit metadata.
+        /// Creates a concrete shape domain from explicit metadata.
         /// </summary>
         public static AtlasShapeDomain Create(
             AtlasShapeDomainKind kind,
@@ -268,14 +317,14 @@ namespace Lokrain.Atlas.Contracts
                 kind,
                 name,
                 default,
-                hasSourceField: false);
+                NoSourceField);
 
             domain.ValidateOrThrow(nameof(domain));
             return domain;
         }
 
         /// <summary>
-        /// Creates a field-derived shape domain from explicit metadata.
+        /// Creates a concrete field-derived shape domain from explicit metadata.
         /// </summary>
         public static AtlasShapeDomain CreateDerived(
             AtlasShapeDomainKind kind,
@@ -286,14 +335,14 @@ namespace Lokrain.Atlas.Contracts
                 kind,
                 name,
                 sourceFieldId,
-                hasSourceField: true);
+                HasSourceFieldValue);
 
             domain.ValidateOrThrow(nameof(domain));
             return domain;
         }
 
         /// <summary>
-        /// Throws when this value does not describe a concrete shape domain.
+        /// Throws when this value is not a concrete shape domain.
         /// </summary>
         public void ValidateOrThrow(string parameterName = null)
         {
@@ -313,24 +362,39 @@ namespace Lokrain.Atlas.Contracts
                     name);
             }
 
-            SourceFieldId.ValidateOrThrow($"{name}.{nameof(SourceFieldId)}");
-
-            if (HasSourceField)
-            {
-                return;
-            }
-
-            if (Kind == AtlasShapeDomainKind.PrefixSumPayload)
+            if (!IsSourceFieldPresenceValid())
             {
                 throw new ArgumentException(
-                    "Prefix-sum payload domains must declare a source field.",
+                    $"Atlas shape domain '{Name}' has invalid source-field presence state '{_sourceFieldPresence}'.",
+                    name);
+            }
+
+            SourceFieldId.ValidateOrThrow($"{name}.{nameof(SourceFieldId)}");
+
+            if (Kind == AtlasShapeDomainKind.PrefixSumPayload && !HasSourceField)
+            {
+                throw new ArgumentException(
+                    $"Atlas shape domain '{Name}' is a prefix-sum payload domain but does not declare a source field.",
+                    name);
+            }
+
+            if (Kind != AtlasShapeDomainKind.PrefixSumPayload &&
+                Kind != AtlasShapeDomainKind.SparseIndexSet &&
+                HasSourceField)
+            {
+                throw new ArgumentException(
+                    $"Atlas shape domain '{Name}' declares a source field, but domain kind '{Kind}' is not source-field-derived.",
                     name);
             }
         }
 
         /// <summary>
-        /// Determines whether this domain has the same kind and name as another domain.
+        /// Determines whether this domain has the same domain identity as another domain.
         /// </summary>
+        /// <remarks>
+        /// This intentionally excludes source field identity. Use full equality when the source field
+        /// must also match.
+        /// </remarks>
         public bool HasSameDomainIdentityAs(AtlasShapeDomain other)
         {
             return Kind == other.Kind &&
@@ -345,7 +409,7 @@ namespace Lokrain.Atlas.Contracts
             return Kind == other.Kind &&
                    Name.Equals(other.Name) &&
                    SourceFieldId == other.SourceFieldId &&
-                   _hasSourceField == other._hasSourceField;
+                   _sourceFieldPresence == other._sourceFieldPresence;
         }
 
         /// <summary>
@@ -358,7 +422,7 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Returns a deterministic hash code.
+        /// Returns a deterministic managed hash code.
         /// </summary>
         public override int GetHashCode()
         {
@@ -368,38 +432,56 @@ namespace Lokrain.Atlas.Contracts
                 hash = (hash * HashMultiplier) ^ (int)Kind;
                 hash = (hash * HashMultiplier) ^ Name.GetHashCode();
                 hash = (hash * HashMultiplier) ^ SourceFieldId.GetHashCode();
-                hash = (hash * HashMultiplier) ^ _hasSourceField;
+                hash = (hash * HashMultiplier) ^ _sourceFieldPresence;
                 return hash;
             }
         }
 
         /// <summary>
-        /// Returns a diagnostic representation of this domain.
+        /// Returns a diagnostic representation of this shape domain.
         /// </summary>
         public override string ToString()
         {
+            if (Kind == AtlasShapeDomainKind.None && Name.IsEmpty)
+            {
+                return "AtlasShapeDomain(None)";
+            }
+
             return HasSourceField
                 ? string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}:{1} Source={2}",
+                    "AtlasShapeDomain(Kind={0}, Name={1}, SourceFieldId={2})",
                     Kind,
                     Name,
                     SourceFieldId)
                 : string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}:{1}",
+                    "AtlasShapeDomain(Kind={0}, Name={1})",
                     Kind,
                     Name);
         }
 
+        /// <summary>
+        /// Determines whether two shape domains are equal.
+        /// </summary>
         public static bool operator ==(AtlasShapeDomain left, AtlasShapeDomain right)
         {
             return left.Equals(right);
         }
 
+        /// <summary>
+        /// Determines whether two shape domains are not equal.
+        /// </summary>
         public static bool operator !=(AtlasShapeDomain left, AtlasShapeDomain right)
         {
             return !left.Equals(right);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool IsSourceFieldPresenceValid()
+        {
+            return _sourceFieldPresence == NoSourceField ||
+                   _sourceFieldPresence == HasSourceFieldValue;
         }
     }
 }

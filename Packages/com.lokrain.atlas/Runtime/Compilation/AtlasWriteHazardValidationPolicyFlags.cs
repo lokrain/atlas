@@ -165,4 +165,4 @@ namespace Lokrain.Atlas.Compilation
         /// </summary>
         RejectExclusiveFlagOnNonWrites = 1u << 23
     }
-} 
+}

@@ -8,6 +8,7 @@
 // - Own a managed copy of serialized field payload bytes.
 // - Preserve artifact header and field table metadata.
 // - Provide durable field-payload lookup by field index, slot, or stable id.
+// - Serialize logical content by default while preserving capacity metadata.
 //
 // Design notes
 // - This is durable output data.
@@ -19,6 +20,10 @@
 // - Field payload layout is contiguous, deterministic, and field-table ordered.
 // - Payload byte offsets are artifact-payload-relative.
 // - Content hash zero is valid; hash presence is explicit in header/field metadata.
+// - Header.TotalByteLength is logical content size metadata.
+// - Header.TotalByteCapacity is allocation capacity metadata.
+// - PayloadByteLength is the actual serialized artifact payload byte count.
+// - Artifact capture writes logical field bytes by default, not capacity slack.
 
 using System;
 using System.Collections;
@@ -36,22 +41,22 @@ namespace Lokrain.Atlas.Artifacts
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasArtifact"/> is the first durable managed output container. It captures
-    /// artifact metadata in <see cref="Header"/>, per-field layout in the field table, and a
-    /// managed payload byte copy detached from workspace-owned native memory.
+    /// <see cref="AtlasArtifact"/> captures artifact metadata in <see cref="Header"/>,
+    /// per-field layout in the field table, and a managed payload byte copy detached from
+    /// workspace-owned native memory.
     /// </para>
     ///
     /// <para>
-    /// This type intentionally does not own native memory and does not reference the workspace after
-    /// creation. Once an artifact is created, the source <see cref="AtlasWorkspace"/> may be
-    /// disposed without invalidating the artifact payload.
+    /// The artifact payload is serialized according to each field row's
+    /// <see cref="AtlasArtifactField.PayloadByteLength"/>. Logical artifact capture writes
+    /// <see cref="AtlasArtifactField.ByteLength"/> bytes for each field and preserves
+    /// <see cref="AtlasArtifactField.ByteCapacity"/> as metadata only.
     /// </para>
     ///
     /// <para>
-    /// The first artifact layout is strict: field payloads are written contiguously in field-table
-    /// order, and each field row's <see cref="AtlasArtifactField.ByteOffset"/> must match the
-    /// current payload cursor. This keeps artifact writing, hashing, and debug inspection
-    /// deterministic.
+    /// Existing manually constructed artifacts may still use capacity payload rows. Validation
+    /// accepts either logical or capacity payload rows as long as offsets and aggregate metadata are
+    /// internally consistent.
     /// </para>
     /// </remarks>
     public sealed class AtlasArtifact :
@@ -99,20 +104,56 @@ namespace Lokrain.Atlas.Artifacts
         public bool IsEmpty => _fields.Length == 0;
 
         /// <summary>
-        /// Gets the managed payload byte count.
+        /// Gets the managed serialized payload byte count.
         /// </summary>
         public int PayloadByteCount => _payload.Length;
 
         /// <summary>
-        /// Gets the managed payload byte count as a long.
+        /// Gets the managed serialized payload byte count as a long.
         /// </summary>
         public long PayloadByteLength => _payload.Length;
 
         /// <summary>
+        /// Gets whether this artifact serializes only logical field content.
+        /// </summary>
+        public bool SerializesLogicalContent
+        {
+            get
+            {
+                for (var i = 0; i < _fields.Length; i++)
+                {
+                    if (!_fields[i].SerializesLogicalContent)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether this artifact serializes full allocated capacity for every field.
+        /// </summary>
+        public bool SerializesCapacity
+        {
+            get
+            {
+                for (var i = 0; i < _fields.Length; i++)
+                {
+                    if (!_fields[i].SerializesCapacity)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
         /// Gets the artifact field row at the supplied field-table index.
         /// </summary>
-        /// <param name="index">Field-table index.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField this[int index]
         {
             get
@@ -125,26 +166,18 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets the artifact field row at the supplied Contract-table slot.
         /// </summary>
-        /// <param name="slot">Contract-table slot.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField this[AtlasFieldSlot slot] =>
             GetRequiredField(slot);
 
         /// <summary>
         /// Gets the artifact field row for the supplied stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField this[StableDataId stableId] =>
             GetRequiredField(stableId);
 
         /// <summary>
         /// Creates an artifact from explicit header, field table, and payload bytes.
         /// </summary>
-        /// <param name="header">Artifact header.</param>
-        /// <param name="fields">Artifact field table.</param>
-        /// <param name="payload">Artifact payload bytes.</param>
-        /// <returns>An immutable managed artifact.</returns>
         public static AtlasArtifact Create(
             AtlasArtifactHeader header,
             AtlasArtifactField[] fields,
@@ -159,12 +192,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Captures a managed artifact snapshot from a completed execution context.
         /// </summary>
-        /// <param name="context">Execution context whose workspace will be copied.</param>
-        /// <returns>An immutable managed artifact with field and aggregate content hashes.</returns>
-        /// <remarks>
-        /// The caller must ensure all jobs writing workspace memory have completed before calling
-        /// this method. This method copies the current workspace bytes synchronously.
-        /// </remarks>
         public static AtlasArtifact Capture(
             AtlasExecutionContext context)
         {
@@ -182,13 +209,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Captures a managed artifact snapshot from a completed execution context.
         /// </summary>
-        /// <param name="context">Execution context whose workspace will be copied.</param>
-        /// <param name="computeContentHashes">Whether to compute field and aggregate payload hashes.</param>
-        /// <returns>An immutable managed artifact.</returns>
-        /// <remarks>
-        /// The caller must ensure all jobs writing workspace memory have completed before calling
-        /// this method. This method copies the current workspace bytes synchronously.
-        /// </remarks>
         public static AtlasArtifact Capture(
             AtlasExecutionContext context,
             bool computeContentHashes)
@@ -205,15 +225,12 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Captures a managed artifact snapshot from a compiled plan and compatible workspace.
+        /// Captures a logical-content managed artifact snapshot from a compiled plan and compatible workspace.
         /// </summary>
-        /// <param name="plan">Compiled plan that produced the workspace contents.</param>
-        /// <param name="workspace">Workspace whose bytes should be copied.</param>
-        /// <param name="computeContentHashes">Whether to compute field and aggregate payload hashes.</param>
-        /// <returns>An immutable managed artifact.</returns>
         /// <remarks>
         /// The caller must ensure all jobs writing workspace memory have completed before calling
-        /// this method. This method copies the current workspace bytes synchronously.
+        /// this method. This method synchronously copies each field's logical byte length and does
+        /// not serialize capacity slack.
         /// </remarks>
         public static AtlasArtifact Capture(
             AtlasCompiledPlan plan,
@@ -222,7 +239,85 @@ namespace Lokrain.Atlas.Artifacts
         {
             ValidateCaptureInputsOrThrow(
                 plan,
-                workspace);
+                workspace,
+                captureCapacityPayload: false);
+
+            var payloadLength = checked((int)workspace.TotalByteLength);
+            var payload = new byte[payloadLength];
+            var fields = new AtlasArtifactField[workspace.Count];
+
+            long byteOffset = 0L;
+
+            for (var i = 0; i < workspace.Count; i++)
+            {
+                var block = workspace[i];
+                var bytes = block.GetByteLengthSlice();
+
+                var fieldByteOffset = byteOffset;
+                var fieldByteLength = checked((int)block.ByteLength);
+
+                CopyNativeBytesToManagedPayload(
+                    bytes,
+                    payload,
+                    fieldByteOffset,
+                    fieldByteLength);
+
+                if (computeContentHashes)
+                {
+                    var fieldHash = ComputeHash(
+                        payload,
+                        checked((int)fieldByteOffset),
+                        fieldByteLength);
+
+                    fields[i] = AtlasArtifactField.CreateLogicalPayload(
+                        block.Contract,
+                        block.Shape,
+                        fieldByteOffset,
+                        fieldHash);
+                }
+                else
+                {
+                    fields[i] = AtlasArtifactField.CreateLogicalPayload(
+                        block.Contract,
+                        block.Shape,
+                        fieldByteOffset);
+                }
+
+                byteOffset = checked(byteOffset + block.ByteLength);
+            }
+
+            var header = computeContentHashes
+                ? AtlasArtifactHeader.Create(
+                    plan,
+                    workspace.Shapes,
+                    ComputeHash(payload, 0, payload.Length))
+                : AtlasArtifactHeader.Create(
+                    plan,
+                    workspace.Shapes);
+
+            return new AtlasArtifact(
+                header,
+                fields,
+                payload);
+        }
+
+        /// <summary>
+        /// Captures a managed artifact snapshot that includes full capacity bytes.
+        /// </summary>
+        /// <remarks>
+        /// This is an explicit capacity snapshot API. Durable production artifact capture should
+        /// normally use <see cref="Capture(AtlasCompiledPlan, AtlasWorkspace, bool)"/> so slack bytes
+        /// do not affect payload bytes or content hashes.
+        /// </remarks>
+        public static AtlasArtifact CaptureCapacitySnapshot(
+            AtlasCompiledPlan plan,
+            AtlasWorkspace workspace,
+            bool computeContentHashes = true)
+        {
+            ValidateCaptureInputsOrThrow(
+                plan,
+                workspace,
+                captureCapacityPayload: true);
 
             var payloadLength = checked((int)workspace.TotalByteCapacity);
             var payload = new byte[payloadLength];
@@ -285,9 +380,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Attempts to get an artifact field by field-table index.
         /// </summary>
-        /// <param name="index">Field-table index.</param>
-        /// <param name="field">Resolved field row on success; otherwise, default payload.</param>
-        /// <returns><c>true</c> when the index exists.</returns>
         public bool TryGetField(
             int index,
             out AtlasArtifactField field)
@@ -305,9 +397,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Attempts to get an artifact field by Contract-table slot.
         /// </summary>
-        /// <param name="slot">Contract-table slot.</param>
-        /// <param name="field">Resolved field row on success; otherwise, default payload.</param>
-        /// <returns><c>true</c> when the slot exists.</returns>
         public bool TryGetField(
             AtlasFieldSlot slot,
             out AtlasArtifactField field)
@@ -337,9 +426,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Attempts to get an artifact field by stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id.</param>
-        /// <param name="field">Resolved field row on success; otherwise, default payload.</param>
-        /// <returns><c>true</c> when the field exists.</returns>
         public bool TryGetField(
             StableDataId stableId,
             out AtlasArtifactField field)
@@ -360,8 +446,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets a required artifact field by field-table index.
         /// </summary>
-        /// <param name="index">Field-table index.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField GetRequiredField(
             int index)
         {
@@ -379,8 +463,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets a required artifact field by Contract-table slot.
         /// </summary>
-        /// <param name="slot">Contract-table slot.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField GetRequiredField(
             AtlasFieldSlot slot)
         {
@@ -397,8 +479,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets a required artifact field by stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id.</param>
-        /// <returns>The artifact field row.</returns>
         public AtlasArtifactField GetRequiredField(
             StableDataId stableId)
         {
@@ -415,17 +495,14 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates a managed copy of the complete artifact payload.
         /// </summary>
-        /// <returns>A new payload byte array.</returns>
         public byte[] GetPayloadCopy()
         {
             return CopyPayload(_payload);
         }
 
         /// <summary>
-        /// Creates a managed copy of one field's payload bytes.
+        /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        /// <param name="fieldIndex">Field-table index.</param>
-        /// <returns>A new byte array containing the field payload bytes.</returns>
         public byte[] GetFieldPayloadCopy(
             int fieldIndex)
         {
@@ -434,10 +511,8 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates a managed copy of one field's payload bytes.
+        /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        /// <param name="slot">Contract-table slot.</param>
-        /// <returns>A new byte array containing the field payload bytes.</returns>
         public byte[] GetFieldPayloadCopy(
             AtlasFieldSlot slot)
         {
@@ -446,10 +521,8 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates a managed copy of one field's payload bytes.
+        /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        /// <param name="stableId">Stable field id.</param>
-        /// <returns>A new byte array containing the field payload bytes.</returns>
         public byte[] GetFieldPayloadCopy(
             StableDataId stableId)
         {
@@ -458,10 +531,8 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Creates a managed copy of one field's payload bytes.
+        /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        /// <param name="field">Artifact field row.</param>
-        /// <returns>A new byte array containing the field payload bytes.</returns>
         public byte[] GetFieldPayloadCopy(
             AtlasArtifactField field)
         {
@@ -470,8 +541,38 @@ namespace Lokrain.Atlas.Artifacts
                 field,
                 _payload.Length);
 
-            var length = checked((int)field.ByteCapacity);
+            var length = checked((int)field.PayloadByteLength);
             var copy = new byte[length];
+
+            Array.Copy(
+                _payload,
+                checked((int)field.ByteOffset),
+                copy,
+                0,
+                length);
+
+            return copy;
+        }
+
+        /// <summary>
+        /// Creates a managed copy of one field's logical-content payload bytes.
+        /// </summary>
+        /// <remarks>
+        /// This requires the artifact field to serialize at least logical byte length. Production
+        /// logical artifacts satisfy this exactly; capacity snapshots also satisfy it because their
+        /// payload includes the logical prefix.
+        /// </remarks>
+        public byte[] GetFieldLogicalPayloadCopy(
+            AtlasArtifactField field)
+        {
+            field.ValidateOrThrow(nameof(field));
+            ValidateFieldRangeInsidePayloadOrThrow(
+                field,
+                _payload.Length);
+
+            var length = checked((int)field.ByteLength);
+            var copy = new byte[length];
+
             Array.Copy(
                 _payload,
                 checked((int)field.ByteOffset),
@@ -485,8 +586,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Copies the complete artifact payload into a caller-provided destination array.
         /// </summary>
-        /// <param name="destination">Destination byte array.</param>
-        /// <param name="destinationIndex">Destination start index.</param>
         public void CopyPayloadTo(
             byte[] destination,
             int destinationIndex = 0)
@@ -520,11 +619,8 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
-        /// Copies one field payload into a caller-provided destination array.
+        /// Copies one field's serialized payload into a caller-provided destination array.
         /// </summary>
-        /// <param name="field">Artifact field row.</param>
-        /// <param name="destination">Destination byte array.</param>
-        /// <param name="destinationIndex">Destination start index.</param>
         public void CopyFieldPayloadTo(
             AtlasArtifactField field,
             byte[] destination,
@@ -548,7 +644,7 @@ namespace Lokrain.Atlas.Artifacts
                     "Destination index must be non-negative.");
             }
 
-            var length = checked((int)field.ByteCapacity);
+            var length = checked((int)field.PayloadByteLength);
 
             if (destination.Length - destinationIndex < length)
             {
@@ -579,7 +675,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets an enumerator over artifact fields in field-table order.
         /// </summary>
-        /// <returns>An artifact field enumerator.</returns>
         public IEnumerator<AtlasArtifactField> GetEnumerator()
         {
             for (var i = 0; i < _fields.Length; i++)
@@ -591,7 +686,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets an enumerator over artifact fields in field-table order.
         /// </summary>
-        /// <returns>An artifact field enumerator.</returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
@@ -600,7 +694,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a diagnostic artifact string.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
             var contentHashText = Header.HasContentHash
@@ -609,16 +702,19 @@ namespace Lokrain.Atlas.Artifacts
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "AtlasArtifact(Pipeline={0}, Fields={1}, PayloadBytes={2}, ContentHash={3})",
+                "AtlasArtifact(Pipeline={0}, Fields={1}, PayloadBytes={2}, ContentBytes={3}, CapacityBytes={4}, ContentHash={5})",
                 Header.PipelineName,
                 FieldCount,
                 PayloadByteCount,
+                Header.TotalByteLength,
+                Header.TotalByteCapacity,
                 contentHashText);
         }
 
         private static void ValidateCaptureInputsOrThrow(
             AtlasCompiledPlan plan,
-            AtlasWorkspace workspace)
+            AtlasWorkspace workspace,
+            bool captureCapacityPayload)
         {
             if (plan == null)
             {
@@ -661,21 +757,41 @@ namespace Lokrain.Atlas.Artifacts
                     "Compiled plan, workspace, and resolved shape set field counts do not match.");
             }
 
-            if (workspace.TotalByteCapacity > int.MaxValue)
+            var payloadBytes = captureCapacityPayload
+                ? workspace.TotalByteCapacity
+                : workspace.TotalByteLength;
+
+            if (payloadBytes > int.MaxValue)
             {
                 throw new OverflowException(
-                    $"Atlas artifact payload byte capacity '{workspace.TotalByteCapacity}' exceeds managed byte array length capacity.");
+                    $"Atlas artifact payload byte length '{payloadBytes}' exceeds managed byte array length capacity.");
             }
 
             for (var i = 0; i < workspace.Count; i++)
             {
                 var planContract = plan.Contracts[i];
+                var workspaceContract = workspace.Contracts[i];
                 var block = workspace[i];
+                var shape = workspace.Shapes[i];
+
+                if (planContract != workspaceContract)
+                {
+                    throw new ArgumentException(
+                        $"Workspace Contract table at index '{i}' does not match compiled plan Contract '{planContract.GetDiagnosticName()}'.",
+                        nameof(workspace));
+                }
 
                 if (planContract != block.Contract)
                 {
                     throw new ArgumentException(
                         $"Workspace block at index '{i}' does not match compiled plan Contract '{planContract.GetDiagnosticName()}'.",
+                        nameof(workspace));
+                }
+
+                if (shape != block.Shape)
+                {
+                    throw new ArgumentException(
+                        $"Workspace block at index '{i}' does not match resolved shape '{shape.GetDiagnosticName()}'.",
                         nameof(workspace));
                 }
             }
@@ -705,16 +821,10 @@ namespace Lokrain.Atlas.Artifacts
                     nameof(fields));
             }
 
-            if (header.TotalByteCapacity != payload.Length)
-            {
-                throw new ArgumentException(
-                    $"Artifact header total byte capacity '{header.TotalByteCapacity}' does not match payload length '{payload.Length}'.",
-                    nameof(payload));
-            }
-
             long cursor = 0L;
             long totalByteLength = 0L;
             long totalByteCapacity = 0L;
+            long totalPayloadByteLength = 0L;
 
             for (var i = 0; i < fields.Length; i++)
             {
@@ -740,7 +850,8 @@ namespace Lokrain.Atlas.Artifacts
                     field,
                     payload.Length);
 
-                cursor = checked(cursor + field.ByteCapacity);
+                cursor = checked(cursor + field.PayloadByteLength);
+                totalPayloadByteLength = checked(totalPayloadByteLength + field.PayloadByteLength);
                 totalByteLength = checked(totalByteLength + field.ByteLength);
                 totalByteCapacity = checked(totalByteCapacity + field.ByteCapacity);
             }
@@ -748,7 +859,14 @@ namespace Lokrain.Atlas.Artifacts
             if (cursor != payload.Length)
             {
                 throw new ArgumentException(
-                    $"Artifact field table describes '{cursor}' payload bytes, but payload length is '{payload.Length}'.",
+                    $"Artifact field table describes '{cursor}' serialized payload bytes, but payload length is '{payload.Length}'.",
+                    nameof(fields));
+            }
+
+            if (totalPayloadByteLength != payload.Length)
+            {
+                throw new ArgumentException(
+                    $"Artifact field table payload byte length '{totalPayloadByteLength}' does not match payload length '{payload.Length}'.",
                     nameof(fields));
             }
 
@@ -777,14 +895,14 @@ namespace Lokrain.Atlas.Artifacts
                     $"Artifact field '{field.DebugName}' byte offset '{field.ByteOffset}' exceeds managed array index capacity.");
             }
 
-            if (field.ByteCapacity > int.MaxValue)
+            if (field.PayloadByteLength > int.MaxValue)
             {
                 throw new OverflowException(
-                    $"Artifact field '{field.DebugName}' byte capacity '{field.ByteCapacity}' exceeds managed array length capacity.");
+                    $"Artifact field '{field.DebugName}' payload byte length '{field.PayloadByteLength}' exceeds managed array length capacity.");
             }
 
             var start = checked((int)field.ByteOffset);
-            var length = checked((int)field.ByteCapacity);
+            var length = checked((int)field.PayloadByteLength);
             var end = checked(start + length);
 
             if (start < 0 ||
@@ -797,10 +915,53 @@ namespace Lokrain.Atlas.Artifacts
             }
         }
 
+        private static void CopyNativeBytesToManagedPayload(
+            Unity.Collections.NativeSlice<byte> source,
+            byte[] destination,
+            long destinationOffset,
+            int length)
+        {
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+
+            if (destinationOffset < 0L || destinationOffset > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(destinationOffset),
+                    destinationOffset,
+                    "Destination offset must fit inside a managed byte array.");
+            }
+
+            if (length < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(length),
+                    length,
+                    "Copy length must be non-negative.");
+            }
+
+            var offset = checked((int)destinationOffset);
+
+            if (offset + length > destination.Length)
+            {
+                throw new ArgumentException(
+                    "Native source copy range exceeds managed destination payload length.",
+                    nameof(destination));
+            }
+
+            for (var i = 0; i < length; i++)
+            {
+                destination[offset + i] = source[i];
+            }
+        }
+
         private static AtlasArtifactField[] CopyFields(
             AtlasArtifactField[] fields)
         {
             var copy = new AtlasArtifactField[fields.Length];
+
             Array.Copy(
                 fields,
                 copy,
@@ -813,6 +974,7 @@ namespace Lokrain.Atlas.Artifacts
             byte[] payload)
         {
             var copy = new byte[payload.Length];
+
             Array.Copy(
                 payload,
                 copy,

@@ -1,4 +1,4 @@
-// Runtime/Contracts/AtlasContract.cs
+// Packages/com.lokrain.atlas/Runtime/Contracts/AtlasContract.cs
 //
 // Package: com.lokrain.atlas
 // Namespace: Lokrain.Atlas.Contracts
@@ -7,6 +7,7 @@
 // - Represent one immutable field-contract row in an Atlas contract table.
 // - Preserve zero-valid StableDataId and AtlasFieldSlot semantics.
 // - Represent assigned/unassigned slot state explicitly instead of reserving an invalid slot.
+// - Preserve semantic shape-domain identity as part of the field ABI.
 // - Validate semantic field-contract metadata at construction/table boundaries.
 // - Keep contract metadata allocation-free, deterministic, and suitable for compiled runtime metadata.
 //
@@ -16,6 +17,8 @@
 // - AtlasFieldSlot default/zero is valid and represents slot zero.
 // - Slot assignment is represented by HasAssignedSlot.
 // - Do not infer slot assignment from Slot == default.
+// - ShapeDomain describes what resolved length/capacity means.
+// - LengthShape describes how resolved length/capacity is produced.
 // - Empty and Invalid are compatibility aliases for default; they are not invalid sentinels.
 // - Missing lookup results must be represented by a bool-returning API, not by returning default.
 // - This type describes schema metadata only. It does not own storage.
@@ -38,9 +41,9 @@ namespace Lokrain.Atlas.Contracts
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A contract is schema metadata. It defines the stable identity, semantic role, storage format,
-    /// ownership policy, lifetime policy, length shape, field flags, hash participation, and
-    /// diagnostic name for one Atlas field.
+    /// A contract is schema metadata. It defines the stable identity, table-local slot, semantic role,
+    /// storage format, ownership policy, lifetime policy, shape-domain identity, length shape,
+    /// field flags, hash participation, and diagnostic name for one Atlas field.
     /// </para>
     ///
     /// <para>
@@ -57,8 +60,9 @@ namespace Lokrain.Atlas.Contracts
     /// </para>
     ///
     /// <para>
-    /// The default value is safe to store and compare. It is not an invalid bit pattern. It simply
-    /// does not describe a meaningful concrete field contract until semantic metadata is supplied.
+    /// Shape domain is part of the ABI because numeric length is not self-describing. Two fields may
+    /// have the same resolved length and storage format while representing incompatible domains,
+    /// such as cells, vertices, graph nodes, graph edges, component rows, or external records.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
@@ -130,6 +134,15 @@ namespace Lokrain.Atlas.Contracts
         public readonly LifetimePolicy Lifetime;
 
         /// <summary>
+        /// Gets the semantic domain used to interpret resolved length and capacity.
+        /// </summary>
+        /// <remarks>
+        /// Shape domain answers what the elements mean. It intentionally does not describe byte
+        /// format, ownership, allocator, or resolution rule.
+        /// </remarks>
+        public readonly AtlasShapeDomain ShapeDomain;
+
+        /// <summary>
         /// Gets the rule used to resolve field length or capacity before scheduling.
         /// </summary>
         public readonly LengthShape LengthShape;
@@ -155,21 +168,6 @@ namespace Lokrain.Atlas.Contracts
         /// <summary>
         /// Initializes a new slotted contract from explicit schema metadata.
         /// </summary>
-        /// <param name="stableId">The durable field identity. Zero/default is valid.</param>
-        /// <param name="slot">The assigned table-local field slot. Slot zero/default is valid.</param>
-        /// <param name="role">The semantic field role.</param>
-        /// <param name="storageFormat">The physical unmanaged storage format.</param>
-        /// <param name="ownership">The allocation and disposal ownership policy.</param>
-        /// <param name="lifetime">The storage lifetime policy.</param>
-        /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
-        /// <param name="flags">Durable field behavior flags.</param>
-        /// <param name="hashParticipation">The hash participation policy.</param>
-        /// <param name="debugName">The stable diagnostic field name.</param>
-        /// <remarks>
-        /// This constructor creates a contract with an assigned slot. Use <see cref="Unslotted"/>
-        /// or <see cref="Of{TField,TElement}"/> when constructing declarations before table
-        /// insertion.
-        /// </remarks>
         public AtlasContract(
             StableDataId stableId,
             AtlasFieldSlot slot,
@@ -177,6 +175,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -189,6 +188,7 @@ namespace Lokrain.Atlas.Contracts
                 storageFormat,
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,
@@ -204,6 +204,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -215,6 +216,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat = storageFormat;
             Ownership = ownership;
             Lifetime = lifetime;
+            ShapeDomain = shapeDomain;
             LengthShape = lengthShape;
             Flags = flags;
             HashParticipation = hashParticipation;
@@ -237,6 +239,7 @@ namespace Lokrain.Atlas.Contracts
                    StorageFormat.IsValid &&
                    Ownership != OwnershipPolicy.None &&
                    Lifetime != LifetimePolicy.None &&
+                   ShapeDomain.IsConcrete &&
                    LengthShape.IsValid &&
                    !DebugName.IsEmpty;
         }
@@ -293,16 +296,6 @@ namespace Lokrain.Atlas.Contracts
         /// <summary>
         /// Creates an unslotted contract from explicit schema metadata.
         /// </summary>
-        /// <param name="stableId">The durable field identity. Zero/default is valid.</param>
-        /// <param name="role">The semantic field role.</param>
-        /// <param name="storageFormat">The physical unmanaged storage format.</param>
-        /// <param name="ownership">The allocation and disposal ownership policy.</param>
-        /// <param name="lifetime">The storage lifetime policy.</param>
-        /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
-        /// <param name="flags">Durable field behavior flags.</param>
-        /// <param name="hashParticipation">The hash participation policy.</param>
-        /// <param name="debugName">The stable diagnostic field name.</param>
-        /// <returns>An unslotted contract.</returns>
         /// <remarks>
         /// The returned contract has no assigned slot. This is the correct state before insertion
         /// into an <see cref="AtlasContractTable"/>.
@@ -313,6 +306,7 @@ namespace Lokrain.Atlas.Contracts
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
             LifetimePolicy lifetime,
+            AtlasShapeDomain shapeDomain,
             LengthShape lengthShape,
             AtlasFieldFlags flags,
             HashParticipation hashParticipation,
@@ -326,6 +320,7 @@ namespace Lokrain.Atlas.Contracts
                 storageFormat,
                 ownership,
                 lifetime,
+                shapeDomain,
                 lengthShape,
                 flags,
                 hashParticipation,
@@ -360,6 +355,7 @@ namespace Lokrain.Atlas.Contracts
                 storageFormat: StorageFormat.Create<TElement>(field.StorageKind),
                 ownership: field.Ownership,
                 lifetime: field.Lifetime,
+                shapeDomain: field.ShapeDomain,
                 lengthShape: field.LengthShape,
                 flags: field.Flags,
                 hashParticipation: field.HashParticipation,
@@ -381,6 +377,7 @@ namespace Lokrain.Atlas.Contracts
                 StorageFormat,
                 Ownership,
                 Lifetime,
+                ShapeDomain,
                 LengthShape,
                 Flags,
                 HashParticipation,
@@ -414,10 +411,36 @@ namespace Lokrain.Atlas.Contracts
                 StorageFormat,
                 Ownership,
                 Lifetime,
+                ShapeDomain,
                 LengthShape,
                 Flags,
                 HashParticipation,
                 DebugName);
+        }
+
+        /// <summary>
+        /// Creates a copy of this contract with a different semantic shape domain.
+        /// </summary>
+        /// <param name="shapeDomain">The replacement shape domain.</param>
+        /// <returns>A copy of this contract with the supplied shape domain.</returns>
+        public AtlasContract WithShapeDomain(AtlasShapeDomain shapeDomain)
+        {
+            var contract = new AtlasContract(
+                StableId,
+                Slot,
+                HasAssignedSlot,
+                Role,
+                StorageFormat,
+                Ownership,
+                Lifetime,
+                shapeDomain,
+                LengthShape,
+                Flags,
+                HashParticipation,
+                DebugName);
+
+            contract.ValidateOrThrow(nameof(contract));
+            return contract;
         }
 
         /// <summary>
@@ -461,6 +484,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             StorageFormat.ValidateOrThrow(name);
+            ShapeDomain.ValidateOrThrow(name);
             LengthShape.ValidateOrThrow(name);
 
             if (Ownership == OwnershipPolicy.None)
@@ -485,6 +509,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             ValidatePolicyCombinationOrThrow(name, diagnosticName);
+            ValidateShapeDomainPolicyOrThrow(name, diagnosticName);
         }
 
         /// <summary>
@@ -511,8 +536,6 @@ namespace Lokrain.Atlas.Contracts
         /// <summary>
         /// Returns whether this contract has the same durable stable identity as another contract.
         /// </summary>
-        /// <param name="other">The contract to compare against.</param>
-        /// <returns><c>true</c> when stable identities match; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool HasSameStableIdAs(AtlasContract other)
         {
@@ -520,10 +543,17 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
+        /// Returns whether this contract has the same semantic shape domain as another contract.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasSameShapeDomainAs(AtlasContract other)
+        {
+            return ShapeDomain == other.ShapeDomain;
+        }
+
+        /// <summary>
         /// Determines whether this contract equals another contract.
         /// </summary>
-        /// <param name="other">The contract to compare against.</param>
-        /// <returns><c>true</c> when all contract fields match; otherwise, <c>false</c>.</returns>
         public bool Equals(AtlasContract other)
         {
             return StableId == other.StableId &&
@@ -533,6 +563,7 @@ namespace Lokrain.Atlas.Contracts
                    StorageFormat == other.StorageFormat &&
                    Ownership == other.Ownership &&
                    Lifetime == other.Lifetime &&
+                   ShapeDomain == other.ShapeDomain &&
                    LengthShape == other.LengthShape &&
                    Flags == other.Flags &&
                    HashParticipation == other.HashParticipation &&
@@ -542,8 +573,6 @@ namespace Lokrain.Atlas.Contracts
         /// <summary>
         /// Determines whether this contract equals another object.
         /// </summary>
-        /// <param name="obj">The object to compare against.</param>
-        /// <returns><c>true</c> when <paramref name="obj"/> is an equal contract; otherwise, <c>false</c>.</returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasContract other && Equals(other);
@@ -569,6 +598,7 @@ namespace Lokrain.Atlas.Contracts
                 hash = (hash * HashMultiplier) ^ StorageFormat.GetHashCode();
                 hash = (hash * HashMultiplier) ^ (int)Ownership;
                 hash = (hash * HashMultiplier) ^ (int)Lifetime;
+                hash = (hash * HashMultiplier) ^ ShapeDomain.GetHashCode();
                 hash = (hash * HashMultiplier) ^ LengthShape.GetHashCode();
                 hash = (hash * HashMultiplier) ^ (int)Flags;
                 hash = (hash * HashMultiplier) ^ (int)HashParticipation;
@@ -589,11 +619,13 @@ namespace Lokrain.Atlas.Contracts
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0} [{1}] Role={2} Slot={3} Storage={4} Ownership={5} Lifetime={6}",
+                "{0} [{1}] Role={2} Slot={3} Domain={4} LengthShape={5} Storage={6} Ownership={7} Lifetime={8}",
                 DebugName,
                 StableId,
                 Role,
                 slotText,
+                ShapeDomain,
+                LengthShape,
                 StorageFormat,
                 Ownership,
                 Lifetime);
@@ -650,9 +682,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             if (Lifetime == LifetimePolicy.External &&
-                Ownership != OwnershipPolicy.ExternalOwned &&
-                Ownership != OwnershipPolicy.Borrowed &&
-                Ownership != OwnershipPolicy.Imported)
+                !IsExternalCompatibleOwnership(Ownership))
             {
                 throw new ArgumentException(
                     $"Atlas contract '{diagnosticName}' uses external lifetime with incompatible " +
@@ -670,7 +700,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             if (Role == AtlasFieldRole.Canonical &&
-                HashParticipation == HashParticipation.None)
+                HashParticipation == Lokrain.Atlas.Contracts.HashParticipation.None)
             {
                 throw new ArgumentException(
                     $"Atlas contract '{diagnosticName}' declares canonical field role but opts out of all " +
@@ -679,7 +709,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             if (Role == AtlasFieldRole.Payload &&
-                HashParticipation == HashParticipation.None)
+                HashParticipation == Lokrain.Atlas.Contracts.HashParticipation.None)
             {
                 throw new ArgumentException(
                     $"Atlas contract '{diagnosticName}' declares payload field role but opts out of all " +
@@ -693,6 +723,86 @@ namespace Lokrain.Atlas.Contracts
                 throw new ArgumentException(
                     $"Atlas contract '{diagnosticName}' uses scalar storage but does not declare scalar " +
                     "length shape.",
+                    parameterName);
+            }
+        }
+
+        private void ValidateShapeDomainPolicyOrThrow(
+            string parameterName,
+            string diagnosticName)
+        {
+            if (ShapeDomain.Kind == AtlasShapeDomainKind.Scalar &&
+                !LengthShape.IsScalar)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares scalar shape domain but length shape is '{LengthShape.Kind}'.",
+                    parameterName);
+            }
+
+            if (LengthShape.IsScalar &&
+                ShapeDomain.Kind != AtlasShapeDomainKind.Scalar &&
+                ShapeDomain.Kind != AtlasShapeDomainKind.FixedVector)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares scalar length shape with incompatible shape domain '{ShapeDomain.Kind}'.",
+                    parameterName);
+            }
+
+            if (ShapeDomain.Kind == AtlasShapeDomainKind.External &&
+                StorageFormat.Kind != StorageKind.External)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares external shape domain with non-external storage kind '{StorageFormat.Kind}'.",
+                    parameterName);
+            }
+
+            if (StorageFormat.Kind == StorageKind.External &&
+                ShapeDomain.Kind != AtlasShapeDomainKind.External)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares external storage with non-external shape domain '{ShapeDomain.Kind}'.",
+                    parameterName);
+            }
+
+            if (ShapeDomain.Kind == AtlasShapeDomainKind.External &&
+                !IsExternalCompatibleOwnership(Ownership))
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares external shape domain with incompatible ownership policy '{Ownership}'.",
+                    parameterName);
+            }
+
+            if (LengthShape.Kind == LengthShapeKind.External &&
+                ShapeDomain.Kind != AtlasShapeDomainKind.External)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares external length shape with non-external shape domain '{ShapeDomain.Kind}'.",
+                    parameterName);
+            }
+
+            if (ShapeDomain.Kind == AtlasShapeDomainKind.PrefixSumPayload &&
+                LengthShape.Kind != LengthShapeKind.PrefixSumPayload)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares prefix-sum payload shape domain with length shape '{LengthShape.Kind}'.",
+                    parameterName);
+            }
+
+            if (LengthShape.Kind == LengthShapeKind.PrefixSumPayload &&
+                ShapeDomain.Kind != AtlasShapeDomainKind.PrefixSumPayload)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares prefix-sum payload length shape with shape domain '{ShapeDomain.Kind}'.",
+                    parameterName);
+            }
+
+            if (ShapeDomain.HasSourceField &&
+                ShapeDomain.SourceFieldId != LengthShape.SourceFieldId &&
+                LengthShape.Kind != LengthShapeKind.PrefixSumPayload)
+            {
+                throw new ArgumentException(
+                    $"Atlas contract '{diagnosticName}' declares shape-domain source field '{ShapeDomain.SourceFieldId}' " +
+                    $"that does not match length-shape source field '{LengthShape.SourceFieldId}'.",
                     parameterName);
             }
         }
