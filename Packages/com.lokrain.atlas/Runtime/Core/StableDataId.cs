@@ -1,4 +1,20 @@
 // Runtime/Core/StableDataId.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Core
+//
+// Purpose
+// - Define a stable, versioned data identity value.
+// - Keep zero/default values valid for production ABI safety.
+// - Avoid invalid sentinels; absence is represented by explicit presence state elsewhere.
+//
+// Design notes
+// - default(StableDataId) is valid.
+// - StableDataId.Zero is valid.
+// - Version 0 is valid.
+// - This type does not encode missing/invalid state.
+// - Optionality must be represented by the containing type through an explicit boolean/presence flag.
+// - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
 using System.Globalization;
@@ -8,25 +24,19 @@ using System.Runtime.InteropServices;
 namespace Lokrain.Atlas.Core
 {
     /// <summary>
-    /// Represents a stable, versioned identity for an Atlas Field contract.
+    /// Represents a stable, versioned identity for an Atlas data contract.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The 128-bit identity is the durable Field identity. It must remain stable across
-    /// refactors, assembly renames, namespace changes, Unity domain reloads, editor sessions,
-    /// player builds, and Contract-table reordering.
+    /// The all-zero value is valid. This type intentionally does not reserve default, zero identity,
+    /// or version zero as invalid. Missing, optional, or unresolved state must be represented by an
+    /// explicit boolean or presence field owned by the containing type.
     /// </para>
     ///
     /// <para>
-    /// Do not derive this value from C# type names, assembly names, Unity asset paths,
-    /// Contract-table slots, ECS component type indices, or any other refactor-sensitive
-    /// source.
-    /// </para>
-    ///
-    /// <para>
-    /// <see cref="Version"/> is part of equality. Increment it when the Field contract
-    /// changes incompatibly, including changes to element layout, storage kind, ownership,
-    /// lifetime, shape rules, or hash participation semantics.
+    /// This value is suitable for unmanaged/Burst-facing metadata because every bit pattern is valid.
+    /// Code must not use <see cref="Zero"/>, <see cref="Empty"/>, or <c>default</c> as an invalid
+    /// sentinel.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
@@ -35,42 +45,48 @@ namespace Lokrain.Atlas.Core
         IComparable<StableDataId>
     {
         private const int HashSeed = 17;
-        private const int HashMultiplier = 31;
+        private const int HashMultiplier = 397;
 
         /// <summary>
-        /// Represents the reserved invalid identifier.
+        /// The all-zero identifier.
         /// </summary>
         /// <remarks>
-        /// Atlas Field declarations must not use this value. It is intended for default
-        /// initialization, sentinel values, and validation failure paths.
+        /// This value is valid. It is not an invalid sentinel and must not be used to represent absence.
+        /// </remarks>
+        public static readonly StableDataId Zero = default;
+
+        /// <summary>
+        /// Legacy alias for <see cref="Zero"/>.
+        /// </summary>
+        /// <remarks>
+        /// This value is valid. The name is kept for source compatibility only.
         /// </remarks>
         public static readonly StableDataId Empty = default;
 
         /// <summary>
-        /// High 64 bits of the durable 128-bit Field identity.
+        /// Gets the high 64 bits of the durable 128-bit identity.
         /// </summary>
         public readonly ulong High;
 
         /// <summary>
-        /// Low 64 bits of the durable 128-bit Field identity.
+        /// Gets the low 64 bits of the durable 128-bit identity.
         /// </summary>
         public readonly ulong Low;
 
         /// <summary>
-        /// Semantic version of the Field contract.
+        /// Gets the semantic contract version.
         /// </summary>
         /// <remarks>
-        /// Version zero is reserved. Valid Atlas Field declarations should use version one
-        /// or higher.
+        /// Version zero is valid.
         /// </remarks>
         public readonly ushort Version;
 
         /// <summary>
-        /// Creates a stable Field identity from explicit identity and version components.
+        /// Initializes a new instance of the <see cref="StableDataId"/> struct.
         /// </summary>
-        /// <param name="high">High 64 bits of the durable 128-bit Field identity.</param>
-        /// <param name="low">Low 64 bits of the durable 128-bit Field identity.</param>
-        /// <param name="version">Semantic Field contract version. Zero is reserved.</param>
+        /// <param name="high">The high 64 bits of the durable 128-bit identity.</param>
+        /// <param name="low">The low 64 bits of the durable 128-bit identity.</param>
+        /// <param name="version">The semantic contract version. Version zero is valid.</param>
         public StableDataId(ulong high, ulong low, ushort version)
         {
             High = high;
@@ -79,31 +95,47 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Gets whether this value is exactly the reserved default identifier.
+        /// Gets whether this value is the all-zero identifier.
         /// </summary>
-        public bool IsEmpty
+        /// <remarks>
+        /// This is a value query only. A zero identifier is valid and does not mean missing or invalid.
+        /// </remarks>
+        public bool IsZero
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => High == 0UL && Low == 0UL && Version == 0;
         }
 
         /// <summary>
-        /// Gets whether this value is valid for an Atlas Field declaration.
+        /// Legacy alias for <see cref="IsZero"/>.
         /// </summary>
         /// <remarks>
-        /// A valid identifier requires a non-zero 128-bit identity and a non-zero version.
+        /// Empty does not mean invalid. This property is kept for source compatibility only.
+        /// </remarks>
+        public bool IsEmpty
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => IsZero;
+        }
+
+        /// <summary>
+        /// Gets whether this value is structurally valid.
+        /// </summary>
+        /// <remarks>
+        /// Every bit pattern is valid. This property is kept for source compatibility with older code
+        /// that expected an <c>IsValid</c> member.
         /// </remarks>
         public bool IsValid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => (High != 0UL || Low != 0UL) && Version != 0;
+            get => true;
         }
 
         /// <summary>
-        /// Creates a new identifier with the same durable identity and a different contract version.
+        /// Returns a copy of this identifier with a different semantic version.
         /// </summary>
-        /// <param name="version">The replacement semantic contract version.</param>
-        /// <returns>A new identifier with the same identity and the supplied version.</returns>
+        /// <param name="version">The semantic contract version to assign. Version zero is valid.</param>
+        /// <returns>A copy of this identifier with <paramref name="version"/>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public StableDataId WithVersion(ushort version)
         {
@@ -111,13 +143,10 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Determines whether two identifiers refer to the same durable Field identity,
-        /// ignoring contract version.
+        /// Returns whether this value has the same 128-bit identity as another value, ignoring version.
         /// </summary>
-        /// <param name="other">The identifier to compare with this identifier.</param>
-        /// <returns>
-        /// <c>true</c> when the 128-bit identity matches; otherwise, <c>false</c>.
-        /// </returns>
+        /// <param name="other">The identifier to compare against.</param>
+        /// <returns><c>true</c> when the high and low identity words match; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool HasSameIdentityAs(StableDataId other)
         {
@@ -125,13 +154,10 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Determines whether this identifier is a newer contract version of the same durable identity.
+        /// Returns whether this value has the same identity as another value and a newer version.
         /// </summary>
-        /// <param name="other">The identifier to compare with this identifier.</param>
-        /// <returns>
-        /// <c>true</c> when both identifiers share the same 128-bit identity and this identifier
-        /// has a greater version.
-        /// </returns>
+        /// <param name="other">The identifier to compare against.</param>
+        /// <returns><c>true</c> when identity matches and this version is greater; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsNewerVersionOf(StableDataId other)
         {
@@ -139,13 +165,10 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Determines whether this identifier is an older contract version of the same durable identity.
+        /// Returns whether this value has the same identity as another value and an older version.
         /// </summary>
-        /// <param name="other">The identifier to compare with this identifier.</param>
-        /// <returns>
-        /// <c>true</c> when both identifiers share the same 128-bit identity and this identifier
-        /// has a smaller version.
-        /// </returns>
+        /// <param name="other">The identifier to compare against.</param>
+        /// <returns><c>true</c> when identity matches and this version is lower; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsOlderVersionOf(StableDataId other)
         {
@@ -153,88 +176,69 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Throws when this identifier is not valid for an Atlas Field declaration.
+        /// Validates this value.
         /// </summary>
-        /// <param name="parameterName">
-        /// Optional parameter name used by the thrown exception.
-        /// </param>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the identity is zero, the version is zero, or both are zero.
-        /// </exception>
+        /// <param name="parameterName">Optional caller parameter name retained for source compatibility.</param>
+        /// <remarks>
+        /// This method intentionally performs no checks because every bit pattern is valid.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void ValidateOrThrow(string parameterName = null)
         {
-            if (IsValid)
-            {
-                return;
-            }
-
-            throw new ArgumentException(
-                "Stable data id must have a non-zero identity and a non-zero version.",
-                parameterName ?? nameof(StableDataId));
+            _ = parameterName;
         }
 
         /// <summary>
-        /// Determines whether this identifier is equal to another identifier.
+        /// Determines whether this value equals another <see cref="StableDataId"/>.
         /// </summary>
-        /// <param name="other">The identifier to compare with this identifier.</param>
-        /// <returns>
-        /// <c>true</c> when high identity bits, low identity bits, and version all match.
-        /// </returns>
+        /// <param name="other">The value to compare against.</param>
+        /// <returns><c>true</c> when all identity and version fields match; otherwise, <c>false</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(StableDataId other)
         {
-            return High == other.High &&
-                   Low == other.Low &&
-                   Version == other.Version;
+            return High == other.High && Low == other.Low && Version == other.Version;
         }
 
         /// <summary>
-        /// Determines whether this identifier is equal to an object instance.
+        /// Determines whether this value equals another object.
         /// </summary>
-        /// <param name="obj">The object to compare with this identifier.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="obj"/> is a <see cref="StableDataId"/> with the
-        /// same high identity bits, low identity bits, and version.
-        /// </returns>
+        /// <param name="obj">The object to compare against.</param>
+        /// <returns><c>true</c> when <paramref name="obj"/> is an equal <see cref="StableDataId"/>; otherwise, <c>false</c>.</returns>
         public override bool Equals(object obj)
         {
             return obj is StableDataId other && Equals(other);
         }
 
         /// <summary>
-        /// Returns a hash code suitable for managed hash containers.
+        /// Returns a deterministic hash code for this value.
         /// </summary>
+        /// <returns>A deterministic 32-bit hash code.</returns>
         /// <remarks>
-        /// This hash is for managed collection lookup only. Schema hashes, content hashes,
-        /// replay hashes, and deterministic compatibility hashes should use Atlas hashing
-        /// utilities instead of <see cref="GetHashCode"/>.
+        /// This intentionally avoids <see cref="HashCode"/> so value hashing does not depend on runtime
+        /// implementation details.
         /// </remarks>
-        /// <returns>A managed hash code for this identifier.</returns>
         public override int GetHashCode()
         {
             unchecked
             {
+                var highFold = (int)(High ^ (High >> 32));
+                var lowFold = (int)(Low ^ (Low >> 32));
+
                 var hash = HashSeed;
-
-                hash = (hash * HashMultiplier) + High.GetHashCode();
-                hash = (hash * HashMultiplier) + Low.GetHashCode();
-                hash = (hash * HashMultiplier) + Version.GetHashCode();
-
+                hash = (hash * HashMultiplier) ^ highFold;
+                hash = (hash * HashMultiplier) ^ lowFold;
+                hash = (hash * HashMultiplier) ^ Version;
                 return hash;
             }
         }
 
         /// <summary>
-        /// Compares identifiers using Atlas canonical diagnostic order.
+        /// Compares this value with another <see cref="StableDataId"/>.
         /// </summary>
-        /// <remarks>
-        /// Ordering is by high identity bits, then low identity bits, then version. Contract
-        /// table order is still defined by the table itself; this comparison exists for
-        /// validation, diagnostics, deterministic sorting of error reports, and tests.
-        /// </remarks>
-        /// <param name="other">The identifier to compare with this identifier.</param>
+        /// <param name="other">The value to compare against.</param>
         /// <returns>
-        /// A negative value when this identifier sorts before <paramref name="other"/>,
-        /// zero when they are equal, and a positive value when this identifier sorts after it.
+        /// A negative value when this value sorts before <paramref name="other"/>, zero when equal,
+        /// or a positive value when this value sorts after <paramref name="other"/>.
         /// </returns>
         public int CompareTo(StableDataId other)
         {
@@ -254,11 +258,9 @@ namespace Lokrain.Atlas.Core
         }
 
         /// <summary>
-        /// Returns a culture-invariant diagnostic representation of this identifier.
+        /// Returns an invariant diagnostic representation of this identifier.
         /// </summary>
-        /// <returns>
-        /// A string containing the high identity bits, low identity bits, and version.
-        /// </returns>
+        /// <returns>A stable diagnostic string containing the high word, low word, and version.</returns>
         public override string ToString()
         {
             return string.Format(
@@ -272,11 +274,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether two identifiers are equal.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns>
-        /// <c>true</c> when high identity bits, low identity bits, and version all match.
-        /// </returns>
         public static bool operator ==(StableDataId left, StableDataId right)
         {
             return left.Equals(right);
@@ -285,11 +282,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether two identifiers are not equal.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns>
-        /// <c>true</c> when any identity or version component differs.
-        /// </returns>
         public static bool operator !=(StableDataId left, StableDataId right)
         {
             return !left.Equals(right);
@@ -298,9 +290,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether the left identifier sorts before the right identifier.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns><c>true</c> when <paramref name="left"/> sorts before <paramref name="right"/>.</returns>
         public static bool operator <(StableDataId left, StableDataId right)
         {
             return left.CompareTo(right) < 0;
@@ -309,9 +298,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether the left identifier sorts after the right identifier.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns><c>true</c> when <paramref name="left"/> sorts after <paramref name="right"/>.</returns>
         public static bool operator >(StableDataId left, StableDataId right)
         {
             return left.CompareTo(right) > 0;
@@ -320,12 +306,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether the left identifier sorts before or equal to the right identifier.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="left"/> sorts before or is equal to
-        /// <paramref name="right"/>.
-        /// </returns>
         public static bool operator <=(StableDataId left, StableDataId right)
         {
             return left.CompareTo(right) <= 0;
@@ -334,12 +314,6 @@ namespace Lokrain.Atlas.Core
         /// <summary>
         /// Determines whether the left identifier sorts after or equal to the right identifier.
         /// </summary>
-        /// <param name="left">The first identifier.</param>
-        /// <param name="right">The second identifier.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="left"/> sorts after or is equal to
-        /// <paramref name="right"/>.
-        /// </returns>
         public static bool operator >=(StableDataId left, StableDataId right)
         {
             return left.CompareTo(right) >= 0;

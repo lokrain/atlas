@@ -71,7 +71,7 @@ namespace Lokrain.Atlas.Compilation
         /// Atlas-owned internal Fields to be produced before content reads.
         /// </remarks>
         public static readonly AtlasDataflowValidationPolicy ProductionDefault =
-            new AtlasDataflowValidationPolicy(
+            new(
                 AtlasDataflowValidationPolicyFlags.AllowExternalRoleInitialRead |
                 AtlasDataflowValidationPolicyFlags.AllowExternalOwnedInitialRead |
                 AtlasDataflowValidationPolicyFlags.AllowBorrowedInitialRead |

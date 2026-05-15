@@ -1,4 +1,23 @@
 // Runtime/Contracts/StorageFormat.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Contracts
+//
+// Purpose
+// - Describe the physical unmanaged storage format required by an Atlas Field Contract.
+// - Combine storage container family with unmanaged element layout metadata.
+// - Support storage allocation, validation, reconstruction, and type-checking.
+// - Preserve zero-valid type-hash semantics.
+//
+// Design notes
+// - default(StorageFormat) is a valid value object, but not a concrete storage format.
+// - StorageFormat.None is a compatibility alias for default, not an invalid sentinel.
+// - StorageKind.None is valid as a default enum value, but not valid for concrete storage.
+// - ElementTypeHash zero is valid and must not be treated as invalid.
+// - Concrete formats require a concrete StorageKind, positive element size, and positive alignment.
+// - This type does not own memory.
+// - Jobs should receive resolved native containers, typed slices/views, or compiled addresses.
+// - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
 using System.Runtime.CompilerServices;
@@ -23,26 +42,49 @@ namespace Lokrain.Atlas.Contracts
     /// This type does not own memory. It describes how memory must be allocated or interpreted
     /// by storage systems before jobs receive resolved native containers.
     /// </para>
+    ///
+    /// <para>
+    /// The default value is safe to store and compare. It is not an invalid bit pattern. It simply
+    /// does not describe a concrete storage format until a concrete storage kind, positive element
+    /// size, and positive alignment are supplied.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="ElementTypeHash"/> is diagnostic/runtime compatibility metadata. It is not durable
+    /// field identity and it is not a validity sentinel. The value zero is valid.
+    /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct StorageFormat :
         IEquatable<StorageFormat>
     {
+        private const int HashSeed = 17;
+        private const int HashMultiplier = 397;
+
         /// <summary>
-        /// Reserved invalid storage format.
+        /// Default non-concrete storage format.
         /// </summary>
+        /// <remarks>
+        /// This value is not an invalid sentinel. It is retained as the default/non-concrete
+        /// storage-format payload. Missing state must be represented by bool-returning APIs or
+        /// explicit presence flags.
+        /// </remarks>
         public static readonly StorageFormat None = default;
 
         /// <summary>
         /// Native storage family used by the Field.
         /// </summary>
+        /// <remarks>
+        /// <see cref="StorageKind.None"/> is valid as a default enum value, but not valid for a
+        /// concrete storage format.
+        /// </remarks>
         public readonly StorageKind Kind;
 
         /// <summary>
         /// Size in bytes of one unmanaged element.
         /// </summary>
         /// <remarks>
-        /// Valid concrete formats must have a positive element size.
+        /// Concrete formats must have a positive element size.
         /// </remarks>
         public readonly int ElementSize;
 
@@ -50,7 +92,7 @@ namespace Lokrain.Atlas.Contracts
         /// Required alignment in bytes for one unmanaged element.
         /// </summary>
         /// <remarks>
-        /// Valid concrete formats must have a positive element alignment.
+        /// Concrete formats must have a positive element alignment.
         /// </remarks>
         public readonly int ElementAlignment;
 
@@ -60,7 +102,7 @@ namespace Lokrain.Atlas.Contracts
         /// <remarks>
         /// This hash is used for validation and diagnostics. It is not durable identity across
         /// deliberate Field-contract migrations. Durable Field identity is represented by
-        /// <see cref="StableDataId"/>.
+        /// <see cref="StableDataId"/>. Zero is a valid hash value.
         /// </remarks>
         public readonly ulong ElementTypeHash;
 
@@ -79,13 +121,16 @@ namespace Lokrain.Atlas.Contracts
         /// <summary>
         /// Gets whether this format is valid for a concrete Atlas Field Contract.
         /// </summary>
+        /// <remarks>
+        /// This is concrete-format validation, not bit-pattern validation. The default value is a
+        /// valid value object, but it is not a concrete storage format.
+        /// </remarks>
         public bool IsValid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => Kind != StorageKind.None &&
                    ElementSize > AtlasConstants.InvalidElementSize &&
-                   ElementAlignment > AtlasConstants.InvalidElementAlignment &&
-                   ElementTypeHash != 0UL;
+                   ElementAlignment > AtlasConstants.InvalidElementAlignment;
         }
 
         /// <summary>
@@ -253,11 +298,11 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Throws when this storage format is invalid or internally inconsistent.
+        /// Throws when this storage format is not valid as a concrete storage format.
         /// </summary>
         /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
         /// <exception cref="ArgumentException">
-        /// Thrown when the storage format is invalid.
+        /// Thrown when the storage format is not concrete.
         /// </exception>
         public void ValidateOrThrow(string parameterName = null)
         {
@@ -267,7 +312,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             throw new ArgumentException(
-                $"Storage format '{this}' is invalid.",
+                $"Storage format '{this}' is not a concrete storage format.",
                 parameterName ?? nameof(StorageFormat));
         }
 
@@ -277,11 +322,13 @@ namespace Lokrain.Atlas.Contracts
         /// <typeparam name="TElement">Expected unmanaged element type.</typeparam>
         /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
         /// <exception cref="ArgumentException">
-        /// Thrown when size, alignment, or type hash differs from <typeparamref name="TElement"/>.
+        /// Thrown when kind, size, alignment, or type hash differs from <typeparamref name="TElement"/>.
         /// </exception>
         public void ValidateElementTypeOrThrow<TElement>(string parameterName = null)
             where TElement : unmanaged
         {
+            ValidateOrThrow(parameterName);
+
             var expected = Create<TElement>(Kind);
 
             if (ElementSize == expected.ElementSize &&
@@ -322,17 +369,20 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Returns a hash code suitable for managed hash containers.
+        /// Returns a deterministic hash code for this storage format.
         /// </summary>
-        /// <returns>A managed hash code for this storage format.</returns>
+        /// <returns>A deterministic managed hash code for this storage format.</returns>
         public override int GetHashCode()
         {
             unchecked
             {
-                var hash = (int)Kind;
-                hash = (hash * 397) ^ ElementSize;
-                hash = (hash * 397) ^ ElementAlignment;
-                hash = (hash * 397) ^ ElementTypeHash.GetHashCode();
+                var typeHashFold = (int)(ElementTypeHash ^ (ElementTypeHash >> 32));
+
+                var hash = HashSeed;
+                hash = (hash * HashMultiplier) ^ (int)Kind;
+                hash = (hash * HashMultiplier) ^ ElementSize;
+                hash = (hash * HashMultiplier) ^ ElementAlignment;
+                hash = (hash * HashMultiplier) ^ typeHashFold;
                 return hash;
             }
         }

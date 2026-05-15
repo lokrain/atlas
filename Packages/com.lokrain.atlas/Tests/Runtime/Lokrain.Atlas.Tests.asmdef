@@ -1,11 +1,25 @@
 {
     "name": "Lokrain.Atlas.Tests",
+    "rootNamespace": "Lokrain.Atlas.Tests",
     "references": [
-        "Lokrain.Atlas"
-    ],
-    "optionalUnityReferences": [
-        "TestAssemblies"
+        "Lokrain.Atlas",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Mathematics"
     ],
     "includePlatforms": [],
-    "excludePlatforms": []
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

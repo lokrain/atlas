@@ -50,8 +50,14 @@ TemporaryDependencyNodeTargetIdentifier=netstandard2.1
 /warnaserror+:NU1605
 
 [sourceFiles]
+Packages/com.lokrain.atlas/Runtime/Artifacts/
+ AtlasArtifact.cs
+ AtlasArtifactField.cs
+ AtlasArtifactHeader.cs
+ AtlasArtifactWriter.cs
 Packages/com.lokrain.atlas/Runtime/Compilation/
  AtlasCompilationResult.cs
+ AtlasCompilationWorkflow.cs
  AtlasCompiledBinding.cs
  AtlasCompiledOperation.cs
  AtlasCompiledPlan.cs
@@ -62,11 +68,19 @@ Packages/com.lokrain.atlas/Runtime/Compilation/
  AtlasDataflowValidator.cs
  AtlasPlanCompiler.cs
  AtlasPlanValidator.cs
+ AtlasResolvedShape.cs
+ AtlasResolvedShapeSet.cs
+ AtlasShapeResolver.cs
+ AtlasWriteHazardValidationPolicy.cs
+ AtlasWriteHazardValidationPolicyFlags.cs
+ AtlasWriteHazardValidationPolicyFlagsExtensions.cs
+ AtlasWriteHazardValidator.cs
 Packages/com.lokrain.atlas/Runtime/Contracts/
  AtlasContract.cs
  AtlasContractFactory.cs
  AtlasContractTable.cs
- AtlasDescriptor.cs
+ AtlasShapeDomain.cs
+ AtlasShapeDomainKind.cs
  HashParticipation.cs
  LengthShape.cs
  LifetimePolicy.cs
@@ -77,6 +91,14 @@ Packages/com.lokrain.atlas/Runtime/Core/
  AtlasConstants.cs
  AtlasException.cs
  StableDataId.cs
+Packages/com.lokrain.atlas/Runtime/Debugging/
+ AtlasDebugMapExport.cs
+ AtlasDebugMapImage.cs
+ AtlasDebugMapPalette.cs
+ AtlasDebugMapRequest.cs
+ AtlasDebugMapRequestKind.cs
+ AtlasDebugMapTargetKind.cs
+ AtlasDebugMapWriter.cs
 Packages/com.lokrain.atlas/Runtime/Diagnostics/
  AtlasDiagnostic.cs
  AtlasDiagnosticBuffer.cs
@@ -84,6 +106,22 @@ Packages/com.lokrain.atlas/Runtime/Diagnostics/
  AtlasDiagnosticLocation.cs
  AtlasDiagnosticSeverity.cs
  AtlasTypeHash.cs
+Packages/com.lokrain.atlas/Runtime/Execution/
+ AtlasExecutionContext.cs
+ AtlasExecutionResult.cs
+ AtlasFieldMemoryBlock.cs
+ AtlasMemoryResolver.cs
+ AtlasOperationRunner.cs
+ AtlasRunRequest.cs
+ AtlasRunWorkflow.cs
+ AtlasRunWorkflowPhase.cs
+ AtlasRunWorkflowResult.cs
+ AtlasRunWorkflowResultStatus.cs
+ AtlasWorkspace.cs
+Packages/com.lokrain.atlas/Runtime/Executors/
+ AtlasOperationExecutorRegistry.cs
+ IAtlasOperationExecutor.cs
+ Operations/AtlasClearFieldsOperationExecutor.cs
 Packages/com.lokrain.atlas/Runtime/Fields/
  AtlasField.cs
  AtlasFieldAccess.cs
@@ -94,12 +132,23 @@ Packages/com.lokrain.atlas/Runtime/Fields/
  IAtlasField.cs
 Packages/com.lokrain.atlas/Runtime/Operations/
  AtlasOperationAccess.cs
+ AtlasOperationAccessFlags.cs
+ AtlasOperationAccessFlagsExtensions.cs
+ AtlasOperationAccessMode.cs
+ AtlasOperationAccessModeExtensions.cs
  AtlasOperationDefinition.cs
  AtlasOperationId.cs
+ AtlasOperationRole.cs
  AtlasOperationSet.cs
+ AtlasWriteCoverage.cs
+ AtlasWriteCoverageExtensions.cs
 Packages/com.lokrain.atlas/Runtime/Pipelines/
  AtlasPipelineDefinition.cs
  AtlasPipelineId.cs
+ AtlasPipelinePolicyValidator.cs
+ AtlasPipelineValidationPolicy.cs
+ AtlasPipelineValidationPolicyFlags.cs
+ AtlasPipelineValidationPolicyFlagsExtensions.cs
 Packages/com.lokrain.atlas/Runtime/Stages/
  AtlasStageDefinition.cs
  AtlasStageId.cs

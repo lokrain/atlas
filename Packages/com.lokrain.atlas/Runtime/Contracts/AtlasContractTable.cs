@@ -1,4 +1,24 @@
 // Runtime/Contracts/AtlasContractTable.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Contracts
+//
+// Purpose
+// - Store an immutable ordered table of Atlas field contracts.
+// - Assign canonical zero-based field slots from explicit table order.
+// - Preserve zero-valid StableDataId and AtlasFieldSlot semantics.
+// - Resolve stable field identities to table-local slots and contracts.
+// - Validate duplicate identities, slot consistency, and field-relative length shapes.
+//
+// Design notes
+// - Contract-table order is the canonical source of AtlasFieldSlot values.
+// - Slot zero is valid.
+// - StableDataId zero/default is valid.
+// - Missing lookup state is represented only by bool-returning Try methods.
+// - Try methods set out payloads to default on failure, but that payload is not semantic.
+// - Do not interpret default AtlasContract or default AtlasFieldSlot as missing without the bool result.
+// - Contract tables are setup/compiler metadata, not hot-loop job data.
+// - Jobs should receive resolved native storage, typed slices/views, or compiled addresses.
 
 using System;
 using System.Collections;
@@ -10,24 +30,26 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Contracts
 {
     /// <summary>
-    /// Immutable ordered catalog of Atlas Field Contracts.
+    /// Immutable ordered table of Atlas field contracts.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Contract-table order is the canonical source of Field slots. A Contract's slot is assigned
-    /// from its index in this table. Slots are table-local execution identifiers; they are not
-    /// durable Field identity and must not be serialized as long-lived Field references.
+    /// Contract-table order is the canonical source of field slots. The contract at index zero is
+    /// assigned slot zero. Slot zero is valid and must not be treated as missing, invalid, or
+    /// unresolved.
     /// </para>
     ///
     /// <para>
-    /// The table copies input Contracts, validates each Contract, assigns canonical slots, rejects
-    /// duplicate identities, and builds lookup data used by plan validation, storage allocation,
-    /// shape resolution, hashing, and typed Field resolution.
+    /// A contract table copies the input contracts, validates declaration metadata, assigns
+    /// canonical table-local slots, rejects duplicate stable identities, and validates
+    /// field-relative length-shape dependencies.
     /// </para>
     ///
     /// <para>
-    /// Runtime jobs should not receive Contract tables. Jobs should receive already-resolved typed
-    /// native memory produced from validated tables, compiled plans, and runtime workspaces.
+    /// This table is an authoring/compiler/runtime-metadata object. It does not allocate field
+    /// storage, own native memory, schedule jobs, or produce artifacts. Later compilation stages
+    /// should turn validated table metadata into workspace layouts, resolved addresses, and
+    /// executable operation bindings.
     /// </para>
     /// </remarks>
     public sealed class AtlasContractTable :
@@ -40,7 +62,7 @@ namespace Lokrain.Atlas.Contracts
         /// Diagnostic table name used by validation reports, editor tooling, exceptions, hashes, and tests.
         /// </summary>
         /// <remarks>
-        /// Table names are not durable Field identity. Durable identity belongs to <see cref="StableDataId"/>.
+        /// Table names are not durable field identity. Durable identity belongs to <see cref="StableDataId"/>.
         /// </remarks>
         public readonly FixedString64Bytes Name;
 
@@ -54,22 +76,22 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets the number of Contracts in this table.
+        /// Gets the number of contracts in this table.
         /// </summary>
         public int Count => _contracts.Length;
 
         /// <summary>
-        /// Gets whether this table contains no Contracts.
+        /// Gets whether this table contains no contracts.
         /// </summary>
         public bool IsEmpty => _contracts.Length == 0;
 
         /// <summary>
-        /// Gets the Contract at a zero-based canonical table index.
+        /// Gets the contract at a zero-based canonical table index.
         /// </summary>
-        /// <param name="index">Zero-based Contract-table index.</param>
-        /// <returns>The Contract assigned to the requested index.</returns>
+        /// <param name="index">The zero-based contract-table index.</param>
+        /// <returns>The contract assigned to <paramref name="index"/>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="index"/> is outside this table's Contract range.
+        /// Thrown when <paramref name="index"/> is outside this table's range.
         /// </exception>
         public AtlasContract this[int index]
         {
@@ -81,38 +103,29 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets the Contract assigned to a canonical Field slot.
+        /// Gets the contract assigned to a canonical field slot.
         /// </summary>
-        /// <param name="slot">Canonical Field slot.</param>
-        /// <returns>The Contract assigned to the requested slot.</returns>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when <paramref name="slot"/> is invalid.
-        /// </exception>
+        /// <param name="slot">The canonical field slot. Slot zero/default is valid.</param>
+        /// <returns>The contract assigned to <paramref name="slot"/>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="slot"/> is outside this table's Contract range.
+        /// Thrown when <paramref name="slot"/> is outside this table's range.
         /// </exception>
-        public AtlasContract this[AtlasFieldSlot slot]
-        {
-            get
-            {
-                slot.ThrowIfInvalid();
-                return this[slot.Index];
-            }
-        }
+        public AtlasContract this[AtlasFieldSlot slot] => this[slot.Index];
 
         /// <summary>
-        /// Creates a Contract table from explicitly ordered Contracts.
+        /// Creates a contract table from explicitly ordered contracts.
         /// </summary>
         /// <param name="contracts">
-        /// Contracts in canonical slot order. Contracts may be unslotted, or already slotted
-        /// with slots matching their table position.
+        /// Contracts in canonical slot order. Contracts may be unslotted, or already slotted with
+        /// slots matching their table position.
         /// </param>
-        /// <returns>A validated immutable Contract table.</returns>
+        /// <returns>A validated immutable contract table.</returns>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="contracts"/> is <c>null</c>.
         /// </exception>
         /// <exception cref="ArgumentException">
-        /// Thrown when Contracts are invalid, duplicated, inconsistently slotted, or exceed Atlas slot capacity.
+        /// Thrown when contracts are invalid, duplicated, inconsistently slotted, or exceed Atlas
+        /// slot capacity.
         /// </exception>
         public static AtlasContractTable Create(params AtlasContract[] contracts)
         {
@@ -120,19 +133,20 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a named Contract table from explicitly ordered Contracts.
+        /// Creates a named contract table from explicitly ordered contracts.
         /// </summary>
-        /// <param name="name">Diagnostic table name.</param>
+        /// <param name="name">The diagnostic table name.</param>
         /// <param name="contracts">
-        /// Contracts in canonical slot order. Contracts may be unslotted, or already slotted
-        /// with slots matching their table position.
+        /// Contracts in canonical slot order. Contracts may be unslotted, or already slotted with
+        /// slots matching their table position.
         /// </param>
-        /// <returns>A validated immutable Contract table.</returns>
+        /// <returns>A validated immutable contract table.</returns>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="contracts"/> is <c>null</c>.
         /// </exception>
         /// <exception cref="ArgumentException">
-        /// Thrown when Contracts are invalid, duplicated, inconsistently slotted, or exceed Atlas slot capacity.
+        /// Thrown when contracts are invalid, duplicated, inconsistently slotted, or exceed Atlas
+        /// slot capacity.
         /// </exception>
         public static AtlasContractTable Create(
             FixedString64Bytes name,
@@ -142,22 +156,21 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Determines whether this table contains a Contract with the supplied stable Field identifier.
+        /// Determines whether this table contains a contract with the supplied stable field identifier.
         /// </summary>
-        /// <param name="stableId">Stable Field identifier to search for.</param>
+        /// <param name="stableId">The stable field identifier to search for. Zero/default is valid.</param>
         /// <returns><c>true</c> when this table contains the identifier; otherwise, <c>false</c>.</returns>
         public bool Contains(StableDataId stableId)
         {
-            return stableId.IsValid &&
-                   _slotsByStableId.ContainsKey(stableId);
+            return _slotsByStableId.ContainsKey(stableId);
         }
 
         /// <summary>
-        /// Determines whether this table contains the supplied typed Field declaration.
+        /// Determines whether this table contains the supplied typed field declaration.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns><c>true</c> when this table contains the typed Field; otherwise, <c>false</c>.</returns>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
+        /// <returns><c>true</c> when this table contains the typed field; otherwise, <c>false</c>.</returns>
         public bool Contains<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -166,35 +179,39 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Attempts to resolve a stable Field identifier to its canonical table slot.
+        /// Attempts to resolve a stable field identifier to its canonical table slot.
         /// </summary>
-        /// <param name="stableId">Stable Field identifier to resolve.</param>
+        /// <param name="stableId">The stable field identifier to resolve. Zero/default is valid.</param>
         /// <param name="slot">
-        /// The resolved slot when the identifier is present; otherwise, <see cref="AtlasFieldSlot.Invalid"/>.
+        /// The resolved slot when this method returns <c>true</c>; otherwise, the default slot
+        /// payload.
         /// </param>
         /// <returns><c>true</c> when the identifier was resolved; otherwise, <c>false</c>.</returns>
+        /// <remarks>
+        /// The output value is not semantically meaningful when this method returns <c>false</c>.
+        /// The returned boolean owns success/failure state.
+        /// </remarks>
         public bool TryGetSlot(
             StableDataId stableId,
             out AtlasFieldSlot slot)
         {
-            if (!stableId.IsValid)
-            {
-                slot = AtlasFieldSlot.Invalid;
-                return false;
-            }
-
             return _slotsByStableId.TryGetValue(stableId, out slot);
         }
 
         /// <summary>
-        /// Attempts to resolve a typed Field declaration to its canonical table slot.
+        /// Attempts to resolve a typed field declaration to its canonical table slot.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
         /// <param name="slot">
-        /// The resolved slot when the typed Field is present; otherwise, <see cref="AtlasFieldSlot.Invalid"/>.
+        /// The resolved slot when this method returns <c>true</c>; otherwise, the default slot
+        /// payload.
         /// </param>
-        /// <returns><c>true</c> when the typed Field was resolved; otherwise, <c>false</c>.</returns>
+        /// <returns><c>true</c> when the typed field was resolved; otherwise, <c>false</c>.</returns>
+        /// <remarks>
+        /// The output value is not semantically meaningful when this method returns <c>false</c>.
+        /// The returned boolean owns success/failure state.
+        /// </remarks>
         public bool TryGetSlot<TField, TElement>(out AtlasFieldSlot slot)
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -203,12 +220,12 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Resolves a stable Field identifier to its canonical table slot.
+        /// Resolves a stable field identifier to its canonical table slot.
         /// </summary>
-        /// <param name="stableId">Stable Field identifier to resolve.</param>
-        /// <returns>The canonical Field slot assigned to <paramref name="stableId"/>.</returns>
+        /// <param name="stableId">The stable field identifier to resolve. Zero/default is valid.</param>
+        /// <returns>The canonical field slot assigned to <paramref name="stableId"/>.</returns>
         /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="stableId"/> is invalid or not present in this table.
+        /// Thrown when <paramref name="stableId"/> is not present in this table.
         /// </exception>
         public AtlasFieldSlot GetRequiredSlot(StableDataId stableId)
         {
@@ -218,18 +235,18 @@ namespace Lokrain.Atlas.Contracts
             }
 
             throw new ArgumentException(
-                $"Atlas Contract table '{GetDiagnosticName()}' does not contain Field id '{stableId}'.",
+                $"Atlas contract table '{GetDiagnosticName()}' does not contain field id '{stableId}'.",
                 nameof(stableId));
         }
 
         /// <summary>
-        /// Resolves a typed Field declaration to its canonical table slot.
+        /// Resolves a typed field declaration to its canonical table slot.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>The canonical Field slot assigned to the typed Field.</returns>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
+        /// <returns>The canonical field slot assigned to the typed field.</returns>
         /// <exception cref="ArgumentException">
-        /// Thrown when the typed Field is not present in this table.
+        /// Thrown when the typed field is not present in this table.
         /// </exception>
         public AtlasFieldSlot GetRequiredSlot<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -239,13 +256,18 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Attempts to resolve a stable Field identifier to its Contract.
+        /// Attempts to resolve a stable field identifier to its contract.
         /// </summary>
-        /// <param name="stableId">Stable Field identifier to resolve.</param>
+        /// <param name="stableId">The stable field identifier to resolve. Zero/default is valid.</param>
         /// <param name="contract">
-        /// The resolved Contract when the identifier is present; otherwise, <see cref="AtlasContract.Empty"/>.
+        /// The resolved contract when this method returns <c>true</c>; otherwise, the default
+        /// contract payload.
         /// </param>
-        /// <returns><c>true</c> when the Contract was resolved; otherwise, <c>false</c>.</returns>
+        /// <returns><c>true</c> when the contract was resolved; otherwise, <c>false</c>.</returns>
+        /// <remarks>
+        /// The output value is not semantically meaningful when this method returns <c>false</c>.
+        /// The returned boolean owns success/failure state.
+        /// </remarks>
         public bool TryGetContract(
             StableDataId stableId,
             out AtlasContract contract)
@@ -256,19 +278,24 @@ namespace Lokrain.Atlas.Contracts
                 return true;
             }
 
-            contract = AtlasContract.Empty;
+            contract = default;
             return false;
         }
 
         /// <summary>
-        /// Attempts to resolve a typed Field declaration to its Contract.
+        /// Attempts to resolve a typed field declaration to its contract.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
         /// <param name="contract">
-        /// The resolved Contract when the typed Field is present; otherwise, <see cref="AtlasContract.Empty"/>.
+        /// The resolved contract when this method returns <c>true</c>; otherwise, the default
+        /// contract payload.
         /// </param>
-        /// <returns><c>true</c> when the Contract was resolved; otherwise, <c>false</c>.</returns>
+        /// <returns><c>true</c> when the contract was resolved; otherwise, <c>false</c>.</returns>
+        /// <remarks>
+        /// The output value is not semantically meaningful when this method returns <c>false</c>.
+        /// The returned boolean owns success/failure state.
+        /// </remarks>
         public bool TryGetContract<TField, TElement>(out AtlasContract contract)
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -277,12 +304,12 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Resolves a stable Field identifier to its Contract.
+        /// Resolves a stable field identifier to its contract.
         /// </summary>
-        /// <param name="stableId">Stable Field identifier to resolve.</param>
-        /// <returns>The Contract assigned to <paramref name="stableId"/>.</returns>
+        /// <param name="stableId">The stable field identifier to resolve. Zero/default is valid.</param>
+        /// <returns>The contract assigned to <paramref name="stableId"/>.</returns>
         /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="stableId"/> is invalid or not present in this table.
+        /// Thrown when <paramref name="stableId"/> is not present in this table.
         /// </exception>
         public AtlasContract GetRequiredContract(StableDataId stableId)
         {
@@ -290,13 +317,13 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Resolves a typed Field declaration to its Contract.
+        /// Resolves a typed field declaration to its contract.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>The Contract assigned to the typed Field.</returns>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
+        /// <returns>The contract assigned to the typed field.</returns>
         /// <exception cref="ArgumentException">
-        /// Thrown when the typed Field is not present in this table.
+        /// Thrown when the typed field is not present in this table.
         /// </exception>
         public AtlasContract GetRequiredContract<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -306,13 +333,13 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a resolved typed handle for a Field declaration contained in this table.
+        /// Creates a resolved typed handle for a field declaration contained in this table.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>A resolved Field handle containing stable identity and canonical slot.</returns>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
+        /// <returns>A resolved field handle containing stable identity and canonical slot.</returns>
         /// <exception cref="ArgumentException">
-        /// Thrown when the typed Field is not present in this table or its storage format is incompatible.
+        /// Thrown when the typed field is not present in this table or its storage format is incompatible.
         /// </exception>
         public AtlasFieldHandle<TField, TElement> GetHandle<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -326,9 +353,9 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Copies Contracts from this table into a caller-provided destination array.
+        /// Copies contracts from this table into a caller-provided destination array.
         /// </summary>
-        /// <param name="destination">Destination array that receives Contracts in canonical order.</param>
+        /// <param name="destination">Destination array that receives contracts in canonical order.</param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="destination"/> is <c>null</c>.
         /// </exception>
@@ -345,7 +372,7 @@ namespace Lokrain.Atlas.Contracts
             if (destination.Length < _contracts.Length)
             {
                 throw new ArgumentException(
-                    $"Destination array length '{destination.Length}' is smaller than Contract count '{_contracts.Length}'.",
+                    $"Destination array length '{destination.Length}' is smaller than contract count '{_contracts.Length}'.",
                     nameof(destination));
             }
 
@@ -353,12 +380,12 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Copies a Contract range into a caller-provided destination array.
+        /// Copies a contract range into a caller-provided destination array.
         /// </summary>
-        /// <param name="sourceIndex">First source index in this table.</param>
-        /// <param name="destination">Destination array.</param>
-        /// <param name="destinationIndex">First destination index.</param>
-        /// <param name="length">Number of Contracts to copy.</param>
+        /// <param name="sourceIndex">The first source index in this table.</param>
+        /// <param name="destination">The destination array.</param>
+        /// <param name="destinationIndex">The first destination index.</param>
+        /// <param name="length">The number of contracts to copy.</param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="destination"/> is <c>null</c>.
         /// </exception>
@@ -381,23 +408,32 @@ namespace Lokrain.Atlas.Contracts
 
             if (sourceIndex < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(sourceIndex), sourceIndex, "Source index must be non-negative.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(sourceIndex),
+                    sourceIndex,
+                    "Source index must be non-negative.");
             }
 
             if (destinationIndex < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(destinationIndex), destinationIndex, "Destination index must be non-negative.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(destinationIndex),
+                    destinationIndex,
+                    "Destination index must be non-negative.");
             }
 
             if (length < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(length), length, "Length must be non-negative.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(length),
+                    length,
+                    "Length must be non-negative.");
             }
 
             if (sourceIndex + length > _contracts.Length)
             {
                 throw new ArgumentException(
-                    "Source range exceeds Contract table bounds.",
+                    "Source range exceeds contract table bounds.",
                     nameof(length));
             }
 
@@ -412,9 +448,9 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a managed copy of this table's Contracts.
+        /// Creates a managed copy of this table's contracts.
         /// </summary>
-        /// <returns>A new Contract array in canonical table order.</returns>
+        /// <returns>A new contract array in canonical table order.</returns>
         /// <remarks>
         /// The returned array may be modified by the caller without affecting this table.
         /// </remarks>
@@ -426,9 +462,9 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets a managed enumerator over Contracts in canonical table order.
+        /// Gets a managed enumerator over contracts in canonical table order.
         /// </summary>
-        /// <returns>An enumerator over Contracts.</returns>
+        /// <returns>An enumerator over contracts.</returns>
         public IEnumerator<AtlasContract> GetEnumerator()
         {
             for (var i = 0; i < _contracts.Length; i++)
@@ -438,18 +474,18 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets a managed enumerator over Contracts in canonical table order.
+        /// Gets a managed enumerator over contracts in canonical table order.
         /// </summary>
-        /// <returns>An enumerator over Contracts.</returns>
+        /// <returns>An enumerator over contracts.</returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
         }
 
         /// <summary>
-        /// Returns a diagnostic representation of this Contract table.
+        /// Returns a diagnostic representation of this contract table.
         /// </summary>
-        /// <returns>A string containing the table name and Contract count.</returns>
+        /// <returns>A string containing the table name and contract count.</returns>
         public override string ToString()
         {
             return $"AtlasContractTable(Name={GetDiagnosticName()}, Count={Count})";
@@ -465,7 +501,7 @@ namespace Lokrain.Atlas.Contracts
             if (contracts.Length > AtlasConstants.MaxFieldSlots)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract table contains '{contracts.Length}' Contracts, but the maximum supported count is '{AtlasConstants.MaxFieldSlots}'.",
+                    $"Atlas contract table contains '{contracts.Length}' contracts, but the maximum supported count is '{AtlasConstants.MaxFieldSlots}'.",
                     nameof(contracts));
             }
 
@@ -508,7 +544,7 @@ namespace Lokrain.Atlas.Contracts
             AtlasContract contract,
             int index)
         {
-            if (!contract.Slot.IsValid)
+            if (!contract.HasAssignedSlot)
             {
                 return;
             }
@@ -519,7 +555,7 @@ namespace Lokrain.Atlas.Contracts
             }
 
             throw new ArgumentException(
-                $"Atlas Contract '{contract.DebugName}' declares slot '{contract.Slot}', but its table index is '{index}'. " +
+                $"Atlas contract '{contract.DebugName}' declares slot '{contract.Slot}', but its table index is '{index}'. " +
                 "Contract-table order is the canonical source of slots.");
         }
 
@@ -537,7 +573,7 @@ namespace Lokrain.Atlas.Contracts
                 }
 
                 throw new ArgumentException(
-                    $"Atlas Contract table contains duplicate stable id '{contract.StableId}' at slot '{contract.Slot}'.");
+                    $"Atlas contract table contains duplicate stable id '{contract.StableId}' at slot '{contract.Slot}'.");
             }
         }
 
@@ -557,10 +593,10 @@ namespace Lokrain.Atlas.Contracts
                     }
 
                     throw new ArgumentException(
-                        $"Atlas Contract table contains multiple versions of durable identity '{left.StableId.High:X16}-{left.StableId.Low:X16}'. " +
-                        $"First Contract is '{left.DebugName}' with version '{left.StableId.Version}', " +
-                        $"second Contract is '{right.DebugName}' with version '{right.StableId.Version}'. " +
-                        "A single Contract table must select exactly one version of each durable Field identity.");
+                        $"Atlas contract table contains multiple versions of durable identity '{left.StableId.High:X16}-{left.StableId.Low:X16}'. " +
+                        $"First contract is '{left.DebugName}' with version '{left.StableId.Version}', " +
+                        $"second contract is '{right.DebugName}' with version '{right.StableId.Version}'. " +
+                        "A single contract table must select exactly one version of each durable field identity.");
                 }
             }
         }
@@ -579,7 +615,7 @@ namespace Lokrain.Atlas.Contracts
                 }
 
                 throw new ArgumentException(
-                    $"Atlas Contract table contains duplicate debug name '{contract.DebugName}' at slot '{contract.Slot}'. " +
+                    $"Atlas contract table contains duplicate debug name '{contract.DebugName}' at slot '{contract.Slot}'. " +
                     "Debug names are not durable identity, but table-local duplicates make diagnostics ambiguous.");
             }
         }
@@ -602,7 +638,7 @@ namespace Lokrain.Atlas.Contracts
                 }
 
                 throw new ArgumentException(
-                    $"Atlas Contract '{contract.DebugName}' has a Field-relative length shape that references itself. Shape={shape}.");
+                    $"Atlas contract '{contract.DebugName}' has a field-relative length shape that references itself. Shape={shape}.");
             }
         }
 
@@ -627,8 +663,8 @@ namespace Lokrain.Atlas.Contracts
                 }
 
                 throw new ArgumentException(
-                    $"Atlas Contract '{contract.DebugName}' depends on source Field id '{shape.SourceFieldId}', " +
-                    "but that Field is not present in the same Contract table.");
+                    $"Atlas contract '{contract.DebugName}' depends on source field id '{shape.SourceFieldId}', " +
+                    "but that field is not present in the same contract table.");
             }
         }
 
@@ -642,7 +678,7 @@ namespace Lokrain.Atlas.Contracts
                     if (!SourceCanProvideLength(source))
                     {
                         throw new ArgumentException(
-                            $"Atlas Contract '{target.DebugName}' matches the length of source Field '{source.DebugName}', " +
+                            $"Atlas contract '{target.DebugName}' matches the length of source field '{source.DebugName}', " +
                             $"but source storage kind '{source.StorageFormat.Kind}' does not provide a stable resolvable length.");
                     }
 
@@ -652,7 +688,7 @@ namespace Lokrain.Atlas.Contracts
                     if (!SourceCanProvideLengthOrCapacity(source))
                     {
                         throw new ArgumentException(
-                            $"Atlas Contract '{target.DebugName}' derives capacity from source Field '{source.DebugName}', " +
+                            $"Atlas contract '{target.DebugName}' derives capacity from source field '{source.DebugName}', " +
                             $"but source storage kind '{source.StorageFormat.Kind}' does not provide length or capacity.");
                     }
 
@@ -662,7 +698,7 @@ namespace Lokrain.Atlas.Contracts
                     if (!SourceCanProvidePrefixMetadata(source))
                     {
                         throw new ArgumentException(
-                            $"Atlas Contract '{target.DebugName}' derives prefix-sum payload length from source Field '{source.DebugName}', " +
+                            $"Atlas contract '{target.DebugName}' derives prefix-sum payload length from source field '{source.DebugName}', " +
                             $"but source storage kind '{source.StorageFormat.Kind}' is not valid prefix metadata storage.");
                     }
 

@@ -1,4 +1,21 @@
 // Runtime/Fields/AtlasFieldSlot.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Fields
+//
+// Purpose
+// - Represent zero-based contract-table slots.
+// - Keep slot zero and every ushort slot payload valid.
+// - Avoid invalid slot sentinels.
+// - Force missing/unresolved state to be represented explicitly by the containing type.
+//
+// Design notes
+// - default(AtlasFieldSlot) is valid and represents slot zero.
+// - AtlasFieldSlot.Invalid is retained only as a source-compatibility alias for default.
+// - AtlasFieldSlot.Invalid is not invalid and must not be used as a sentinel.
+// - A slot is table-local compiled metadata, not durable field identity.
+// - Durable identity belongs to StableDataId or the production field catalog.
+// - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
 using System.Globalization;
@@ -9,22 +26,18 @@ using Lokrain.Atlas.Core;
 namespace Lokrain.Atlas.Fields
 {
     /// <summary>
-    /// Represents the canonical table slot assigned to an Atlas Field Contract.
+    /// Represents the canonical zero-based table slot assigned to an Atlas field contract.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Slots are table-local indexes. They are not stable identity and must not be serialized
-    /// as durable Field references. Use <see cref="StableDataId"/> for durable identity.
+    /// A field slot is a table-local index produced by contract-table construction. It is not a
+    /// durable field identity and must not be serialized as a stable external reference.
     /// </para>
     ///
     /// <para>
-    /// The default value of <see cref="AtlasFieldSlot"/> is invalid. This is intentional:
-    /// unresolved slots should fail validation instead of accidentally resolving to slot zero.
-    /// </para>
-    ///
-    /// <para>
-    /// Valid slots are zero-based and are suitable for direct indexing into Contract and
-    /// runtime storage arrays after validation.
+    /// The default value is valid and represents slot zero. This type intentionally has no invalid
+    /// bit pattern. Optional, missing, or unresolved state must be represented by an explicit
+    /// boolean/presence field on the containing type.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
@@ -32,115 +45,106 @@ namespace Lokrain.Atlas.Fields
         IEquatable<AtlasFieldSlot>,
         IComparable<AtlasFieldSlot>
     {
-        private const ushort InvalidEncodedValue = 0;
+        private const int HashSeed = 17;
+        private const int HashMultiplier = 397;
 
         /// <summary>
-        /// Represents an unresolved, missing, or invalid Field slot.
+        /// Legacy alias for the default slot.
         /// </summary>
+        /// <remarks>
+        /// This value is slot zero. It is valid. It is not an invalid sentinel. The member is kept
+        /// only for source compatibility with older code.
+        /// </remarks>
         public static readonly AtlasFieldSlot Invalid = default;
 
-        private readonly ushort _encodedValue;
-
-        private AtlasFieldSlot(ushort encodedValue, bool _)
-        {
-            _encodedValue = encodedValue;
-        }
+        /// <summary>
+        /// The first valid field slot index.
+        /// </summary>
+        public static readonly AtlasFieldSlot First = new AtlasFieldSlot((ushort)AtlasConstants.FirstFieldSlot);
 
         /// <summary>
-        /// Creates a valid Field slot from a zero-based table index.
+        /// The last valid field slot index.
         /// </summary>
-        /// <param name="value">Zero-based Contract-table slot.</param>
-        /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="value"/> is the reserved invalid slot sentinel.
-        /// </exception>
+        public static readonly AtlasFieldSlot Last = new AtlasFieldSlot((ushort)AtlasConstants.LastFieldSlot);
+
+        private readonly ushort _value;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AtlasFieldSlot"/> struct.
+        /// </summary>
+        /// <param name="value">The zero-based table slot value.</param>
+        /// <remarks>
+        /// Every <see cref="ushort"/> value is structurally valid, but package-level limits may be
+        /// narrower. Use <see cref="FromIndex"/> when validating user or compiler input.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public AtlasFieldSlot(ushort value)
         {
-            if (value == AtlasConstants.InvalidFieldSlot)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(value),
-                    value,
-                    "Field slot value is reserved for invalid slots.");
-            }
-
-            _encodedValue = Encode(value);
+            _value = value;
         }
 
         /// <summary>
-        /// Gets whether this slot is valid for Contract-table and storage-array indexing.
+        /// Gets whether this slot is structurally valid.
         /// </summary>
+        /// <remarks>
+        /// Every bit pattern is valid. This property is retained for source compatibility.
+        /// </remarks>
         public bool IsValid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _encodedValue != InvalidEncodedValue;
+            get => true;
         }
 
         /// <summary>
-        /// Gets whether this slot is unresolved, missing, or invalid.
+        /// Gets whether this slot is invalid.
         /// </summary>
+        /// <remarks>
+        /// <see cref="AtlasFieldSlot"/> has no invalid value. This property always returns
+        /// <c>false</c> and is retained only for source compatibility.
+        /// </remarks>
         public bool IsInvalid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _encodedValue == InvalidEncodedValue;
+            get => false;
         }
 
         /// <summary>
         /// Gets the zero-based slot value.
         /// </summary>
-        /// <remarks>
-        /// This property throws for invalid slots. Use <see cref="ValueOrInvalid"/> when a
-        /// non-throwing sentinel value is required for diagnostics or validation reports.
-        /// </remarks>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when this slot is invalid.
-        /// </exception>
         public ushort Value
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                ThrowIfInvalid();
-                return Decode(_encodedValue);
-            }
+            get => _value;
         }
 
         /// <summary>
         /// Gets the zero-based slot value as an array index.
         /// </summary>
-        /// <remarks>
-        /// This property is equivalent to <see cref="Value"/> but returns <see cref="int"/> for
-        /// APIs that index managed arrays, native arrays, and validation collections.
-        /// </remarks>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when this slot is invalid.
-        /// </exception>
         public int Index
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Value;
+            get => _value;
         }
 
         /// <summary>
-        /// Gets the zero-based slot value or the reserved invalid slot sentinel.
+        /// Legacy alias for <see cref="Value"/>.
         /// </summary>
         /// <remarks>
-        /// This property does not throw. It is intended for diagnostics, validation reports,
-        /// and serialization of transient validation state. It must not be used as durable
-        /// Field identity.
+        /// There is no invalid slot payload. This member is retained only for source compatibility.
         /// </remarks>
         public ushort ValueOrInvalid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsValid ? Decode(_encodedValue) : AtlasConstants.InvalidFieldSlot;
+            get => _value;
         }
 
         /// <summary>
-        /// Creates a valid Field slot from a zero-based table index.
+        /// Creates a field slot from a zero-based table index.
         /// </summary>
-        /// <param name="index">Zero-based Contract-table slot.</param>
-        /// <returns>A valid Field slot for the supplied index.</returns>
+        /// <param name="index">The zero-based slot index.</param>
+        /// <returns>A field slot representing <paramref name="index"/>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="index"/> is outside the valid Atlas slot range.
+        /// Thrown when <paramref name="index"/> falls outside the supported field-slot range.
         /// </exception>
         public static AtlasFieldSlot FromIndex(int index)
         {
@@ -150,27 +154,37 @@ namespace Lokrain.Atlas.Fields
                 throw new ArgumentOutOfRangeException(
                     nameof(index),
                     index,
-                    $"Field slot index must be between {AtlasConstants.FirstFieldSlot} and {AtlasConstants.LastFieldSlot}.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Field slot index must be between {0} and {1}.",
+                        AtlasConstants.FirstFieldSlot,
+                        AtlasConstants.LastFieldSlot));
             }
 
             return new AtlasFieldSlot((ushort)index);
         }
 
         /// <summary>
-        /// Attempts to create a valid Field slot from a zero-based table index.
+        /// Attempts to create a field slot from a zero-based table index.
         /// </summary>
-        /// <param name="index">Zero-based Contract-table slot.</param>
+        /// <param name="index">The zero-based slot index.</param>
         /// <param name="slot">
-        /// The created slot when <paramref name="index"/> is valid; otherwise,
-        /// <see cref="Invalid"/>.
+        /// The created slot when this method returns <c>true</c>; otherwise, the default slot.
         /// </param>
-        /// <returns><c>true</c> when the index is valid; otherwise, <c>false</c>.</returns>
+        /// <returns>
+        /// <c>true</c> when <paramref name="index"/> is within the supported slot range; otherwise,
+        /// <c>false</c>.
+        /// </returns>
+        /// <remarks>
+        /// The output value is not semantically meaningful when this method returns <c>false</c>.
+        /// The returned boolean owns success/failure state.
+        /// </remarks>
         public static bool TryFromIndex(int index, out AtlasFieldSlot slot)
         {
             if (index < AtlasConstants.FirstFieldSlot ||
                 index > AtlasConstants.LastFieldSlot)
             {
-                slot = Invalid;
+                slot = default;
                 return false;
             }
 
@@ -179,92 +193,89 @@ namespace Lokrain.Atlas.Fields
         }
 
         /// <summary>
-        /// Throws when this slot is invalid.
+        /// Validates this slot.
         /// </summary>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when this slot is invalid.
-        /// </exception>
+        /// <remarks>
+        /// This method intentionally performs no checks because every bit pattern is valid. It is
+        /// retained for compatibility with older validation call sites.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void ThrowIfInvalid()
         {
-            if (IsValid)
-            {
-                return;
-            }
-
-            throw new InvalidOperationException("Atlas Field slot is invalid.");
         }
 
         /// <summary>
-        /// Determines whether this slot is equal to another slot.
+        /// Validates this slot.
         /// </summary>
-        /// <param name="other">The slot to compare with this slot.</param>
-        /// <returns>
-        /// <c>true</c> when both slots have the same validity state and value; otherwise,
-        /// <c>false</c>.
-        /// </returns>
+        /// <param name="parameterName">Optional caller parameter name retained for compatibility.</param>
+        /// <remarks>
+        /// This method intentionally performs no checks because every bit pattern is valid.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ValidateOrThrow(string parameterName = null)
+        {
+            _ = parameterName;
+        }
+
+        /// <summary>
+        /// Determines whether this slot equals another slot.
+        /// </summary>
+        /// <param name="other">The slot to compare against.</param>
+        /// <returns><c>true</c> when both slots contain the same slot value; otherwise, <c>false</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(AtlasFieldSlot other)
         {
-            return _encodedValue == other._encodedValue;
+            return _value == other._value;
         }
 
         /// <summary>
-        /// Determines whether this slot is equal to an object instance.
+        /// Determines whether this slot equals another object.
         /// </summary>
-        /// <param name="obj">The object to compare with this slot.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="obj"/> is an <see cref="AtlasFieldSlot"/> with
-        /// the same validity state and value.
-        /// </returns>
+        /// <param name="obj">The object to compare against.</param>
+        /// <returns><c>true</c> when <paramref name="obj"/> is an equal slot; otherwise, <c>false</c>.</returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasFieldSlot other && Equals(other);
         }
 
         /// <summary>
-        /// Returns a hash code suitable for managed hash containers.
+        /// Returns a deterministic hash code for this slot.
         /// </summary>
-        /// <returns>A managed hash code for this slot.</returns>
+        /// <returns>A deterministic 32-bit hash code.</returns>
         public override int GetHashCode()
         {
-            return _encodedValue.GetHashCode();
+            unchecked
+            {
+                return (HashSeed * HashMultiplier) ^ _value;
+            }
         }
 
         /// <summary>
-        /// Compares slots by canonical table order.
+        /// Compares this slot with another slot.
         /// </summary>
-        /// <remarks>
-        /// Valid slots sort before invalid slots. Among valid slots, comparison is by numeric
-        /// zero-based slot value.
-        /// </remarks>
-        /// <param name="other">The slot to compare with this slot.</param>
+        /// <param name="other">The slot to compare against.</param>
         /// <returns>
-        /// A negative value when this slot sorts before <paramref name="other"/>, zero when
-        /// both slots are equal, and a positive value when this slot sorts after it.
+        /// A negative value when this slot sorts before <paramref name="other"/>, zero when equal,
+        /// or a positive value when this slot sorts after <paramref name="other"/>.
         /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int CompareTo(AtlasFieldSlot other)
         {
-            return ValueOrInvalid.CompareTo(other.ValueOrInvalid);
+            return _value.CompareTo(other._value);
         }
 
         /// <summary>
-        /// Returns a culture-invariant diagnostic representation of this slot.
+        /// Returns an invariant diagnostic representation of this slot.
         /// </summary>
-        /// <returns>
-        /// The zero-based slot value for valid slots; otherwise, the string <c>Invalid</c>.
-        /// </returns>
+        /// <returns>The zero-based slot value.</returns>
         public override string ToString()
         {
-            return IsValid
-                ? Value.ToString(CultureInfo.InvariantCulture)
-                : "Invalid";
+            return _value.ToString(CultureInfo.InvariantCulture);
         }
 
         /// <summary>
         /// Determines whether two slots are equal.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns><c>true</c> when both slots have the same validity state and value.</returns>
         public static bool operator ==(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return left.Equals(right);
@@ -273,9 +284,6 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// Determines whether two slots are not equal.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns><c>true</c> when the slots differ by validity state or value.</returns>
         public static bool operator !=(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return !left.Equals(right);
@@ -284,9 +292,6 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// Determines whether the left slot sorts before the right slot.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns><c>true</c> when <paramref name="left"/> sorts before <paramref name="right"/>.</returns>
         public static bool operator <(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return left.CompareTo(right) < 0;
@@ -295,9 +300,6 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// Determines whether the left slot sorts after the right slot.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns><c>true</c> when <paramref name="left"/> sorts after <paramref name="right"/>.</returns>
         public static bool operator >(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return left.CompareTo(right) > 0;
@@ -306,12 +308,6 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// Determines whether the left slot sorts before or equal to the right slot.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="left"/> sorts before or is equal to
-        /// <paramref name="right"/>.
-        /// </returns>
         public static bool operator <=(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return left.CompareTo(right) <= 0;
@@ -320,27 +316,9 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// Determines whether the left slot sorts after or equal to the right slot.
         /// </summary>
-        /// <param name="left">The first slot.</param>
-        /// <param name="right">The second slot.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="left"/> sorts after or is equal to
-        /// <paramref name="right"/>.
-        /// </returns>
         public static bool operator >=(AtlasFieldSlot left, AtlasFieldSlot right)
         {
             return left.CompareTo(right) >= 0;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static ushort Encode(ushort value)
-        {
-            return checked((ushort)(value + 1));
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static ushort Decode(ushort encodedValue)
-        {
-            return checked((ushort)(encodedValue - 1));
         }
     }
 }

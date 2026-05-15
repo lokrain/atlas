@@ -1,6 +1,30 @@
 // Runtime/Contracts/AtlasContract.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Contracts
+//
+// Purpose
+// - Represent one immutable field-contract row in an Atlas contract table.
+// - Preserve zero-valid StableDataId and AtlasFieldSlot semantics.
+// - Represent assigned/unassigned slot state explicitly instead of reserving an invalid slot.
+// - Validate semantic field-contract metadata at construction/table boundaries.
+// - Keep contract metadata allocation-free, deterministic, and suitable for compiled runtime metadata.
+//
+// Design notes
+// - default(AtlasContract) is a valid value object, but it is not a valid concrete field contract.
+// - StableDataId default/zero is valid.
+// - AtlasFieldSlot default/zero is valid and represents slot zero.
+// - Slot assignment is represented by HasAssignedSlot.
+// - Do not infer slot assignment from Slot == default.
+// - Empty and Invalid are compatibility aliases for default; they are not invalid sentinels.
+// - Missing lookup results must be represented by a bool-returning API, not by returning default.
+// - This type describes schema metadata only. It does not own storage.
+// - Jobs should not consume AtlasContract directly in hot loops. Jobs should receive compiled
+//   addresses, typed slices/views, or resolved native containers.
+// - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Lokrain.Atlas.Core;
@@ -10,106 +34,172 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Contracts
 {
     /// <summary>
-    /// Describes one Field contract row in an Atlas Contract table.
+    /// Describes one immutable field-contract row in an Atlas contract table.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A Contract is schema metadata. It defines stable identity, semantic role, storage format,
-    /// ownership, lifetime, length shape, Field flags, hash participation, and diagnostic name
-    /// for one Atlas Field.
+    /// A contract is schema metadata. It defines the stable identity, semantic role, storage format,
+    /// ownership policy, lifetime policy, length shape, field flags, hash participation, and
+    /// diagnostic name for one Atlas field.
     /// </para>
     ///
     /// <para>
-    /// Contracts do not own memory. Runtime storage is allocated from a validated Contract table,
-    /// then jobs receive already-resolved native containers.
+    /// A contract does not own memory. Runtime storage is allocated later from validated contract
+    /// tables, compiled plans, and workspace layout decisions. Jobs must receive already-resolved
+    /// native containers, typed slices/views, or compiled memory addresses instead of resolving
+    /// contracts by field identity.
     /// </para>
     ///
     /// <para>
-    /// The Contract slot is table-local. An unslotted Contract may be created from a Field
-    /// declaration and later assigned a canonical slot by <see cref="AtlasContractTable"/>.
+    /// The slot is table-local execution metadata. It is not durable field identity. Slot zero is a
+    /// valid slot, so assigned/unassigned slot state is represented explicitly by
+    /// <see cref="HasAssignedSlot"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// The default value is safe to store and compare. It is not an invalid bit pattern. It simply
+    /// does not describe a meaningful concrete field contract until semantic metadata is supplied.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct AtlasContract :
         IEquatable<AtlasContract>
     {
+        private const int HashSeed = 17;
+        private const int HashMultiplier = 397;
+
+        private const byte SlotUnassigned = 0;
+        private const byte SlotAssigned = 1;
+
         /// <summary>
-        /// Reserved invalid Contract.
+        /// Compatibility alias for the default contract value.
         /// </summary>
+        /// <remarks>
+        /// This value is not an invalid sentinel. It is retained only for source compatibility with
+        /// older code that used <c>Empty</c> as a missing lookup payload. Missing lookup state must
+        /// be represented by a boolean return value.
+        /// </remarks>
         public static readonly AtlasContract Empty = default;
 
         /// <summary>
-        /// Durable, versioned Field identity.
+        /// Compatibility alias for the default contract value.
         /// </summary>
+        /// <remarks>
+        /// This value is not an invalid sentinel. It is retained only for source compatibility with
+        /// older code. Do not use this value to represent absence.
+        /// </remarks>
+        public static readonly AtlasContract Invalid = default;
+
+        private readonly byte _slotPresence;
+
+        /// <summary>
+        /// Gets the durable, versioned field identity.
+        /// </summary>
+        /// <remarks>
+        /// Zero/default is valid and must not be interpreted as missing or invalid.
+        /// </remarks>
         public readonly StableDataId StableId;
 
         /// <summary>
-        /// Canonical table-local Field slot.
+        /// Gets the table-local field slot.
         /// </summary>
         /// <remarks>
-        /// The slot may be invalid before a Contract is placed into a Contract table.
+        /// Slot zero/default is valid. Use <see cref="HasAssignedSlot"/> to determine whether this
+        /// slot is assigned.
         /// </remarks>
         public readonly AtlasFieldSlot Slot;
 
         /// <summary>
-        /// Semantic role of the Field in the generated-world contract.
+        /// Gets the semantic role of the field in the generated-world contract.
         /// </summary>
         public readonly AtlasFieldRole Role;
 
         /// <summary>
-        /// Physical unmanaged storage format required by the Field.
+        /// Gets the physical unmanaged storage format required by the field.
         /// </summary>
         public readonly StorageFormat StorageFormat;
 
         /// <summary>
-        /// Allocation and disposal ownership policy for the Field storage.
+        /// Gets the allocation and disposal ownership policy for the field storage.
         /// </summary>
         public readonly OwnershipPolicy Ownership;
 
         /// <summary>
-        /// Validity interval policy for the Field storage.
+        /// Gets the validity interval policy for the field storage.
         /// </summary>
         public readonly LifetimePolicy Lifetime;
 
         /// <summary>
-        /// Rule used to resolve Field length or capacity before scheduling.
+        /// Gets the rule used to resolve field length or capacity before scheduling.
         /// </summary>
         public readonly LengthShape LengthShape;
 
         /// <summary>
-        /// Durable behavior flags for the Field.
+        /// Gets durable field behavior flags.
         /// </summary>
         public readonly AtlasFieldFlags Flags;
 
         /// <summary>
-        /// Hash participation policy for Contract, shape, compatibility, and content hashes.
+        /// Gets the hash participation policy for contract, shape, compatibility, and content hashes.
         /// </summary>
         public readonly HashParticipation HashParticipation;
 
         /// <summary>
-        /// Stable diagnostic name used by validation, tooling, exceptions, and tests.
+        /// Gets the stable diagnostic name used by validation, tooling, exceptions, and tests.
         /// </summary>
         /// <remarks>
-        /// Debug names are not durable identity. Use <see cref="StableId"/> for identity.
+        /// Debug names are not durable identity. Use <see cref="StableId"/> for durable identity.
         /// </remarks>
         public readonly FixedString64Bytes DebugName;
 
         /// <summary>
-        /// Creates an Atlas Contract from explicit schema fields.
+        /// Initializes a new slotted contract from explicit schema metadata.
         /// </summary>
-        /// <param name="stableId">Durable, versioned Field identity.</param>
-        /// <param name="slot">Table-local Field slot. May be invalid before table assignment.</param>
-        /// <param name="role">Semantic role of the Field.</param>
-        /// <param name="storageFormat">Physical unmanaged storage format.</param>
-        /// <param name="ownership">Allocation and disposal ownership policy.</param>
-        /// <param name="lifetime">Storage validity interval policy.</param>
-        /// <param name="lengthShape">Rule used to resolve length or capacity.</param>
-        /// <param name="flags">Durable Field behavior flags.</param>
-        /// <param name="hashParticipation">Hash participation policy.</param>
-        /// <param name="debugName">Stable diagnostic name.</param>
+        /// <param name="stableId">The durable field identity. Zero/default is valid.</param>
+        /// <param name="slot">The assigned table-local field slot. Slot zero/default is valid.</param>
+        /// <param name="role">The semantic field role.</param>
+        /// <param name="storageFormat">The physical unmanaged storage format.</param>
+        /// <param name="ownership">The allocation and disposal ownership policy.</param>
+        /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
+        /// <param name="flags">Durable field behavior flags.</param>
+        /// <param name="hashParticipation">The hash participation policy.</param>
+        /// <param name="debugName">The stable diagnostic field name.</param>
+        /// <remarks>
+        /// This constructor creates a contract with an assigned slot. Use <see cref="Unslotted"/>
+        /// or <see cref="Of{TField,TElement}"/> when constructing declarations before table
+        /// insertion.
+        /// </remarks>
         public AtlasContract(
             StableDataId stableId,
             AtlasFieldSlot slot,
+            AtlasFieldRole role,
+            StorageFormat storageFormat,
+            OwnershipPolicy ownership,
+            LifetimePolicy lifetime,
+            LengthShape lengthShape,
+            AtlasFieldFlags flags,
+            HashParticipation hashParticipation,
+            FixedString64Bytes debugName)
+            : this(
+                stableId,
+                slot,
+                hasAssignedSlot: true,
+                role,
+                storageFormat,
+                ownership,
+                lifetime,
+                lengthShape,
+                flags,
+                hashParticipation,
+                debugName)
+        {
+        }
+
+        private AtlasContract(
+            StableDataId stableId,
+            AtlasFieldSlot slot,
+            bool hasAssignedSlot,
             AtlasFieldRole role,
             StorageFormat storageFormat,
             OwnershipPolicy ownership,
@@ -129,20 +219,21 @@ namespace Lokrain.Atlas.Contracts
             Flags = flags;
             HashParticipation = hashParticipation;
             DebugName = debugName;
+            _slotPresence = hasAssignedSlot ? SlotAssigned : SlotUnassigned;
         }
 
         /// <summary>
-        /// Gets whether this Contract has valid Field identity, semantic role, and storage contract.
+        /// Gets whether this value has meaningful concrete field-contract schema metadata.
         /// </summary>
         /// <remarks>
-        /// This property does not require a valid slot. Unslotted Contracts are valid before
-        /// Contract-table construction assigns canonical slots.
+        /// This does not require an assigned table slot. Unslotted contracts are expected before
+        /// contract-table construction. This property is semantic validation shorthand, not a
+        /// bit-pattern validity check.
         /// </remarks>
         public bool IsValid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => StableId.IsValid &&
-                   Role != AtlasFieldRole.None &&
+            get => Role != AtlasFieldRole.None &&
                    StorageFormat.IsValid &&
                    Ownership != OwnershipPolicy.None &&
                    Lifetime != LifetimePolicy.None &&
@@ -151,34 +242,108 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Gets whether this Contract has been assigned a canonical table slot.
+        /// Gets whether this value is structurally invalid.
+        /// </summary>
+        /// <remarks>
+        /// No bit pattern is structurally invalid. This property is retained for source
+        /// compatibility and always returns <c>false</c>.
+        /// </remarks>
+        public bool IsInvalid
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => false;
+        }
+
+        /// <summary>
+        /// Gets whether this contract has an assigned canonical table-local field slot.
+        /// </summary>
+        public bool HasAssignedSlot
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _slotPresence == SlotAssigned;
+        }
+
+        /// <summary>
+        /// Gets whether this contract has no assigned canonical table-local field slot.
+        /// </summary>
+        public bool IsUnslotted
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _slotPresence != SlotAssigned;
+        }
+
+        /// <summary>
+        /// Legacy alias for <see cref="HasAssignedSlot"/>.
         /// </summary>
         public bool IsSlotted
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Slot.IsValid;
+            get => HasAssignedSlot;
         }
 
         /// <summary>
-        /// Gets whether this Contract is valid and has a canonical table slot.
+        /// Gets whether this contract has meaningful schema metadata and an assigned table slot.
         /// </summary>
         public bool IsTableReady
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsValid && IsSlotted;
+            get => IsValid && HasAssignedSlot;
         }
 
         /// <summary>
-        /// Creates an unslotted Contract from a typed Atlas Field declaration.
+        /// Creates an unslotted contract from explicit schema metadata.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged element type stored by the Field.</typeparam>
-        /// <returns>
-        /// An unslotted Contract whose metadata is read from <c>default(TField)</c>.
-        /// </returns>
-        /// <exception cref="AtlasException">
-        /// Thrown when the Field declaration is invalid.
-        /// </exception>
+        /// <param name="stableId">The durable field identity. Zero/default is valid.</param>
+        /// <param name="role">The semantic field role.</param>
+        /// <param name="storageFormat">The physical unmanaged storage format.</param>
+        /// <param name="ownership">The allocation and disposal ownership policy.</param>
+        /// <param name="lifetime">The storage lifetime policy.</param>
+        /// <param name="lengthShape">The rule used to resolve field length or capacity.</param>
+        /// <param name="flags">Durable field behavior flags.</param>
+        /// <param name="hashParticipation">The hash participation policy.</param>
+        /// <param name="debugName">The stable diagnostic field name.</param>
+        /// <returns>An unslotted contract.</returns>
+        /// <remarks>
+        /// The returned contract has no assigned slot. This is the correct state before insertion
+        /// into an <see cref="AtlasContractTable"/>.
+        /// </remarks>
+        public static AtlasContract Unslotted(
+            StableDataId stableId,
+            AtlasFieldRole role,
+            StorageFormat storageFormat,
+            OwnershipPolicy ownership,
+            LifetimePolicy lifetime,
+            LengthShape lengthShape,
+            AtlasFieldFlags flags,
+            HashParticipation hashParticipation,
+            FixedString64Bytes debugName)
+        {
+            return new AtlasContract(
+                stableId,
+                default,
+                hasAssignedSlot: false,
+                role,
+                storageFormat,
+                ownership,
+                lifetime,
+                lengthShape,
+                flags,
+                hashParticipation,
+                debugName);
+        }
+
+        /// <summary>
+        /// Creates an unslotted contract from a typed Atlas field declaration.
+        /// </summary>
+        /// <typeparam name="TField">The field declaration type.</typeparam>
+        /// <typeparam name="TElement">The unmanaged element type stored by the field.</typeparam>
+        /// <returns>An unslotted contract whose metadata is read from <c>default(TField)</c>.</returns>
+        /// <exception cref="AtlasException">Thrown when the field declaration is invalid.</exception>
+        /// <remarks>
+        /// Field declaration types are expected to expose metadata from their default value. This
+        /// method validates the declaration and then creates an unslotted schema row. Contract-table
+        /// construction assigns the final table-local slot.
+        /// </remarks>
         public static AtlasContract Of<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -189,7 +354,8 @@ namespace Lokrain.Atlas.Contracts
 
             return new AtlasContract(
                 stableId: field.StableId,
-                slot: AtlasFieldSlot.Invalid,
+                slot: default,
+                hasAssignedSlot: false,
                 role: field.Role,
                 storageFormat: StorageFormat.Create<TElement>(field.StorageKind),
                 ownership: field.Ownership,
@@ -201,20 +367,16 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a Contract copy with a canonical table slot.
+        /// Creates a copy of this contract with an assigned canonical table-local slot.
         /// </summary>
-        /// <param name="slot">Canonical table-local Field slot.</param>
-        /// <returns>A copy of this Contract with the supplied slot.</returns>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when <paramref name="slot"/> is invalid.
-        /// </exception>
+        /// <param name="slot">The assigned table-local field slot. Slot zero/default is valid.</param>
+        /// <returns>A copy of this contract with <see cref="HasAssignedSlot"/> set to <c>true</c>.</returns>
         public AtlasContract WithSlot(AtlasFieldSlot slot)
         {
-            slot.ThrowIfInvalid();
-
             return new AtlasContract(
                 StableId,
                 slot,
+                hasAssignedSlot: true,
                 Role,
                 StorageFormat,
                 Ownership,
@@ -226,12 +388,12 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Creates a Contract copy with a canonical table slot from a zero-based index.
+        /// Creates a copy of this contract with an assigned canonical table-local slot.
         /// </summary>
-        /// <param name="slotIndex">Zero-based Contract-table slot.</param>
-        /// <returns>A copy of this Contract with the supplied slot.</returns>
+        /// <param name="slotIndex">The zero-based contract-table slot index. Slot index zero is valid.</param>
+        /// <returns>A copy of this contract with the supplied assigned slot.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="slotIndex"/> is outside the valid Atlas slot range.
+        /// Thrown when <paramref name="slotIndex"/> falls outside the supported field-slot range.
         /// </exception>
         public AtlasContract WithSlot(int slotIndex)
         {
@@ -239,31 +401,62 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Throws when this Contract is invalid for Contract-table construction.
+        /// Creates a copy of this contract without an assigned table-local slot.
         /// </summary>
-        /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
+        /// <returns>A copy of this contract with <see cref="HasAssignedSlot"/> set to <c>false</c>.</returns>
+        public AtlasContract WithoutSlot()
+        {
+            return new AtlasContract(
+                StableId,
+                default,
+                hasAssignedSlot: false,
+                Role,
+                StorageFormat,
+                Ownership,
+                Lifetime,
+                LengthShape,
+                Flags,
+                HashParticipation,
+                DebugName);
+        }
+
+        /// <summary>
+        /// Returns the diagnostic name of this contract.
+        /// </summary>
+        /// <returns>The declared debug name when present; otherwise, an invariant fallback string.</returns>
+        public string GetDiagnosticName()
+        {
+            if (!DebugName.IsEmpty)
+            {
+                return DebugName.ToString();
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "StableId:{0}",
+                StableId);
+        }
+
+        /// <summary>
+        /// Validates semantic schema metadata for contract-table construction.
+        /// </summary>
+        /// <param name="parameterName">Optional caller parameter name used by thrown exceptions.</param>
         /// <exception cref="ArgumentException">
-        /// Thrown when the Contract is missing required schema metadata or declares an invalid policy combination.
+        /// Thrown when the contract is missing required schema metadata or declares an invalid policy combination.
         /// </exception>
         /// <remarks>
-        /// This validation does not require a slot. Contract tables assign canonical slots after
-        /// receiving ordered Contracts.
+        /// This validation does not require an assigned slot. Unslotted contracts are valid inputs
+        /// to contract-table construction.
         /// </remarks>
         public void ValidateOrThrow(string parameterName = null)
         {
             var name = parameterName ?? nameof(AtlasContract);
-
-            if (!StableId.IsValid)
-            {
-                throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' has an invalid stable id.",
-                    name);
-            }
+            var diagnosticName = GetDiagnosticName();
 
             if (Role == AtlasFieldRole.None)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' has no Field role.",
+                    $"Atlas contract '{diagnosticName}' declares no field role.",
                     name);
             }
 
@@ -273,57 +466,69 @@ namespace Lokrain.Atlas.Contracts
             if (Ownership == OwnershipPolicy.None)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' has no ownership policy.",
+                    $"Atlas contract '{diagnosticName}' declares no ownership policy.",
                     name);
             }
 
             if (Lifetime == LifetimePolicy.None)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' has no lifetime policy.",
+                    $"Atlas contract '{diagnosticName}' declares no lifetime policy.",
                     name);
             }
 
             if (DebugName.IsEmpty)
             {
                 throw new ArgumentException(
-                    "Atlas Contract has an empty debug name.",
+                    $"Atlas contract '{diagnosticName}' declares an empty debug name.",
                     name);
             }
 
-            ValidatePolicyCombinationOrThrow(name);
+            ValidatePolicyCombinationOrThrow(name, diagnosticName);
         }
 
         /// <summary>
-        /// Throws when this Contract is invalid for runtime table usage.
+        /// Validates semantic schema metadata and requires an assigned table slot.
         /// </summary>
-        /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
+        /// <param name="parameterName">Optional caller parameter name used by thrown exceptions.</param>
         /// <exception cref="ArgumentException">
-        /// Thrown when the Contract is invalid or has no canonical slot.
+        /// Thrown when the contract is semantically invalid or has no assigned table slot.
         /// </exception>
         public void ValidateTableReadyOrThrow(string parameterName = null)
         {
             ValidateOrThrow(parameterName);
 
-            if (Slot.IsValid)
+            if (HasAssignedSlot)
             {
                 return;
             }
 
             throw new ArgumentException(
-                $"Atlas Contract '{DebugName}' has no assigned table slot.",
+                $"Atlas contract '{GetDiagnosticName()}' has no assigned table slot.",
                 parameterName ?? nameof(AtlasContract));
         }
 
         /// <summary>
-        /// Determines whether this Contract is equal to another Contract.
+        /// Returns whether this contract has the same durable stable identity as another contract.
         /// </summary>
-        /// <param name="other">The Contract to compare with this Contract.</param>
-        /// <returns><c>true</c> when all Contract fields match; otherwise, <c>false</c>.</returns>
+        /// <param name="other">The contract to compare against.</param>
+        /// <returns><c>true</c> when stable identities match; otherwise, <c>false</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasSameStableIdAs(AtlasContract other)
+        {
+            return StableId == other.StableId;
+        }
+
+        /// <summary>
+        /// Determines whether this contract equals another contract.
+        /// </summary>
+        /// <param name="other">The contract to compare against.</param>
+        /// <returns><c>true</c> when all contract fields match; otherwise, <c>false</c>.</returns>
         public bool Equals(AtlasContract other)
         {
             return StableId == other.StableId &&
                    Slot == other.Slot &&
+                   _slotPresence == other._slotPresence &&
                    Role == other.Role &&
                    StorageFormat == other.StorageFormat &&
                    Ownership == other.Ownership &&
@@ -335,71 +540,75 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
-        /// Determines whether this Contract is equal to an object instance.
+        /// Determines whether this contract equals another object.
         /// </summary>
-        /// <param name="obj">The object to compare with this Contract.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="obj"/> is an <see cref="AtlasContract"/> with matching fields.
-        /// </returns>
+        /// <param name="obj">The object to compare against.</param>
+        /// <returns><c>true</c> when <paramref name="obj"/> is an equal contract; otherwise, <c>false</c>.</returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasContract other && Equals(other);
         }
 
         /// <summary>
-        /// Returns a hash code suitable for managed hash containers.
+        /// Returns a deterministic hash code for this contract.
         /// </summary>
-        /// <returns>A managed hash code for this Contract.</returns>
+        /// <returns>A deterministic 32-bit hash code.</returns>
+        /// <remarks>
+        /// This intentionally avoids <see cref="HashCode"/> so metadata hashing does not depend on
+        /// runtime implementation details.
+        /// </remarks>
         public override int GetHashCode()
         {
             unchecked
             {
-                var hash = StableId.GetHashCode();
-                hash = (hash * 397) ^ Slot.GetHashCode();
-                hash = (hash * 397) ^ (int)Role;
-                hash = (hash * 397) ^ StorageFormat.GetHashCode();
-                hash = (hash * 397) ^ (int)Ownership;
-                hash = (hash * 397) ^ (int)Lifetime;
-                hash = (hash * 397) ^ LengthShape.GetHashCode();
-                hash = (hash * 397) ^ (int)Flags;
-                hash = (hash * 397) ^ (int)HashParticipation;
-                hash = (hash * 397) ^ DebugName.GetHashCode();
+                var hash = HashSeed;
+                hash = (hash * HashMultiplier) ^ StableId.GetHashCode();
+                hash = (hash * HashMultiplier) ^ Slot.GetHashCode();
+                hash = (hash * HashMultiplier) ^ _slotPresence;
+                hash = (hash * HashMultiplier) ^ (int)Role;
+                hash = (hash * HashMultiplier) ^ StorageFormat.GetHashCode();
+                hash = (hash * HashMultiplier) ^ (int)Ownership;
+                hash = (hash * HashMultiplier) ^ (int)Lifetime;
+                hash = (hash * HashMultiplier) ^ LengthShape.GetHashCode();
+                hash = (hash * HashMultiplier) ^ (int)Flags;
+                hash = (hash * HashMultiplier) ^ (int)HashParticipation;
+                hash = (hash * HashMultiplier) ^ DebugName.GetHashCode();
                 return hash;
             }
         }
 
         /// <summary>
-        /// Returns a diagnostic representation of this Contract.
+        /// Returns an invariant diagnostic representation of this contract.
         /// </summary>
-        /// <returns>A string containing debug name, role, stable identity, slot, and storage format.</returns>
+        /// <returns>A stable diagnostic string.</returns>
         public override string ToString()
         {
-            return $"{DebugName} [{StableId}] Role={Role} Slot={Slot} Storage={StorageFormat}";
+            var slotText = HasAssignedSlot
+                ? Slot.ToString()
+                : "Unassigned";
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} [{1}] Role={2} Slot={3} Storage={4} Ownership={5} Lifetime={6}",
+                DebugName,
+                StableId,
+                Role,
+                slotText,
+                StorageFormat,
+                Ownership,
+                Lifetime);
         }
 
-        /// <summary>
-        /// Determines whether two Contracts are equal.
-        /// </summary>
-        public static bool operator ==(AtlasContract left, AtlasContract right)
-        {
-            return left.Equals(right);
-        }
-
-        /// <summary>
-        /// Determines whether two Contracts are not equal.
-        /// </summary>
-        public static bool operator !=(AtlasContract left, AtlasContract right)
-        {
-            return !left.Equals(right);
-        }
-
-        private void ValidatePolicyCombinationOrThrow(string parameterName)
+        private void ValidatePolicyCombinationOrThrow(
+            string parameterName,
+            string diagnosticName)
         {
             if (Flags.HasAll(AtlasFieldFlags.ClearOnAcquire | AtlasFieldFlags.PreserveContent))
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' declares both " +
-                    $"{nameof(AtlasFieldFlags.ClearOnAcquire)} and {nameof(AtlasFieldFlags.PreserveContent)}.",
+                    $"Atlas contract '{diagnosticName}' declares both " +
+                    $"{nameof(AtlasFieldFlags.ClearOnAcquire)} and " +
+                    $"{nameof(AtlasFieldFlags.PreserveContent)}.",
                     parameterName);
             }
 
@@ -407,7 +616,7 @@ namespace Lokrain.Atlas.Contracts
                 Flags.HasNone(AtlasFieldFlags.DiscardBeforeWrite))
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' declares " +
+                    $"Atlas contract '{diagnosticName}' declares " +
                     $"{nameof(AtlasFieldFlags.AllowsUninitializedMemory)} without " +
                     $"{nameof(AtlasFieldFlags.DiscardBeforeWrite)}.",
                     parameterName);
@@ -417,7 +626,7 @@ namespace Lokrain.Atlas.Contracts
                 !StorageFormat.SupportsResize)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' is marked resizable, but storage kind " +
+                    $"Atlas contract '{diagnosticName}' is marked resizable, but storage kind " +
                     $"'{StorageFormat.Kind}' does not support resizing.",
                     parameterName);
             }
@@ -426,7 +635,8 @@ namespace Lokrain.Atlas.Contracts
                 !IsExternalCompatibleOwnership(Ownership))
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' allows external aliasing with incompatible ownership policy '{Ownership}'.",
+                    $"Atlas contract '{diagnosticName}' allows external aliasing with incompatible " +
+                    $"ownership policy '{Ownership}'.",
                     parameterName);
             }
 
@@ -434,7 +644,8 @@ namespace Lokrain.Atlas.Contracts
                 !IsExternalCompatibleOwnership(Ownership))
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' uses external storage with incompatible ownership policy '{Ownership}'.",
+                    $"Atlas contract '{diagnosticName}' uses external storage with incompatible " +
+                    $"ownership policy '{Ownership}'.",
                     parameterName);
             }
 
@@ -444,7 +655,8 @@ namespace Lokrain.Atlas.Contracts
                 Ownership != OwnershipPolicy.Imported)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' uses external lifetime with incompatible ownership policy '{Ownership}'.",
+                    $"Atlas contract '{diagnosticName}' uses external lifetime with incompatible " +
+                    $"ownership policy '{Ownership}'.",
                     parameterName);
             }
 
@@ -452,7 +664,8 @@ namespace Lokrain.Atlas.Contracts
                 !IsExternalCompatibleOwnership(Ownership))
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' declares external Field role with incompatible ownership policy '{Ownership}'.",
+                    $"Atlas contract '{diagnosticName}' declares external field role with incompatible " +
+                    $"ownership policy '{Ownership}'.",
                     parameterName);
             }
 
@@ -460,7 +673,8 @@ namespace Lokrain.Atlas.Contracts
                 HashParticipation == HashParticipation.None)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' declares canonical Field role but opts out of all hash participation.",
+                    $"Atlas contract '{diagnosticName}' declares canonical field role but opts out of all " +
+                    "hash participation.",
                     parameterName);
             }
 
@@ -468,7 +682,8 @@ namespace Lokrain.Atlas.Contracts
                 HashParticipation == HashParticipation.None)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' declares payload Field role but opts out of all hash participation.",
+                    $"Atlas contract '{diagnosticName}' declares payload field role but opts out of all " +
+                    "hash participation.",
                     parameterName);
             }
 
@@ -476,7 +691,8 @@ namespace Lokrain.Atlas.Contracts
                 !LengthShape.IsScalar)
             {
                 throw new ArgumentException(
-                    $"Atlas Contract '{DebugName}' uses scalar storage but does not declare scalar length shape.",
+                    $"Atlas contract '{diagnosticName}' uses scalar storage but does not declare scalar " +
+                    "length shape.",
                     parameterName);
             }
         }
@@ -488,6 +704,22 @@ namespace Lokrain.Atlas.Contracts
                    ownership == OwnershipPolicy.Borrowed ||
                    ownership == OwnershipPolicy.Imported ||
                    ownership == OwnershipPolicy.Adopted;
+        }
+
+        /// <summary>
+        /// Determines whether two contracts are equal.
+        /// </summary>
+        public static bool operator ==(AtlasContract left, AtlasContract right)
+        {
+            return left.Equals(right);
+        }
+
+        /// <summary>
+        /// Determines whether two contracts are not equal.
+        /// </summary>
+        public static bool operator !=(AtlasContract left, AtlasContract right)
+        {
+            return !left.Equals(right);
         }
     }
 }

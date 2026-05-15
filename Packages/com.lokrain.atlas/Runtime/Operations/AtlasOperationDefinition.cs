@@ -1,4 +1,20 @@
-// Runtime/Operations/AtlasOperationDefinition.cs
+// Packages/com.lokrain.atlas/Runtime/Operations/AtlasOperationDefinition.cs
+//
+// Package: com.lokrain.atlas
+// Namespace: Lokrain.Atlas.Operations
+//
+// Purpose
+// - Define one durable Atlas operation contract.
+// - Preserve operation identity, semantic role, diagnostic name, and symbolic field access.
+// - Keep operation definitions independent from executors, jobs, native memory, and runtime storage.
+//
+// Design notes
+// - OperationId is durable identity.
+// - Role is semantic classification.
+// - DebugName is diagnostic ABI metadata.
+// - Access declaration order is operation ABI and must not be sorted.
+// - WriteCoverage is required for write-capable bindings.
+// - Jobs must not receive this type.
 
 using System;
 using System.Collections;
@@ -11,25 +27,6 @@ namespace Lokrain.Atlas.Operations
     /// <summary>
     /// Defines one durable Atlas operation contract.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// An operation definition declares stable operation identity, diagnostic name, and the
-    /// symbolic Field access requirements needed by the operation. It does not contain executable
-    /// code, job structs, delegates, native memory, or resolved Field slots.
-    /// </para>
-    ///
-    /// <para>
-    /// The compiler resolves <see cref="AtlasOperationAccess"/> declarations against an ordered
-    /// Contract table and produces concrete execution bindings. Jobs should receive resolved typed
-    /// memory and numeric parameters, never operation definitions or symbolic Field identities.
-    /// </para>
-    ///
-    /// <para>
-    /// Access order is preserved. The compiler may use declaration order to build deterministic
-    /// binding tables, diagnostics, generated wrappers, and hash input. Do not sort operation
-    /// access declarations after construction.
-    /// </para>
-    /// </remarks>
     public sealed class AtlasOperationDefinition :
         IReadOnlyList<AtlasOperationAccess>
     {
@@ -43,22 +40,29 @@ namespace Lokrain.Atlas.Operations
         public readonly AtlasOperationId OperationId;
 
         /// <summary>
+        /// Semantic operation role used by validation, diagnostics, tooling, and policy.
+        /// </summary>
+        public readonly AtlasOperationRole Role;
+
+        /// <summary>
         /// Stable diagnostic name used by validation reports, editor tooling, generated docs, and tests.
         /// </summary>
-        /// <remarks>
-        /// Operation names are not durable identity. Durable identity belongs to <see cref="OperationId"/>.
-        /// </remarks>
         public readonly FixedString64Bytes DebugName;
 
         private AtlasOperationDefinition(
             AtlasOperationId operationId,
+            AtlasOperationRole role,
             FixedString64Bytes debugName,
             AtlasOperationAccess[] accesses)
         {
             OperationId = operationId;
+            Role = role;
             DebugName = debugName;
 
-            ValidateHeaderOrThrow(operationId, debugName);
+            ValidateHeaderOrThrow(
+                operationId,
+                role,
+                debugName);
 
             _accesses = CopyAndValidateAccesses(accesses);
             _accessIndexByFieldId = BuildFieldLookup(_accesses);
@@ -66,17 +70,17 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Gets the number of Field access declarations in this operation.
+        /// Gets the number of field access declarations.
         /// </summary>
         public int Count => _accesses.Length;
 
         /// <summary>
-        /// Gets whether this operation declares no Field access.
+        /// Gets whether this operation declares no field access.
         /// </summary>
         public bool IsEmpty => _accesses.Length == 0;
 
         /// <summary>
-        /// Gets whether this operation reads at least one Field content binding.
+        /// Gets whether this operation reads at least one content binding.
         /// </summary>
         public bool ReadsContent
         {
@@ -95,7 +99,7 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Gets whether this operation writes, appends, consumes, or mutates at least one Field binding.
+        /// Gets whether this operation writes, appends, consumes, or mutates at least one content binding.
         /// </summary>
         public bool WritesContent
         {
@@ -104,6 +108,44 @@ namespace Lokrain.Atlas.Operations
                 for (var i = 0; i < _accesses.Length; i++)
                 {
                     if (_accesses[i].WritesContent)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether this operation fully writes at least one logical content binding.
+        /// </summary>
+        public bool WritesFullLogicalContent
+        {
+            get
+            {
+                for (var i = 0; i < _accesses.Length; i++)
+                {
+                    if (_accesses[i].WritesFullLogicalContent)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether this operation declares at least one partial content write.
+        /// </summary>
+        public bool HasPartialContentWrite
+        {
+            get
+            {
+                for (var i = 0; i < _accesses.Length; i++)
+                {
+                    if (_accesses[i].WritesPartialContent)
                     {
                         return true;
                     }
@@ -154,11 +196,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Gets the access declaration at a zero-based operation binding index.
         /// </summary>
-        /// <param name="index">Zero-based access declaration index.</param>
-        /// <returns>The access declaration at <paramref name="index"/>.</returns>
-        /// <exception cref="ArgumentOutOfRangeException">
-        /// Thrown when <paramref name="index"/> is outside this operation's access range.
-        /// </exception>
         public AtlasOperationAccess this[int index]
         {
             get
@@ -169,28 +206,24 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Creates an operation definition from explicitly ordered Field access declarations.
+        /// Creates an operation definition from explicitly ordered field access declarations.
         /// </summary>
-        /// <param name="operationId">Stable, versioned operation identity.</param>
-        /// <param name="debugName">Stable diagnostic operation name.</param>
-        /// <param name="accesses">Access declarations in canonical operation binding order.</param>
-        /// <returns>A validated operation definition.</returns>
         public static AtlasOperationDefinition Create(
             AtlasOperationId operationId,
+            AtlasOperationRole role,
             FixedString64Bytes debugName,
             params AtlasOperationAccess[] accesses)
         {
             return new AtlasOperationDefinition(
                 operationId,
+                role,
                 debugName,
                 accesses);
         }
 
         /// <summary>
-        /// Determines whether this operation declares access to the supplied Field identifier.
+        /// Determines whether this operation declares access to the supplied field identifier.
         /// </summary>
-        /// <param name="fieldId">Stable Field identifier to search for.</param>
-        /// <returns><c>true</c> when this operation declares access to the Field; otherwise, <c>false</c>.</returns>
         public bool ContainsField(StableDataId fieldId)
         {
             return fieldId.IsValid &&
@@ -200,8 +233,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Determines whether this operation declares an access binding with the supplied binding name.
         /// </summary>
-        /// <param name="bindingName">Binding name to search for.</param>
-        /// <returns><c>true</c> when this operation contains the binding name; otherwise, <c>false</c>.</returns>
         public bool ContainsBinding(FixedString64Bytes bindingName)
         {
             return !bindingName.IsEmpty &&
@@ -209,13 +240,8 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Attempts to resolve a Field identifier to its operation access declaration.
+        /// Attempts to resolve a field identifier to its operation access declaration.
         /// </summary>
-        /// <param name="fieldId">Stable Field identifier to resolve.</param>
-        /// <param name="access">
-        /// Resolved operation access declaration when present; otherwise, <see cref="AtlasOperationAccess.Empty"/>.
-        /// </param>
-        /// <returns><c>true</c> when the Field access declaration was found; otherwise, <c>false</c>.</returns>
         public bool TryGetAccess(
             StableDataId fieldId,
             out AtlasOperationAccess access)
@@ -234,11 +260,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Attempts to resolve a binding name to its operation access declaration.
         /// </summary>
-        /// <param name="bindingName">Binding name to resolve.</param>
-        /// <param name="access">
-        /// Resolved operation access declaration when present; otherwise, <see cref="AtlasOperationAccess.Empty"/>.
-        /// </param>
-        /// <returns><c>true</c> when the binding was found; otherwise, <c>false</c>.</returns>
         public bool TryGetAccess(
             FixedString64Bytes bindingName,
             out AtlasOperationAccess access)
@@ -255,13 +276,8 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Resolves a Field identifier to its operation access declaration.
+        /// Resolves a field identifier to its operation access declaration.
         /// </summary>
-        /// <param name="fieldId">Stable Field identifier to resolve.</param>
-        /// <returns>The operation access declaration for <paramref name="fieldId"/>.</returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the Field identifier is invalid or not declared by this operation.
-        /// </exception>
         public AtlasOperationAccess GetRequiredAccess(StableDataId fieldId)
         {
             if (TryGetAccess(fieldId, out var access))
@@ -277,11 +293,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Resolves a binding name to its operation access declaration.
         /// </summary>
-        /// <param name="bindingName">Binding name to resolve.</param>
-        /// <returns>The operation access declaration for <paramref name="bindingName"/>.</returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the binding name is empty or not declared by this operation.
-        /// </exception>
         public AtlasOperationAccess GetRequiredAccess(FixedString64Bytes bindingName)
         {
             if (TryGetAccess(bindingName, out var access))
@@ -297,13 +308,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Copies access declarations into a caller-provided destination array.
         /// </summary>
-        /// <param name="destination">Destination array receiving access declarations in operation order.</param>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="destination"/> is <c>null</c>.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="destination"/> is smaller than <see cref="Count"/>.
-        /// </exception>
         public void CopyTo(AtlasOperationAccess[] destination)
         {
             if (destination == null)
@@ -318,24 +322,30 @@ namespace Lokrain.Atlas.Operations
                     nameof(destination));
             }
 
-            Array.Copy(_accesses, destination, _accesses.Length);
+            Array.Copy(
+                _accesses,
+                destination,
+                _accesses.Length);
         }
 
         /// <summary>
         /// Creates a managed copy of operation access declarations in canonical binding order.
         /// </summary>
-        /// <returns>A new access declaration array.</returns>
         public AtlasOperationAccess[] ToArray()
         {
             var copy = new AtlasOperationAccess[_accesses.Length];
-            Array.Copy(_accesses, copy, _accesses.Length);
+
+            Array.Copy(
+                _accesses,
+                copy,
+                _accesses.Length);
+
             return copy;
         }
 
         /// <summary>
         /// Gets a managed enumerator over access declarations in operation binding order.
         /// </summary>
-        /// <returns>An enumerator over access declarations.</returns>
         public IEnumerator<AtlasOperationAccess> GetEnumerator()
         {
             for (var i = 0; i < _accesses.Length; i++)
@@ -347,7 +357,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Gets a managed enumerator over access declarations in operation binding order.
         /// </summary>
-        /// <returns>An enumerator over access declarations.</returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
@@ -356,17 +365,24 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Returns a diagnostic representation of this operation definition.
         /// </summary>
-        /// <returns>A string containing operation name, id, and access count.</returns>
         public override string ToString()
         {
-            return $"AtlasOperationDefinition(Name={DebugName}, Id={OperationId}, Accesses={Count})";
+            return $"AtlasOperationDefinition(Name={DebugName}, Id={OperationId}, Role={Role}, Accesses={Count})";
         }
 
         private static void ValidateHeaderOrThrow(
             AtlasOperationId operationId,
+            AtlasOperationRole role,
             FixedString64Bytes debugName)
         {
             operationId.ValidateOrThrow(nameof(operationId));
+
+            if (role == AtlasOperationRole.None)
+            {
+                throw new ArgumentException(
+                    "Atlas operation definition must declare a concrete semantic role.",
+                    nameof(role));
+            }
 
             if (!debugName.IsEmpty)
             {
@@ -447,7 +463,7 @@ namespace Lokrain.Atlas.Operations
 
                 throw new ArgumentException(
                     $"Atlas operation declares Field id '{access.FieldId}' more than once. " +
-                    "Use a single access declaration with the correct access mode, such as ReadWrite, instead of duplicate bindings.");
+                    "Use a single access declaration with the correct access mode and write coverage instead of duplicate bindings.");
             }
         }
 
@@ -478,21 +494,35 @@ namespace Lokrain.Atlas.Operations
 
                 if (!access.WritesContent)
                 {
+                    if (access.WriteCoverage != AtlasWriteCoverage.None)
+                    {
+                        throw new ArgumentException(
+                            $"Atlas operation access '{access.BindingName}' declares write coverage '{access.WriteCoverage}' but does not write content.");
+                    }
+
                     continue;
                 }
 
-                if (access.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite) ||
-                    access.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent) ||
-                    access.Mode == AtlasOperationAccessMode.Append ||
-                    access.Mode == AtlasOperationAccessMode.Consume)
+                if (!access.WriteCoverage.IsConcreteWriteCoverage())
                 {
-                    continue;
+                    throw new ArgumentException(
+                        $"Atlas operation access '{access.BindingName}' writes Field '{access.FieldId}' without concrete write coverage.");
                 }
 
-                throw new ArgumentException(
-                    $"Atlas operation access '{access.BindingName}' writes Field '{access.FieldId}' without declaring write-content policy. " +
-                    $"Use {nameof(AtlasOperationAccessFlags.DiscardBeforeWrite)} for full overwrite, " +
-                    $"{nameof(AtlasOperationAccessFlags.PreserveExistingContent)} for read-modify-write, or an append/consume mode where appropriate.");
+                if (access.Mode == AtlasOperationAccessMode.Write &&
+                    access.WriteCoverage.MakesFullLogicalContentAvailable() &&
+                    !access.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite))
+                {
+                    throw new ArgumentException(
+                        $"Atlas operation access '{access.BindingName}' fully writes Field '{access.FieldId}' without declaring discard-before-write.");
+                }
+
+                if (access.Mode == AtlasOperationAccessMode.ReadWrite &&
+                    !access.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent))
+                {
+                    throw new ArgumentException(
+                        $"Atlas operation access '{access.BindingName}' uses read-write access without preserving existing content.");
+                }
             }
         }
 
