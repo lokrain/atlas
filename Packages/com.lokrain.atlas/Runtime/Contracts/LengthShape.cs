@@ -8,7 +8,7 @@ using Lokrain.Atlas.Fields;
 using Unity.Collections;
 
 namespace Lokrain.Atlas.Contracts
-{  
+{
     /// <summary>
     /// Describes how Atlas resolves field length or capacity before scheduling jobs.
     /// </summary>

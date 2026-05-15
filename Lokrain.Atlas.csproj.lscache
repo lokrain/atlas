@@ -114,11 +114,9 @@ Packages/com.lokrain.atlas/Runtime/Diagnostics/
 Packages/com.lokrain.atlas/Runtime/Execution/
  AtlasExecutionContext.cs
  AtlasExecutionResult.cs
- AtlasFieldMemoryBlock.cs
  AtlasMemoryResolver.cs
  AtlasOperationRunner.cs
  AtlasRunRequest.cs
- AtlasRunWorkflow.cs
  AtlasRunWorkflowPhase.cs
  AtlasRunWorkflowResult.cs
  AtlasRunWorkflowResultStatus.cs
@@ -157,6 +155,13 @@ Packages/com.lokrain.atlas/Runtime/Pipelines/
 Packages/com.lokrain.atlas/Runtime/Stages/
  AtlasStageDefinition.cs
  AtlasStageId.cs
+Packages/com.lokrain.atlas/Runtime/Workspaces/
+ AtlasFieldAddress.cs
+ AtlasStorageBlockPlan.cs
+ AtlasWorkspace.cs
+ AtlasWorkspaceLayout.cs
+ AtlasWorkspaceLayoutCompiler.cs
+ AtlasWorkspaceLayoutEntry.cs
 Temp/obj/Lokrain.Atlas/.NETStandard,Version=v2.1.AssemblyAttributes.cs
 
 [metadataReferences]

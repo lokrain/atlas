@@ -395,4 +395,4 @@ namespace Lokrain.Atlas.Stages
             return left.CompareTo(right) >= 0;
         }
     }
-} 
+}

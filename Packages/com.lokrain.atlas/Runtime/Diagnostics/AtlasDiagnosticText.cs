@@ -83,9 +83,7 @@ namespace Lokrain.Atlas.Diagnostics
                 return value;
             }
 
-            return value.Substring(
-                0,
-                maxLength);
+            return value[..maxLength];
         }
     }
 }

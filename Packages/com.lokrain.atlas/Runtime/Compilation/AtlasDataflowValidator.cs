@@ -29,8 +29,7 @@ using System.Collections.Generic;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Diagnostics;
-using Lokrain.Atlas.Operations;
-using Unity.Collections;
+using Lokrain.Atlas.Operations; 
 
 namespace Lokrain.Atlas.Compilation
 {

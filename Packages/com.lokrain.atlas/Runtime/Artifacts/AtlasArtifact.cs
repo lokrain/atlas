@@ -242,6 +242,10 @@ namespace Lokrain.Atlas.Artifacts
                 workspace,
                 captureCapacityPayload: false);
 
+            var shapes = CreateShapeSet(
+                plan,
+                workspace);
+
             var payloadLength = checked((int)workspace.TotalByteLength);
             var payload = new byte[payloadLength];
             var fields = new AtlasArtifactField[workspace.Count];
@@ -250,11 +254,13 @@ namespace Lokrain.Atlas.Artifacts
 
             for (var i = 0; i < workspace.Count; i++)
             {
-                var block = workspace[i];
-                var bytes = block.GetByteLengthSlice();
+                var entry = workspace[i];
+                var contract = plan.Contracts[i];
+                var shape = shapes[i];
+                var bytes = workspace.GetFieldByteLengthSlice(entry.Slot);
 
                 var fieldByteOffset = byteOffset;
-                var fieldByteLength = checked((int)block.ByteLength);
+                var fieldByteLength = checked((int)entry.ByteLength);
 
                 CopyNativeBytesToManagedPayload(
                     bytes,
@@ -270,30 +276,30 @@ namespace Lokrain.Atlas.Artifacts
                         fieldByteLength);
 
                     fields[i] = AtlasArtifactField.CreateLogicalPayload(
-                        block.Contract,
-                        block.Shape,
+                        contract,
+                        shape,
                         fieldByteOffset,
                         fieldHash);
                 }
                 else
                 {
                     fields[i] = AtlasArtifactField.CreateLogicalPayload(
-                        block.Contract,
-                        block.Shape,
+                        contract,
+                        shape,
                         fieldByteOffset);
                 }
 
-                byteOffset = checked(byteOffset + block.ByteLength);
+                byteOffset = checked(byteOffset + entry.ByteLength);
             }
 
             var header = computeContentHashes
                 ? AtlasArtifactHeader.Create(
                     plan,
-                    workspace.Shapes,
+                    shapes,
                     ComputeHash(payload, 0, payload.Length))
                 : AtlasArtifactHeader.Create(
                     plan,
-                    workspace.Shapes);
+                    shapes);
 
             return new AtlasArtifact(
                 header,
@@ -319,6 +325,10 @@ namespace Lokrain.Atlas.Artifacts
                 workspace,
                 captureCapacityPayload: true);
 
+            var shapes = CreateShapeSet(
+                plan,
+                workspace);
+
             var payloadLength = checked((int)workspace.TotalByteCapacity);
             var payload = new byte[payloadLength];
             var fields = new AtlasArtifactField[workspace.Count];
@@ -327,16 +337,19 @@ namespace Lokrain.Atlas.Artifacts
 
             for (var i = 0; i < workspace.Count; i++)
             {
-                var block = workspace[i];
-                var bytes = block.GetByteCapacityArray();
+                var entry = workspace[i];
+                var contract = plan.Contracts[i];
+                var shape = shapes[i];
+                var bytes = workspace.GetFieldByteCapacitySlice(entry.Slot);
 
                 var fieldByteOffset = byteOffset;
-                var fieldByteCapacity = checked((int)block.ByteCapacity);
+                var fieldByteCapacity = checked((int)entry.ByteCapacity);
 
-                for (var j = 0; j < fieldByteCapacity; j++)
-                {
-                    payload[checked((int)fieldByteOffset + j)] = bytes[j];
-                }
+                CopyNativeBytesToManagedPayload(
+                    bytes,
+                    payload,
+                    fieldByteOffset,
+                    fieldByteCapacity);
 
                 if (computeContentHashes)
                 {
@@ -346,30 +359,30 @@ namespace Lokrain.Atlas.Artifacts
                         fieldByteCapacity);
 
                     fields[i] = AtlasArtifactField.Create(
-                        block.Contract,
-                        block.Shape,
+                        contract,
+                        shape,
                         fieldByteOffset,
                         fieldHash);
                 }
                 else
                 {
                     fields[i] = AtlasArtifactField.Create(
-                        block.Contract,
-                        block.Shape,
+                        contract,
+                        shape,
                         fieldByteOffset);
                 }
 
-                byteOffset = checked(byteOffset + block.ByteCapacity);
+                byteOffset = checked(byteOffset + entry.ByteCapacity);
             }
 
             var header = computeContentHashes
                 ? AtlasArtifactHeader.Create(
                     plan,
-                    workspace.Shapes,
+                    shapes,
                     ComputeHash(payload, 0, payload.Length))
                 : AtlasArtifactHeader.Create(
                     plan,
-                    workspace.Shapes);
+                    shapes);
 
             return new AtlasArtifact(
                 header,
@@ -735,26 +748,10 @@ namespace Lokrain.Atlas.Artifacts
                     nameof(plan));
             }
 
-            if (workspace.Contracts == null)
+            if (plan.Contracts.Count != workspace.Count)
             {
                 throw new ArgumentException(
-                    "Workspace does not reference a Contract table.",
-                    nameof(workspace));
-            }
-
-            if (workspace.Shapes == null)
-            {
-                throw new ArgumentException(
-                    "Workspace does not reference a resolved shape set.",
-                    nameof(workspace));
-            }
-
-            if (plan.Contracts.Count != workspace.Contracts.Count ||
-                plan.Contracts.Count != workspace.Count ||
-                plan.Contracts.Count != workspace.Shapes.Count)
-            {
-                throw new ArgumentException(
-                    "Compiled plan, workspace, and resolved shape set field counts do not match.");
+                    "Compiled plan and workspace layout field counts do not match.");
             }
 
             var payloadBytes = captureCapacityPayload
@@ -769,31 +766,68 @@ namespace Lokrain.Atlas.Artifacts
 
             for (var i = 0; i < workspace.Count; i++)
             {
-                var planContract = plan.Contracts[i];
-                var workspaceContract = workspace.Contracts[i];
-                var block = workspace[i];
-                var shape = workspace.Shapes[i];
+                var contract = plan.Contracts[i];
+                var entry = workspace[i];
 
-                if (planContract != workspaceContract)
-                {
-                    throw new ArgumentException(
-                        $"Workspace Contract table at index '{i}' does not match compiled plan Contract '{planContract.GetDiagnosticName()}'.",
-                        nameof(workspace));
-                }
+                ValidateEntryMatchesContractOrThrow(
+                    entry,
+                    contract,
+                    i);
+            }
+        }
 
-                if (planContract != block.Contract)
-                {
-                    throw new ArgumentException(
-                        $"Workspace block at index '{i}' does not match compiled plan Contract '{planContract.GetDiagnosticName()}'.",
-                        nameof(workspace));
-                }
+        private static AtlasResolvedShapeSet CreateShapeSet(
+            AtlasCompiledPlan plan,
+            AtlasWorkspace workspace)
+        {
+            var shapes = new AtlasResolvedShape[workspace.Count];
 
-                if (shape != block.Shape)
-                {
-                    throw new ArgumentException(
-                        $"Workspace block at index '{i}' does not match resolved shape '{shape.GetDiagnosticName()}'.",
-                        nameof(workspace));
-                }
+            for (var i = 0; i < workspace.Count; i++)
+            {
+                var entry = workspace[i];
+
+                ValidateEntryMatchesContractOrThrow(
+                    entry,
+                    plan.Contracts[i],
+                    i);
+
+                shapes[i] = AtlasResolvedShape.Create(
+                    entry.StableId,
+                    entry.Slot,
+                    entry.Role,
+                    entry.StorageFormat,
+                    entry.ShapeDomain,
+                    entry.DeclaredShape,
+                    entry.DebugName,
+                    entry.Length,
+                    entry.Capacity);
+            }
+
+            return AtlasResolvedShapeSet.Create(
+                plan.DebugName,
+                plan.Contracts,
+                shapes);
+        }
+
+        private static void ValidateEntryMatchesContractOrThrow(
+            Lokrain.Atlas.Workspaces.AtlasWorkspaceLayoutEntry entry,
+            Lokrain.Atlas.Contracts.AtlasContract contract,
+            int index)
+        {
+            contract.ValidateTableReadyOrThrow(nameof(contract));
+            entry.ValidateBoundOrThrow(nameof(entry));
+
+            if (entry.Slot.Index != index ||
+                entry.StableId != contract.StableId ||
+                entry.Slot != contract.Slot ||
+                entry.Role != contract.Role ||
+                entry.StorageFormat != contract.StorageFormat ||
+                entry.ShapeDomain != contract.ShapeDomain ||
+                entry.DeclaredShape != contract.LengthShape)
+            {
+                throw new ArgumentException(
+                    $"Workspace layout entry at index '{index}' does not match compiled plan Contract '{contract.GetDiagnosticName()}'.",
+                    nameof(entry));
             }
         }
 

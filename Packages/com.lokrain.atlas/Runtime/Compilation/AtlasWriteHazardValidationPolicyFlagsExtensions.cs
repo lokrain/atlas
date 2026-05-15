@@ -68,4 +68,4 @@ namespace Lokrain.Atlas.Compilation
             return (value & flags) == 0;
         }
     }
-} 
+}

@@ -4,17 +4,19 @@
 // Namespace: Lokrain.Atlas.Execution
 //
 // Purpose
-// - Validate whether resolved Atlas field shapes can be backed by the current workspace allocator.
-// - Resolve Contract-table or compiled-plan shapes into workspace-owned native memory.
-// - Keep allocation policy separate from compilation, operation scheduling, artifacts, and debug rendering.
+// - Validate whether resolved Atlas field shapes can be compiled into a workspace layout.
+// - Compile Contract-table or compiled-plan shapes into AtlasWorkspaceLayout.
+// - Allocate workspace-owned native memory from AtlasWorkspaceLayout.
+// - Keep allocation policy separate from operation scheduling, artifacts, and debug rendering.
 //
 // Design notes
 // - The catalog owns meaning.
 // - The compiler owns resolution.
 // - The workspace owns memory.
-// - Jobs own only numeric execution.
+// - Execution owns JobHandle flow.
+// - Jobs own only numeric computation.
 // - Artifacts own durable output.
-// - This resolver is a managed execution-boundary policy point.
+// - This type is a migration facade over AtlasWorkspaceLayoutCompiler.
 // - It does not schedule operations.
 // - It does not expose FieldId lookup to jobs.
 // - It does not write artifacts.
@@ -23,6 +25,7 @@
 using System;
 using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Contracts;
+using Lokrain.Atlas.Workspaces;
 using Unity.Collections;
 
 namespace Lokrain.Atlas.Execution
@@ -32,27 +35,21 @@ namespace Lokrain.Atlas.Execution
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasMemoryResolver"/> is the allocation-policy boundary between resolved
-    /// compiler metadata and <see cref="AtlasWorkspace"/> memory ownership. It validates that every
-    /// resolved field can be represented by the currently supported workspace memory model before
-    /// allocation starts.
+    /// <see cref="AtlasMemoryResolver"/> is retained as a source-compatible migration facade.
+    /// The canonical memory product is now <see cref="AtlasWorkspaceLayout"/>, produced by
+    /// <see cref="AtlasWorkspaceLayoutCompiler"/> and consumed by <see cref="AtlasWorkspace"/>.
     /// </para>
     ///
     /// <para>
-    /// This type deliberately stays thin. Shape resolution remains in <see cref="AtlasShapeResolver"/>.
-    /// Memory ownership remains in <see cref="AtlasWorkspace"/> and <see cref="AtlasFieldMemoryBlock"/>.
-    /// Operation execution, artifact export, and debug-map rendering are downstream systems.
+    /// New code should prefer the explicit path:
+    /// resolve shapes, compile workspace layout, then allocate workspace from that layout.
     /// </para>
     /// </remarks>
     public static class AtlasMemoryResolver
     {
         /// <summary>
-        /// Resolves field shapes from a compiled plan and allocates a workspace.
+        /// Resolves field shapes from a compiled plan, compiles a workspace layout, and allocates a workspace.
         /// </summary>
-        /// <param name="plan">Compiled plan whose Contract table defines workspace fields.</param>
-        /// <param name="allocator">Unity allocator used for workspace-owned native memory.</param>
-        /// <param name="options">Native allocation initialization option.</param>
-        /// <returns>A live Atlas workspace.</returns>
         public static AtlasWorkspace CreateWorkspace(
             AtlasCompiledPlan plan,
             Allocator allocator,
@@ -79,12 +76,8 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Allocates a workspace from an already resolved shape set.
+        /// Compiles a workspace layout from an already resolved shape set and allocates a workspace.
         /// </summary>
-        /// <param name="shapes">Resolved field shape set.</param>
-        /// <param name="allocator">Unity allocator used for workspace-owned native memory.</param>
-        /// <param name="options">Native allocation initialization option.</param>
-        /// <returns>A live Atlas workspace.</returns>
         public static AtlasWorkspace CreateWorkspace(
             AtlasResolvedShapeSet shapes,
             Allocator allocator,
@@ -93,19 +86,17 @@ namespace Lokrain.Atlas.Execution
             ValidateAllocatorOrThrow(allocator);
             ValidateAllocatableOrThrow(shapes);
 
+            var layout = AtlasWorkspaceLayoutCompiler.Compile(shapes);
+
             return AtlasWorkspace.Create(
-                shapes,
+                layout,
                 allocator,
                 options);
         }
 
         /// <summary>
-        /// Resolves field shapes from a Contract table and allocates a workspace.
+        /// Resolves field shapes from a Contract table, compiles a layout, and allocates a workspace.
         /// </summary>
-        /// <param name="contracts">Contract table whose fields should be allocated.</param>
-        /// <param name="allocator">Unity allocator used for workspace-owned native memory.</param>
-        /// <param name="options">Native allocation initialization option.</param>
-        /// <returns>A live Atlas workspace.</returns>
         public static AtlasWorkspace CreateWorkspace(
             AtlasContractTable contracts,
             Allocator allocator,
@@ -125,133 +116,58 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Returns whether the supplied resolved shape set can be allocated by the current workspace memory model.
+        /// Resolves field shapes from a compiled plan and compiles a workspace layout without allocating memory.
         /// </summary>
-        /// <param name="shapes">Resolved field shape set.</param>
-        /// <returns><c>true</c> when all fields are allocatable; otherwise, <c>false</c>.</returns>
-        public static bool CanAllocate(
-            AtlasResolvedShapeSet shapes)
+        public static AtlasWorkspaceLayout CompileLayout(AtlasCompiledPlan plan)
         {
-            try
+            if (plan == null)
             {
-                ValidateAllocatableOrThrow(shapes);
-                return true;
+                throw new ArgumentNullException(nameof(plan));
             }
-            catch (ArgumentException)
-            {
-                return false;
-            }
-            catch (InvalidOperationException)
-            {
-                return false;
-            }
-            catch (NotSupportedException)
-            {
-                return false;
-            }
-            catch (OverflowException)
-            {
-                return false;
-            }
+
+            return CompileLayout(AtlasShapeResolver.Resolve(plan));
         }
 
         /// <summary>
-        /// Validates that a resolved shape set can be allocated by the current workspace memory model.
+        /// Compiles a workspace layout from an already resolved shape set without allocating memory.
         /// </summary>
-        /// <param name="shapes">Resolved field shape set.</param>
-        public static void ValidateAllocatableOrThrow(
-            AtlasResolvedShapeSet shapes)
+        public static AtlasWorkspaceLayout CompileLayout(AtlasResolvedShapeSet shapes)
         {
-            if (shapes == null)
-            {
-                throw new ArgumentNullException(nameof(shapes));
-            }
+            ValidateAllocatableOrThrow(shapes);
 
-            shapes.ValidateOrThrow(nameof(shapes));
-
-            for (var i = 0; i < shapes.Count; i++)
-            {
-                var shape = shapes[i];
-                var contract = shapes.Contracts[i];
-
-                ValidateAllocatableFieldOrThrow(
-                    contract,
-                    shape,
-                    $"shapes[{i}]");
-            }
+            return AtlasWorkspaceLayoutCompiler.Compile(shapes);
         }
 
-        private static void ValidateAllocatableFieldOrThrow(
-            AtlasContract contract,
-            AtlasResolvedShape shape,
-            string parameterName)
+        /// <summary>
+        /// Resolves field shapes from a Contract table and compiles a workspace layout without allocating memory.
+        /// </summary>
+        public static AtlasWorkspaceLayout CompileLayout(AtlasContractTable contracts)
         {
-            contract.ValidateTableReadyOrThrow(parameterName);
-            shape.ValidateOrThrow(parameterName);
-
-            var storageKind = contract.StorageFormat.Kind;
-
-            if (!AtlasFieldMemoryBlock.SupportsOwnedByteBlock(storageKind))
+            if (contracts == null)
             {
-                throw new NotSupportedException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' with storage kind '{storageKind}'. " +
-                    "Use a dedicated workspace container model for growable, stream, map, blob, or external storage.");
+                throw new ArgumentNullException(nameof(contracts));
             }
 
-            if (contract.Ownership != OwnershipPolicy.AtlasOwned)
-            {
-                throw new NotSupportedException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' with ownership policy '{contract.Ownership}'. " +
-                    "This allocation path creates new workspace-owned memory and therefore only supports AtlasOwned storage. " +
-                    "Borrowed, imported, external-owned, job-owned, and adopted storage require explicit acquisition paths.");
-            }
-
-            if (contract.StorageFormat != shape.StorageFormat)
-            {
-                throw new ArgumentException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because its Contract storage format does not match its resolved shape storage format.",
-                    parameterName);
-            }
-
-            if (contract.StableId != shape.StableId)
-            {
-                throw new ArgumentException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because its Contract stable id does not match its resolved shape stable id.",
-                    parameterName);
-            }
-
-            if (contract.Slot != shape.Slot)
-            {
-                throw new ArgumentException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because its Contract slot does not match its resolved shape slot.",
-                    parameterName);
-            }
-
-            if (contract.Role != shape.Role)
-            {
-                throw new ArgumentException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because its Contract role does not match its resolved shape role.",
-                    parameterName);
-            }
-
-            if (shape.ByteCapacity > int.MaxValue)
-            {
-                throw new OverflowException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because byte capacity '{shape.ByteCapacity}' exceeds NativeArray length capacity.");
-            }
-
-            var expectedByteCapacity = checked((long)contract.StorageFormat.ElementSize * shape.Capacity);
-
-            if (shape.ByteCapacity != expectedByteCapacity)
-            {
-                throw new ArgumentException(
-                    $"Atlas memory resolver cannot allocate field '{contract.GetDiagnosticName()}' because resolved byte capacity '{shape.ByteCapacity}' does not match expected byte capacity '{expectedByteCapacity}'.",
-                    parameterName);
-            }
+            return CompileLayout(AtlasShapeResolver.Resolve(contracts));
         }
 
-        private static void ValidateAllocatorOrThrow(
-            Allocator allocator)
+        /// <summary>
+        /// Returns whether the supplied resolved shape set can be compiled by the current workspace layout model.
+        /// </summary>
+        public static bool CanAllocate(AtlasResolvedShapeSet shapes)
+        {
+            return AtlasWorkspaceLayoutCompiler.CanCompile(shapes);
+        }
+
+        /// <summary>
+        /// Validates that a resolved shape set can be compiled by the current workspace layout model.
+        /// </summary>
+        public static void ValidateAllocatableOrThrow(AtlasResolvedShapeSet shapes)
+        {
+            AtlasWorkspaceLayoutCompiler.ValidateCompilableOrThrow(shapes);
+        }
+
+        private static void ValidateAllocatorOrThrow(Allocator allocator)
         {
             if (allocator == Allocator.None ||
                 allocator == Allocator.Invalid)
@@ -259,7 +175,7 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentOutOfRangeException(
                     nameof(allocator),
                     allocator,
-                    "Atlas workspace allocation requires a concrete Unity allocator.");
+                    "Atlas workspace requires a concrete Unity allocator.");
             }
         }
     }

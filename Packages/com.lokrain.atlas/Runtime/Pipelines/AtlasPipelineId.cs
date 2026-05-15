@@ -397,4 +397,4 @@ namespace Lokrain.Atlas.Pipelines
             return left.CompareTo(right) >= 0;
         }
     }
-} 
+}

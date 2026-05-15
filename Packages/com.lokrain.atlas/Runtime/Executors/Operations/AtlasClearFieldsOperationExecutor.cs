@@ -141,11 +141,9 @@ namespace Lokrain.Atlas.Executors
                     continue;
                 }
 
-                var block = context.GetRequiredBlock(binding);
-                var bytes = block.GetByteCapacityArray();
+                var bytes = context.GetFieldByteCapacitySlice(binding);
 
-                if (!bytes.IsCreated ||
-                    bytes.Length == 0)
+                if (bytes.Length == 0)
                 {
                     continue;
                 }
@@ -304,7 +302,7 @@ namespace Lokrain.Atlas.Executors
         [BurstCompile]
         private struct ClearByteCapacityJob : IJobParallelFor
         {
-            public NativeArray<byte> Bytes;
+            public NativeSlice<byte> Bytes;
 
             public void Execute(int index)
             {

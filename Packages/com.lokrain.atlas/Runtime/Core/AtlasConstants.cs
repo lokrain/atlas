@@ -194,4 +194,4 @@ namespace Lokrain.Atlas.Core
         /// </remarks>
         public const int InvalidElementAlignment = 0;
     }
-} 
+}

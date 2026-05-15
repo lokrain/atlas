@@ -648,16 +648,6 @@ namespace Lokrain.Atlas.Compilation
                     name);
             }
 
-            if (storageFormat.RequiresFixedLength &&
-                capacity != length)
-            {
-                throw new ArgumentException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Storage kind '{0}' requires capacity to equal length.",
-                        storageFormat.Kind),
-                    name);
-            }
 
             ValidateDomainShapeCompatibilityOrThrow(
                 shapeDomain,

@@ -25,7 +25,7 @@ using Lokrain.Atlas.Stages;
 using Unity.Collections;
 
 namespace Lokrain.Atlas.Pipelines
-{ 
+{
     /// <summary>
     /// Route/preset validation policy for Atlas pipelines.
     /// </summary>

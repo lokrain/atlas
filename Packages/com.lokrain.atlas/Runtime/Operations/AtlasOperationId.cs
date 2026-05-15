@@ -389,4 +389,4 @@ namespace Lokrain.Atlas.Operations
             return left.CompareTo(right) >= 0;
         }
     }
-} 
+}

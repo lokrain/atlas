@@ -1,11 +1,11 @@
-// Packages/com.lokrain.atlas/Runtime/Execution/AtlasWorkspace.cs
+// Packages/com.lokrain.atlas/Runtime/Workspaces/AtlasWorkspace.cs
 //
 // Package: com.lokrain.atlas
-// Namespace: Lokrain.Atlas.Execution
+// Namespace: Lokrain.Atlas.Workspaces
 //
 // Purpose
 // - Own workspace native memory allocated from a compiled AtlasWorkspaceLayout.
-// - Allocate physical byte storage blocks from AtlasStorageBlockPlan values.
+// - Allocate physical storage blocks from AtlasStorageBlockPlan values.
 // - Resolve field byte and typed views through AtlasFieldAddress values.
 // - Keep workspace allocation independent from Contracts, resolved shape sets, execution, jobs, and artifacts.
 //
@@ -22,8 +22,8 @@
 // - Missing lookup state is represented by bool-returning APIs.
 // - This class intentionally exposes typed slices for fields because fields may be packed into
 //   shared physical blocks.
-// - The previous AtlasFieldMemoryBlock-per-field model is obsolete and should not remain on the
-//   canonical allocation path.
+// - The old per-field AtlasFieldMemoryBlock model should be deleted or kept only as a temporary
+//   migration adapter outside the canonical workspace path.
 
 using System;
 using System.Collections;
@@ -33,31 +33,30 @@ using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Fields;
-using Lokrain.Atlas.Workspaces;
 using Unity.Collections;
 
-namespace Lokrain.Atlas.Execution
+namespace Lokrain.Atlas.Workspaces
 {
     /// <summary>
     /// Workspace-owned native memory allocated from a compiled Atlas workspace layout.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasWorkspace"/> is the concrete memory owner for Atlas runtime data. It
-    /// allocates physical byte storage blocks from <see cref="AtlasWorkspaceLayout"/> and exposes
+    /// <see cref="AtlasWorkspace"/> is the concrete memory owner for Atlas generation/runtime data.
+    /// It allocates physical byte storage blocks from <see cref="AtlasWorkspaceLayout"/> and exposes
     /// field views by resolving <see cref="AtlasFieldAddress"/> values.
     /// </para>
     ///
     /// <para>
     /// The workspace does not own semantic compilation. It must not allocate directly from
     /// <see cref="AtlasResolvedShapeSet"/> as its primary model. Shape sets are accepted only by
-    /// migration factory methods that immediately compile a workspace layout first.
+    /// convenience factory methods that immediately compile a workspace layout first.
     /// </para>
     ///
     /// <para>
     /// Because multiple fields may share one physical storage block, canonical field access returns
-    /// <see cref="NativeSlice{T}"/> views. Returning <see cref="NativeArray{T}"/> for an individual
-    /// field is not generally correct once fields are packed into shared byte blocks.
+    /// <see cref="NativeSlice{T}"/> views. Returning <see cref="NativeArray{T}"/> for a field is only
+    /// correct when that field owns an entire physical block, which is no longer the canonical model.
     /// </para>
     /// </remarks>
     public sealed class AtlasWorkspace :
@@ -76,7 +75,7 @@ namespace Lokrain.Atlas.Execution
         public readonly AtlasWorkspaceLayout Layout;
 
         /// <summary>
-        /// Allocator used for all owned native storage blocks.
+        /// Allocator used for all owned native memory blocks.
         /// </summary>
         public readonly Allocator Allocator;
 
@@ -108,12 +107,12 @@ namespace Lokrain.Atlas.Execution
         public int Count => Layout.Count;
 
         /// <summary>
-        /// Gets the number of physical storage blocks.
+        /// Gets the number of allocated physical storage blocks.
         /// </summary>
-        public int StorageBlockCount => Layout.StorageBlockCount;
+        public int StorageBlockCount => _storageBlocks.Length;
 
         /// <summary>
-        /// Gets whether this workspace contains no field entries and no storage blocks.
+        /// Gets whether this workspace contains no fields and no storage blocks.
         /// </summary>
         public bool IsEmpty => Layout.IsEmpty;
 
@@ -138,32 +137,14 @@ namespace Lokrain.Atlas.Execution
         public long TotalFieldByteCapacity => Layout.TotalFieldByteCapacity;
 
         /// <summary>
-        /// Gets the total used byte length across all physical storage blocks.
+        /// Gets the total used byte length across physical storage blocks.
         /// </summary>
         public long TotalBlockUsedByteLength => Layout.TotalBlockUsedByteLength;
 
         /// <summary>
-        /// Gets the total allocated byte capacity across all physical storage blocks.
+        /// Gets the total allocated byte capacity across physical storage blocks.
         /// </summary>
         public long TotalBlockByteCapacity => Layout.TotalBlockByteCapacity;
-
-        /// <summary>
-        /// Compatibility alias for <see cref="TotalFieldByteLength"/>.
-        /// </summary>
-        /// <remarks>
-        /// Kept only to reduce migration noise at call sites. New code should use
-        /// <see cref="TotalFieldByteLength"/> or <see cref="TotalBlockUsedByteLength"/> explicitly.
-        /// </remarks>
-        public long TotalByteLength => TotalFieldByteLength;
-
-        /// <summary>
-        /// Compatibility alias for <see cref="TotalFieldByteCapacity"/>.
-        /// </summary>
-        /// <remarks>
-        /// Kept only to reduce migration noise at call sites. New code should use
-        /// <see cref="TotalFieldByteCapacity"/> or <see cref="TotalBlockByteCapacity"/> explicitly.
-        /// </remarks>
-        public long TotalByteCapacity => TotalFieldByteCapacity;
 
         /// <summary>
         /// Gets a layout entry by canonical field index.
@@ -204,11 +185,11 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Compiles a workspace layout from resolved shapes and allocates a workspace.
+        /// Compiles a layout from resolved shapes and allocates a workspace.
         /// </summary>
         /// <remarks>
         /// This overload exists as a migration convenience. The canonical path is explicit:
-        /// resolve shapes, compile <see cref="AtlasWorkspaceLayout"/>, then allocate the workspace.
+        /// resolve shapes, compile <see cref="AtlasWorkspaceLayout"/>, then create the workspace.
         /// </remarks>
         public static AtlasWorkspace Create(
             AtlasResolvedShapeSet shapes,
@@ -220,10 +201,8 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(shapes));
             }
 
-            var layout = AtlasWorkspaceLayoutCompiler.Compile(shapes);
-
             return Create(
-                layout,
+                AtlasWorkspaceLayoutCompiler.Compile(shapes),
                 allocator,
                 options);
         }
@@ -232,8 +211,8 @@ namespace Lokrain.Atlas.Execution
         /// Resolves shapes from a Contract table, compiles a layout, and allocates a workspace.
         /// </summary>
         /// <remarks>
-        /// This overload exists as a migration convenience. Prefer retaining the compiled layout
-        /// explicitly when the same Contract table is used repeatedly.
+        /// This overload exists for call-site migration. Prefer creating and retaining the compiled
+        /// layout explicitly when the same table is used repeatedly.
         /// </remarks>
         public static AtlasWorkspace Create(
             AtlasContractTable contracts,
@@ -432,12 +411,8 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Attempts to get a physical storage block byte-capacity array.
+        /// Attempts to get the full byte capacity array of a physical storage block.
         /// </summary>
-        /// <remarks>
-        /// Returns <c>true</c> for a valid zero-capacity block. In that case the returned
-        /// <see cref="NativeArray{T}"/> is the default zero-length payload and is not created.
-        /// </remarks>
         public bool TryGetStorageBlockByteCapacityArray(
             int blockIndex,
             out NativeArray<byte> bytes)
@@ -456,11 +431,8 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets a required physical storage block byte-capacity array.
+        /// Gets the full byte capacity array of a required physical storage block.
         /// </summary>
-        /// <remarks>
-        /// A valid zero-capacity block returns the default zero-length native-array payload.
-        /// </remarks>
         public NativeArray<byte> GetRequiredStorageBlockByteCapacityArray(int blockIndex)
         {
             ThrowIfDisposed();
@@ -483,7 +455,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Attempts to get the allocated byte-capacity slice for a field by canonical slot.
+        /// Attempts to get the byte capacity slice for a field by canonical slot.
         /// </summary>
         public bool TryGetFieldByteCapacitySlice(
             AtlasFieldSlot slot,
@@ -502,7 +474,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Attempts to get the allocated byte-capacity slice for a field by stable field id.
+        /// Attempts to get the byte capacity slice for a field by stable field id.
         /// </summary>
         public bool TryGetFieldByteCapacitySlice(
             StableDataId stableId,
@@ -521,22 +493,20 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Attempts to get the allocated byte-capacity slice for a typed field declaration.
+        /// Attempts to get the byte capacity slice for a typed field declaration.
         /// </summary>
         public bool TryGetFieldByteCapacitySlice<TField, TElement>(
             out NativeSlice<byte> bytes)
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
         {
-            ThrowIfDisposed();
-
             return TryGetFieldByteCapacitySlice(
                 AtlasField.StableId<TField, TElement>(),
                 out bytes);
         }
 
         /// <summary>
-        /// Gets the allocated byte-capacity slice for a required field by canonical slot.
+        /// Gets the byte capacity slice for a required field by canonical slot.
         /// </summary>
         public NativeSlice<byte> GetFieldByteCapacitySlice(AtlasFieldSlot slot)
         {
@@ -545,7 +515,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets the allocated byte-capacity slice for a required field by stable field id.
+        /// Gets the byte capacity slice for a required field by stable field id.
         /// </summary>
         public NativeSlice<byte> GetFieldByteCapacitySlice(StableDataId stableId)
         {
@@ -554,7 +524,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets the allocated byte-capacity slice for a required typed field declaration.
+        /// Gets the byte capacity slice for a required typed field declaration.
         /// </summary>
         public NativeSlice<byte> GetFieldByteCapacitySlice<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -670,11 +640,6 @@ namespace Lokrain.Atlas.Execution
             {
                 var bytes = _storageBlocks[blockIndex];
 
-                if (!bytes.IsCreated)
-                {
-                    continue;
-                }
-
                 for (var i = 0; i < bytes.Length; i++)
                 {
                     bytes[i] = 0;
@@ -683,7 +648,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Clears the allocated byte-capacity range of one field by canonical slot.
+        /// Clears the allocated byte capacity range of one field by canonical slot.
         /// </summary>
         public void Clear(AtlasFieldSlot slot)
         {
@@ -692,7 +657,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Clears the allocated byte-capacity range of one field by stable field id.
+        /// Clears the allocated byte capacity range of one field by stable field id.
         /// </summary>
         public void Clear(StableDataId stableId)
         {
@@ -701,7 +666,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Clears the allocated byte-capacity range of one typed field declaration.
+        /// Clears the allocated byte capacity range of one typed field declaration.
         /// </summary>
         public void Clear<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
@@ -751,7 +716,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets an enumerator over field layout entries in canonical slot order.
+        /// Returns an enumerator over field layout entries in canonical slot order.
         /// </summary>
         public IEnumerator<AtlasWorkspaceLayoutEntry> GetEnumerator()
         {
@@ -761,7 +726,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets an enumerator over field layout entries in canonical slot order.
+        /// Returns an enumerator over field layout entries in canonical slot order.
         /// </summary>
         IEnumerator IEnumerable.GetEnumerator()
         {
@@ -799,23 +764,8 @@ namespace Lokrain.Atlas.Execution
             ThrowIfDisposed();
             entry.ValidateBoundOrThrow(nameof(entry));
 
-            if (entry.ByteCapacity == 0L)
-            {
-                return default;
-            }
-
             var address = entry.Address;
             var block = GetRequiredStorageBlockByteCapacityArray(address.BlockIndex);
-
-            if (!block.IsCreated)
-            {
-                throw new InvalidOperationException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Atlas workspace field '{0}' references storage block {1}, but that block has no allocated memory.",
-                        entry.GetDiagnosticName(),
-                        address.BlockIndex));
-            }
 
             return new NativeSlice<byte>(
                 block,
@@ -828,23 +778,8 @@ namespace Lokrain.Atlas.Execution
             ThrowIfDisposed();
             entry.ValidateBoundOrThrow(nameof(entry));
 
-            if (entry.ByteLength == 0L)
-            {
-                return default;
-            }
-
             var address = entry.Address;
             var block = GetRequiredStorageBlockByteCapacityArray(address.BlockIndex);
-
-            if (!block.IsCreated)
-            {
-                throw new InvalidOperationException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Atlas workspace field '{0}' references storage block {1}, but that block has no allocated memory.",
-                        entry.GetDiagnosticName(),
-                        address.BlockIndex));
-            }
 
             return new NativeSlice<byte>(
                 block,
@@ -859,11 +794,6 @@ namespace Lokrain.Atlas.Execution
             ValidateTypedAccessOrThrow<TElement>(
                 entry,
                 nameof(TElement));
-
-            if (entry.Capacity == 0)
-            {
-                return default;
-            }
 
             var bytes = GetFieldByteCapacitySlice(entry);
             var typed = bytes.SliceConvert<TElement>();
@@ -889,11 +819,6 @@ namespace Lokrain.Atlas.Execution
             ValidateTypedAccessOrThrow<TElement>(
                 entry,
                 nameof(TElement));
-
-            if (entry.Length == 0)
-            {
-                return default;
-            }
 
             var bytes = GetFieldByteLengthSlice(entry);
             var typed = bytes.SliceConvert<TElement>();
@@ -934,16 +859,9 @@ namespace Lokrain.Atlas.Execution
                 for (var i = 0; i < layout.StorageBlockCount; i++)
                 {
                     var blockPlan = layout.GetRequiredStorageBlockPlan(i);
-                    var byteCapacity = blockPlan.ByteCapacityInt32;
-
-                    if (byteCapacity == 0)
-                    {
-                        blocks[i] = default;
-                        continue;
-                    }
 
                     blocks[i] = new NativeArray<byte>(
-                        byteCapacity,
+                        blockPlan.ByteCapacityInt32,
                         allocator,
                         options);
                 }

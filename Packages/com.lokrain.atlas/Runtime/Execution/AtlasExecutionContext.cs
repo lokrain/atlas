@@ -4,24 +4,27 @@
 // Namespace: Lokrain.Atlas.Execution
 //
 // Purpose
-// - Bind one compiled Atlas plan to one compatible workspace.
-// - Provide executor-facing access from compiled bindings to workspace-owned memory.
+// - Bind one compiled Atlas plan to one compatible layout-owned workspace.
+// - Provide executor-facing access from compiled bindings to workspace layout entries and slices.
 // - Keep FieldId/slot resolution out of jobs.
 // - Keep operation execution separate from compilation, memory allocation, artifacts, and debug rendering.
 //
 // Design notes
 // - This context does not own native memory.
 // - Disposing the workspace remains the caller's responsibility.
-// - Executors may use compiled operation bindings to obtain typed NativeArray/NativeSlice views.
-// - Jobs should receive those typed views, not this managed context.
-// - Shape-only bindings should use shape access, not memory access.
+// - Executors use compiled operation bindings to obtain AtlasFieldAddress values and typed NativeSlice views.
+// - Jobs should receive those typed views or numeric addresses, not this managed context.
+// - Shape-only bindings should use layout/shape metadata access, not memory access.
 // - Missing optional bindings are represented explicitly and must not be treated as default slots.
+// - This context no longer exposes AtlasFieldMemoryBlock because fields are packed into workspace
+//   storage blocks and addressed by AtlasFieldAddress.
 
 using System;
 using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Fields;
+using Lokrain.Atlas.Workspaces;
 using Unity.Collections;
 
 namespace Lokrain.Atlas.Execution
@@ -33,9 +36,8 @@ namespace Lokrain.Atlas.Execution
     /// <para>
     /// <see cref="AtlasExecutionContext"/> is the managed executor-facing boundary after
     /// compilation and workspace allocation. It validates that the supplied
-    /// <see cref="AtlasCompiledPlan"/> and <see cref="AtlasWorkspace"/> agree on the same field
-    /// contract shape, then exposes accessors from <see cref="AtlasCompiledBinding"/> to
-    /// workspace-owned blocks and typed native views.
+    /// <see cref="AtlasCompiledPlan"/> and <see cref="AtlasWorkspace"/> agree on field identity,
+    /// storage format, shape domain, and length-shape metadata.
     /// </para>
     ///
     /// <para>
@@ -74,9 +76,18 @@ namespace Lokrain.Atlas.Execution
         public AtlasContractTable Contracts => Plan.Contracts;
 
         /// <summary>
-        /// Gets the resolved workspace shape set.
+        /// Gets the compiled workspace layout.
         /// </summary>
-        public AtlasResolvedShapeSet Shapes => Workspace.Shapes;
+        public AtlasWorkspaceLayout Layout => Workspace.Layout;
+
+        /// <summary>
+        /// Gets a resolved shape set reconstructed from the compiled plan and workspace layout.
+        /// </summary>
+        /// <remarks>
+        /// This property is a compatibility bridge for artifact/header code. It allocates managed
+        /// metadata and should not be used in hot execution paths.
+        /// </remarks>
+        public AtlasResolvedShapeSet Shapes => CreateResolvedShapeSet();
 
         /// <summary>
         /// Gets the number of compiled stage occurrences.
@@ -94,7 +105,7 @@ namespace Lokrain.Atlas.Execution
         public int BindingCount => Plan.BindingCount;
 
         /// <summary>
-        /// Gets the number of workspace field blocks.
+        /// Gets the number of workspace field entries.
         /// </summary>
         public int FieldCount => Workspace.Count;
 
@@ -111,9 +122,6 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Creates a non-owning execution context for an already compiled plan and allocated workspace.
         /// </summary>
-        /// <param name="plan">Compiled plan.</param>
-        /// <param name="workspace">Compatible workspace.</param>
-        /// <returns>A validated execution context.</returns>
         public static AtlasExecutionContext Create(
             AtlasCompiledPlan plan,
             AtlasWorkspace workspace)
@@ -126,9 +134,6 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Creates a non-owning execution context from a successful compilation result and allocated workspace.
         /// </summary>
-        /// <param name="compilation">Compilation result containing a successful compiled plan.</param>
-        /// <param name="workspace">Compatible workspace.</param>
-        /// <returns>A validated execution context.</returns>
         public static AtlasExecutionContext Create(
             AtlasCompilationResult compilation,
             AtlasWorkspace workspace)
@@ -146,10 +151,7 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Gets a compiled operation by flattened operation index.
         /// </summary>
-        /// <param name="flattenedOperationIndex">Zero-based operation index across all stages.</param>
-        /// <returns>The compiled operation.</returns>
-        public AtlasCompiledOperation GetRequiredOperation(
-            int flattenedOperationIndex)
+        public AtlasCompiledOperation GetRequiredOperation(int flattenedOperationIndex)
         {
             return Plan.GetRequiredFlattenedOperation(flattenedOperationIndex);
         }
@@ -157,11 +159,6 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Attempts to get a compiled operation by flattened operation index.
         /// </summary>
-        /// <param name="flattenedOperationIndex">Zero-based operation index across all stages.</param>
-        /// <param name="stageIndex">Resolved stage index when present; otherwise, -1.</param>
-        /// <param name="operationIndex">Resolved stage-local operation index when present; otherwise, -1.</param>
-        /// <param name="operation">Resolved operation when present; otherwise, null.</param>
-        /// <returns><c>true</c> when the operation exists.</returns>
         public bool TryGetOperation(
             int flattenedOperationIndex,
             out int stageIndex,
@@ -176,31 +173,25 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets the workspace block for a present compiled binding that requires content memory.
+        /// Gets the layout entry for a present compiled binding.
         /// </summary>
-        /// <param name="binding">Compiled binding.</param>
-        /// <returns>The matching workspace field memory block.</returns>
-        public AtlasFieldMemoryBlock GetRequiredBlock(
-            AtlasCompiledBinding binding)
+        public AtlasWorkspaceLayoutEntry GetRequiredEntry(AtlasCompiledBinding binding)
         {
-            ValidateContentBindingOrThrow(binding);
+            ValidatePresentBindingOrThrow(binding);
 
-            var block = Workspace.GetRequiredBlock(binding.Contract.Slot);
+            var entry = Workspace.GetRequiredEntry(binding.Contract.Slot);
 
-            ValidateBlockMatchesBindingOrThrow(
-                block,
+            ValidateEntryMatchesBindingOrThrow(
+                entry,
                 binding);
 
-            return block;
+            return entry;
         }
 
         /// <summary>
-        /// Gets the workspace block for a compiled operation binding by binding index.
+        /// Gets the layout entry for a compiled operation binding by binding index.
         /// </summary>
-        /// <param name="operation">Compiled operation.</param>
-        /// <param name="bindingIndex">Operation-local binding index.</param>
-        /// <returns>The matching workspace field memory block.</returns>
-        public AtlasFieldMemoryBlock GetRequiredBlock(
+        public AtlasWorkspaceLayoutEntry GetRequiredEntry(
             AtlasCompiledOperation operation,
             int bindingIndex)
         {
@@ -209,71 +200,77 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            return GetRequiredBlock(operation[bindingIndex]);
+            return GetRequiredEntry(operation[bindingIndex]);
         }
 
         /// <summary>
-        /// Attempts to get the workspace block for a compiled binding.
+        /// Attempts to get the layout entry for a compiled binding.
         /// </summary>
-        /// <param name="binding">Compiled binding.</param>
-        /// <param name="block">Resolved block on success; otherwise, null.</param>
-        /// <returns>
-        /// <c>true</c> when the binding is present and requires content memory; otherwise,
-        /// <c>false</c> for missing optional or shape-only bindings.
-        /// </returns>
-        public bool TryGetBlock(
+        public bool TryGetEntry(
             AtlasCompiledBinding binding,
-            out AtlasFieldMemoryBlock block)
+            out AtlasWorkspaceLayoutEntry entry)
         {
             binding.ValidateOrThrow(nameof(binding));
 
-            if (!binding.IsPresent ||
-                !binding.RequiresContentMemory)
+            if (!binding.IsPresent)
             {
-                block = null;
+                entry = default;
                 return false;
             }
 
-            if (!Workspace.TryGetBlock(binding.Contract.Slot, out block))
+            if (!Workspace.TryGetEntry(binding.Contract.Slot, out entry))
             {
-                block = null;
+                entry = default;
                 return false;
             }
 
-            ValidateBlockMatchesBindingOrThrow(
-                block,
+            ValidateEntryMatchesBindingOrThrow(
+                entry,
                 binding);
 
             return true;
         }
 
         /// <summary>
-        /// Gets the resolved shape for a present compiled binding.
+        /// Gets the physical field address for a present compiled binding.
         /// </summary>
-        /// <param name="binding">Compiled binding.</param>
-        /// <returns>The matching resolved shape.</returns>
-        public AtlasResolvedShape GetRequiredShape(
-            AtlasCompiledBinding binding)
+        public AtlasFieldAddress GetRequiredAddress(AtlasCompiledBinding binding)
         {
-            ValidatePresentBindingOrThrow(binding);
-
-            var shape = Shapes.GetRequiredShape(binding.Contract.Slot);
-
-            if (shape.StableId != binding.Contract.StableId)
-            {
-                throw new InvalidOperationException(
-                    $"Atlas execution context shape mismatch for binding '{binding.BindingName}'. Shape stable id '{shape.StableId}' does not match binding field id '{binding.Contract.StableId}'.");
-            }
-
-            return shape;
+            return GetRequiredEntry(binding).Address;
         }
 
         /// <summary>
-        /// Gets the resolved shape for a compiled operation binding by binding index.
+        /// Attempts to get the physical field address for a compiled binding.
         /// </summary>
-        /// <param name="operation">Compiled operation.</param>
-        /// <param name="bindingIndex">Operation-local binding index.</param>
-        /// <returns>The matching resolved shape.</returns>
+        public bool TryGetAddress(
+            AtlasCompiledBinding binding,
+            out AtlasFieldAddress address)
+        {
+            if (TryGetEntry(binding, out var entry))
+            {
+                address = entry.Address;
+                return true;
+            }
+
+            address = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the resolved shape metadata for a present compiled binding.
+        /// </summary>
+        public AtlasResolvedShape GetRequiredShape(AtlasCompiledBinding binding)
+        {
+            var entry = GetRequiredEntry(binding);
+
+            return CreateShapeFromEntry(
+                binding.Contract,
+                entry);
+        }
+
+        /// <summary>
+        /// Gets the resolved shape metadata for a compiled operation binding by binding index.
+        /// </summary>
         public AtlasResolvedShape GetRequiredShape(
             AtlasCompiledOperation operation,
             int bindingIndex)
@@ -287,60 +284,91 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Attempts to get the resolved shape for a compiled binding.
+        /// Attempts to get the resolved shape metadata for a compiled binding.
         /// </summary>
-        /// <param name="binding">Compiled binding.</param>
-        /// <param name="shape">Resolved shape on success; otherwise, default payload.</param>
-        /// <returns><c>true</c> when the binding is present; otherwise, <c>false</c>.</returns>
         public bool TryGetShape(
             AtlasCompiledBinding binding,
             out AtlasResolvedShape shape)
         {
-            binding.ValidateOrThrow(nameof(binding));
-
-            if (!binding.IsPresent)
+            if (TryGetEntry(binding, out var entry))
             {
-                shape = default;
-                return false;
+                shape = CreateShapeFromEntry(
+                    binding.Contract,
+                    entry);
+                return true;
             }
 
-            if (!Shapes.TryGetShape(binding.Contract.Slot, out shape))
-            {
-                shape = default;
-                return false;
-            }
-
-            if (shape.StableId != binding.Contract.StableId)
-            {
-                throw new InvalidOperationException(
-                    $"Atlas execution context shape mismatch for binding '{binding.BindingName}'. Shape stable id '{shape.StableId}' does not match binding field id '{binding.Contract.StableId}'.");
-            }
-
-            return true;
+            shape = default;
+            return false;
         }
 
         /// <summary>
-        /// Gets a typed capacity view for a present content binding.
+        /// Gets the allocated byte-capacity slice for a present content binding.
         /// </summary>
-        /// <typeparam name="TElement">Expected unmanaged field element type.</typeparam>
-        /// <param name="binding">Compiled binding.</param>
-        /// <returns>A NativeArray view over the full resolved field capacity.</returns>
-        public NativeArray<TElement> GetTypedCapacityArray<TElement>(
+        public NativeSlice<byte> GetFieldByteCapacitySlice(AtlasCompiledBinding binding)
+        {
+            ValidateContentBindingOrThrow(binding);
+
+            var entry = GetRequiredEntry(binding);
+
+            return Workspace.GetFieldByteCapacitySlice(entry.Slot);
+        }
+
+        /// <summary>
+        /// Gets the allocated byte-capacity slice for a compiled operation binding by binding index.
+        /// </summary>
+        public NativeSlice<byte> GetFieldByteCapacitySlice(
+            AtlasCompiledOperation operation,
+            int bindingIndex)
+        {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            return GetFieldByteCapacitySlice(operation[bindingIndex]);
+        }
+
+        /// <summary>
+        /// Gets the logical byte-length slice for a present content binding.
+        /// </summary>
+        public NativeSlice<byte> GetFieldByteLengthSlice(AtlasCompiledBinding binding)
+        {
+            ValidateContentBindingOrThrow(binding);
+
+            var entry = GetRequiredEntry(binding);
+
+            return Workspace.GetFieldByteLengthSlice(entry.Slot);
+        }
+
+        /// <summary>
+        /// Gets a typed capacity slice for a present content binding.
+        /// </summary>
+        public NativeSlice<TElement> GetTypedCapacitySlice<TElement>(
             AtlasCompiledBinding binding)
             where TElement : unmanaged
         {
-            return GetRequiredBlock(binding)
-                .GetTypedCapacityArray<TElement>();
+            ValidateContentBindingOrThrow(binding);
+
+            var entry = GetRequiredEntry(binding);
+
+            return Workspace.GetTypedCapacitySlice<TElement>(entry.Slot);
         }
 
         /// <summary>
-        /// Gets a typed capacity view for a compiled operation binding by binding index.
+        /// Compatibility alias for <see cref="GetTypedCapacitySlice{TElement}(AtlasCompiledBinding)"/>.
         /// </summary>
-        /// <typeparam name="TElement">Expected unmanaged field element type.</typeparam>
-        /// <param name="operation">Compiled operation.</param>
-        /// <param name="bindingIndex">Operation-local binding index.</param>
-        /// <returns>A NativeArray view over the full resolved field capacity.</returns>
-        public NativeArray<TElement> GetTypedCapacityArray<TElement>(
+        public NativeSlice<TElement> GetTypedCapacityArray<TElement>(
+            AtlasCompiledBinding binding)
+            where TElement : unmanaged
+        {
+            return GetTypedCapacitySlice<TElement>(binding);
+        }
+
+        /// <summary>
+        /// Gets a typed capacity slice for a compiled operation binding by binding index.
+        /// </summary>
+        public NativeSlice<TElement> GetTypedCapacitySlice<TElement>(
             AtlasCompiledOperation operation,
             int bindingIndex)
             where TElement : unmanaged
@@ -350,30 +378,39 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            return GetTypedCapacityArray<TElement>(operation[bindingIndex]);
+            return GetTypedCapacitySlice<TElement>(operation[bindingIndex]);
         }
 
         /// <summary>
-        /// Gets a typed logical-length view for a present content binding.
+        /// Compatibility alias for <see cref="GetTypedCapacitySlice{TElement}(AtlasCompiledOperation, int)"/>.
         /// </summary>
-        /// <typeparam name="TElement">Expected unmanaged field element type.</typeparam>
-        /// <param name="binding">Compiled binding.</param>
-        /// <returns>A NativeSlice view over the resolved logical field length.</returns>
+        public NativeSlice<TElement> GetTypedCapacityArray<TElement>(
+            AtlasCompiledOperation operation,
+            int bindingIndex)
+            where TElement : unmanaged
+        {
+            return GetTypedCapacitySlice<TElement>(
+                operation,
+                bindingIndex);
+        }
+
+        /// <summary>
+        /// Gets a typed logical-length slice for a present content binding.
+        /// </summary>
         public NativeSlice<TElement> GetTypedLengthSlice<TElement>(
             AtlasCompiledBinding binding)
             where TElement : unmanaged
         {
-            return GetRequiredBlock(binding)
-                .GetTypedLengthSlice<TElement>();
+            ValidateContentBindingOrThrow(binding);
+
+            var entry = GetRequiredEntry(binding);
+
+            return Workspace.GetTypedLengthSlice<TElement>(entry.Slot);
         }
 
         /// <summary>
-        /// Gets a typed logical-length view for a compiled operation binding by binding index.
+        /// Gets a typed logical-length slice for a compiled operation binding by binding index.
         /// </summary>
-        /// <typeparam name="TElement">Expected unmanaged field element type.</typeparam>
-        /// <param name="operation">Compiled operation.</param>
-        /// <param name="bindingIndex">Operation-local binding index.</param>
-        /// <returns>A NativeSlice view over the resolved logical field length.</returns>
         public NativeSlice<TElement> GetTypedLengthSlice<TElement>(
             AtlasCompiledOperation operation,
             int bindingIndex)
@@ -388,41 +425,46 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Gets a required field memory block by stable field identity.
+        /// Gets a required layout entry by stable field identity.
         /// </summary>
-        /// <param name="stableId">Stable field id.</param>
-        /// <returns>The matching workspace field memory block.</returns>
-        /// <remarks>
-        /// Prefer compiled binding access inside operation executors. This method exists for
-        /// orchestration, diagnostics, artifact writing, and debug-map export boundaries.
-        /// </remarks>
-        public AtlasFieldMemoryBlock GetRequiredBlock(
-            StableDataId stableId)
+        public AtlasWorkspaceLayoutEntry GetRequiredEntry(StableDataId stableId)
         {
-            return Workspace.GetRequiredBlock(stableId);
+            return Workspace.GetRequiredEntry(stableId);
         }
 
         /// <summary>
-        /// Gets a required field memory block by typed field declaration.
+        /// Gets a required layout entry by typed field declaration.
         /// </summary>
-        /// <typeparam name="TField">Typed field declaration.</typeparam>
-        /// <typeparam name="TElement">Expected unmanaged field element type.</typeparam>
-        /// <returns>The matching workspace field memory block.</returns>
-        /// <remarks>
-        /// Prefer compiled binding access inside operation executors. This method exists for
-        /// orchestration, diagnostics, artifact writing, and debug-map export boundaries.
-        /// </remarks>
-        public AtlasFieldMemoryBlock GetRequiredBlock<TField, TElement>()
+        public AtlasWorkspaceLayoutEntry GetRequiredEntry<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
         {
-            return Workspace.GetRequiredBlock<TField, TElement>();
+            return Workspace.GetRequiredEntry<TField, TElement>();
+        }
+
+        /// <summary>
+        /// Reconstructs resolved shape metadata from the compiled plan and workspace layout.
+        /// </summary>
+        public AtlasResolvedShapeSet CreateResolvedShapeSet()
+        {
+            var shapes = new AtlasResolvedShape[Workspace.Count];
+
+            for (var i = 0; i < Workspace.Count; i++)
+            {
+                shapes[i] = CreateShapeFromEntry(
+                    Plan.Contracts[i],
+                    Workspace[i]);
+            }
+
+            return AtlasResolvedShapeSet.Create(
+                Plan.DebugName,
+                Plan.Contracts,
+                shapes);
         }
 
         /// <summary>
         /// Returns a stable diagnostic name for this execution context.
         /// </summary>
-        /// <returns>The compiled pipeline debug name when present; otherwise, the workspace name.</returns>
         public string GetDiagnosticName()
         {
             if (!Plan.DebugName.IsEmpty)
@@ -436,7 +478,6 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Returns a diagnostic representation of this context.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
             return
@@ -465,84 +506,24 @@ namespace Lokrain.Atlas.Execution
             }
 
             workspace.ThrowIfDisposed();
+            workspace.Layout.ValidateOrThrow();
 
-            if (workspace.Contracts == null)
+            if (plan.Contracts.Count != workspace.Count)
             {
                 throw new ArgumentException(
-                    "Workspace does not reference a Contract table.",
-                    nameof(workspace));
+                    $"Compiled plan Contract table contains '{plan.Contracts.Count}' fields, but workspace layout contains '{workspace.Count}' entries.");
             }
 
-            if (workspace.Shapes == null)
+            for (var i = 0; i < plan.Contracts.Count; i++)
             {
-                throw new ArgumentException(
-                    "Workspace does not reference a resolved shape set.",
-                    nameof(workspace));
-            }
-
-            ValidateCompatibleContractTablesOrThrow(
-                plan.Contracts,
-                workspace.Contracts);
-
-            ValidateWorkspaceShapesMatchPlanOrThrow(
-                plan.Contracts,
-                workspace.Shapes);
-        }
-
-        private static void ValidateCompatibleContractTablesOrThrow(
-            AtlasContractTable planContracts,
-            AtlasContractTable workspaceContracts)
-        {
-            if (planContracts.Count != workspaceContracts.Count)
-            {
-                throw new ArgumentException(
-                    $"Compiled plan Contract table contains '{planContracts.Count}' fields, but workspace Contract table contains '{workspaceContracts.Count}' fields.");
-            }
-
-            for (var i = 0; i < planContracts.Count; i++)
-            {
-                var planContract = planContracts[i];
-                var workspaceContract = workspaceContracts[i];
-
-                if (planContract != workspaceContract)
-                {
-                    throw new ArgumentException(
-                        $"Compiled plan Contract table does not match workspace Contract table at slot '{i}'. Plan field '{planContract.GetDiagnosticName()}' does not match workspace field '{workspaceContract.GetDiagnosticName()}'.");
-                }
+                ValidateEntryMatchesContractOrThrow(
+                    workspace[i],
+                    plan.Contracts[i],
+                    i);
             }
         }
 
-        private static void ValidateWorkspaceShapesMatchPlanOrThrow(
-            AtlasContractTable planContracts,
-            AtlasResolvedShapeSet shapes)
-        {
-            if (shapes.Count != planContracts.Count)
-            {
-                throw new ArgumentException(
-                    $"Workspace shape set contains '{shapes.Count}' shapes, but compiled plan Contract table contains '{planContracts.Count}' contracts.");
-            }
-
-            for (var i = 0; i < shapes.Count; i++)
-            {
-                var contract = planContracts[i];
-                var shape = shapes[i];
-
-                shape.ValidateOrThrow($"shapes[{i}]");
-
-                if (shape.StableId != contract.StableId ||
-                    shape.Slot != contract.Slot ||
-                    shape.Role != contract.Role ||
-                    shape.StorageFormat != contract.StorageFormat ||
-                    shape.DeclaredShape != contract.LengthShape)
-                {
-                    throw new ArgumentException(
-                        $"Workspace shape at slot '{i}' does not match compiled plan Contract field '{contract.GetDiagnosticName()}'.");
-                }
-            }
-        }
-
-        private static void ValidatePresentBindingOrThrow(
-            AtlasCompiledBinding binding)
+        private static void ValidatePresentBindingOrThrow(AtlasCompiledBinding binding)
         {
             binding.ValidateOrThrow(nameof(binding));
 
@@ -553,8 +534,7 @@ namespace Lokrain.Atlas.Execution
             }
         }
 
-        private static void ValidateContentBindingOrThrow(
-            AtlasCompiledBinding binding)
+        private static void ValidateContentBindingOrThrow(AtlasCompiledBinding binding)
         {
             ValidatePresentBindingOrThrow(binding);
 
@@ -565,31 +545,85 @@ namespace Lokrain.Atlas.Execution
             }
         }
 
-        private static void ValidateBlockMatchesBindingOrThrow(
-            AtlasFieldMemoryBlock block,
+        private static AtlasResolvedShape CreateShapeFromEntry(
+            AtlasContract contract,
+            AtlasWorkspaceLayoutEntry entry)
+        {
+            ValidateEntryMatchesContractOrThrow(
+                entry,
+                contract,
+                entry.Slot.Index);
+
+            return AtlasResolvedShape.Create(
+                entry.StableId,
+                entry.Slot,
+                entry.Role,
+                entry.StorageFormat,
+                entry.ShapeDomain,
+                entry.DeclaredShape,
+                entry.DebugName,
+                entry.Length,
+                entry.Capacity);
+        }
+
+        private static void ValidateEntryMatchesBindingOrThrow(
+            AtlasWorkspaceLayoutEntry entry,
             AtlasCompiledBinding binding)
         {
-            if (block == null)
+            ValidateEntryMatchesContractOrThrow(
+                entry,
+                binding.Contract,
+                entry.Slot.Index);
+        }
+
+        private static void ValidateEntryMatchesContractOrThrow(
+            AtlasWorkspaceLayoutEntry entry,
+            AtlasContract contract,
+            int index)
+        {
+            contract.ValidateTableReadyOrThrow(nameof(contract));
+            entry.ValidateBoundOrThrow(nameof(entry));
+
+            if (entry.Slot.Index != index)
             {
-                throw new ArgumentNullException(nameof(block));
+                throw new ArgumentException(
+                    $"Workspace layout entry at index '{index}' has slot '{entry.Slot}'.");
             }
 
-            if (block.StableId != binding.Contract.StableId)
+            if (entry.StableId != contract.StableId)
             {
                 throw new InvalidOperationException(
-                    $"Atlas workspace block '{block.GetDiagnosticName()}' does not match compiled binding '{binding.BindingName}'. Block field id '{block.StableId}' differs from binding field id '{binding.Contract.StableId}'.");
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry field id '{entry.StableId}' differs from Contract field id '{contract.StableId}'.");
             }
 
-            if (block.Slot != binding.Contract.Slot)
+            if (entry.Slot != contract.Slot)
             {
                 throw new InvalidOperationException(
-                    $"Atlas workspace block '{block.GetDiagnosticName()}' does not match compiled binding '{binding.BindingName}'. Block slot '{block.Slot}' differs from binding slot '{binding.Contract.Slot}'.");
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry slot '{entry.Slot}' differs from Contract slot '{contract.Slot}'.");
             }
 
-            if (block.StorageFormat != binding.Contract.StorageFormat)
+            if (entry.Role != contract.Role)
             {
                 throw new InvalidOperationException(
-                    $"Atlas workspace block '{block.GetDiagnosticName()}' does not match compiled binding '{binding.BindingName}'. Block storage format differs from binding storage format.");
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry role '{entry.Role}' differs from Contract role '{contract.Role}'.");
+            }
+
+            if (entry.StorageFormat != contract.StorageFormat)
+            {
+                throw new InvalidOperationException(
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry storage format differs from Contract storage format.");
+            }
+
+            if (entry.ShapeDomain != contract.ShapeDomain)
+            {
+                throw new InvalidOperationException(
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry shape domain differs from Contract shape domain.");
+            }
+
+            if (entry.DeclaredShape != contract.LengthShape)
+            {
+                throw new InvalidOperationException(
+                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry declared shape differs from Contract length shape.");
             }
         }
     }

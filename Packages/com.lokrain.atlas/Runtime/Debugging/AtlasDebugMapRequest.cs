@@ -28,7 +28,7 @@ using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Fields;
 
 namespace Lokrain.Atlas.Debugging
-{ 
+{
     /// <summary>
     /// Explicit request to export one Atlas debug-map image.
     /// </summary>
