@@ -1,4 +1,4 @@
-// Runtime/Compilation/AtlasCompiledBinding.cs
+// Packages/com.lokrain.atlas/Runtime/Compilation/AtlasCompiledBinding.cs
 //
 // Package: com.lokrain.atlas
 // Namespace: Lokrain.Atlas.Compilation
@@ -7,6 +7,7 @@
 // - Represent one operation access declaration after resolution against the field contract table.
 // - Preserve operation-local binding order.
 // - Bind symbolic operation access to either a concrete field contract or an explicit optional-missing binding.
+// - Preserve declared write coverage for dataflow validation and execution policy.
 // - Keep compilation output separate from runtime native memory.
 //
 // Design notes
@@ -21,6 +22,7 @@
 // - AtlasContract.Empty/default is only an inert payload for missing optional bindings; the presence flag owns meaning.
 // - AtlasFieldSlot default/zero is valid and must not be used as missing state.
 // - StableDataId default/zero is valid and must not be used as missing state.
+// - DiscardBeforeWrite does not prove full write coverage; WriteCoverage owns that proof.
 // - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
@@ -38,24 +40,6 @@ namespace Lokrain.Atlas.Compilation
     /// <summary>
     /// Resolved binding for one operation access declaration.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A compiled binding is the first compilation boundary where symbolic operation access is
-    /// resolved against the field contract table. It preserves the operation-local binding index and
-    /// either carries the resolved contract or records that an optional binding is absent.
-    /// </para>
-    ///
-    /// <para>
-    /// This type does not own memory. It does not expose native containers. It does not schedule
-    /// jobs. Runtime workspaces and memory resolvers use compiled bindings to produce execution
-    /// bindings appropriate for concrete schedulers.
-    /// </para>
-    ///
-    /// <para>
-    /// Missing bindings are valid only for optional operation access declarations. Required access
-    /// must always resolve to a present contract during plan compilation.
-    /// </para>
-    /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct AtlasCompiledBinding :
         IEquatable<AtlasCompiledBinding>
@@ -69,18 +53,11 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Default compiled binding payload used by Try-style APIs when no binding is found.
         /// </summary>
-        /// <remarks>
-        /// This value is not an invalid sentinel. Callers must use the boolean result of the
-        /// Try-style API to determine whether this payload is meaningful.
-        /// </remarks>
         public static readonly AtlasCompiledBinding Empty = default;
 
         /// <summary>
         /// Compatibility alias for <see cref="Empty"/>.
         /// </summary>
-        /// <remarks>
-        /// This value is not an invalid sentinel. It is retained only for older call sites.
-        /// </remarks>
         public static readonly AtlasCompiledBinding Invalid = default;
 
         private readonly byte _presence;
@@ -88,10 +65,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Zero-based operation-local binding index.
         /// </summary>
-        /// <remarks>
-        /// This index corresponds to the access declaration index inside the source operation
-        /// definition. Operation binding order is ABI and must not be sorted by field id or slot.
-        /// </remarks>
         public readonly int BindingIndex;
 
         /// <summary>
@@ -100,13 +73,8 @@ namespace Lokrain.Atlas.Compilation
         public readonly AtlasOperationAccess Access;
 
         /// <summary>
-        /// Resolved field contract when <see cref="IsPresent"/> is <c>true</c>.
+        /// Resolved field contract when <see cref="IsPresent"/> is true.
         /// </summary>
-        /// <remarks>
-        /// When <see cref="IsMissingOptional"/> is <c>true</c>, this value is an inert default
-        /// payload. Do not infer missing state from <see cref="Contract"/>. Use
-        /// <see cref="IsPresent"/> or <see cref="IsMissingOptional"/>.
-        /// </remarks>
         public readonly AtlasContract Contract;
 
         private AtlasCompiledBinding(
@@ -144,9 +112,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets whether this binding is valid compiled metadata.
         /// </summary>
-        /// <remarks>
-        /// This is semantic validation shorthand. It does not mean default bit patterns are invalid.
-        /// </remarks>
         public bool IsValid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -158,9 +123,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets whether this compiled binding is not semantically valid metadata.
         /// </summary>
-        /// <remarks>
-        /// This is a semantic validation query, not a bit-pattern validity query.
-        /// </remarks>
         public bool IsInvalid
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -204,12 +166,17 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Gets the declared write coverage.
+        /// </summary>
+        public AtlasWriteCoverage WriteCoverage
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Access.WriteCoverage;
+        }
+
+        /// <summary>
         /// Gets the resolved field slot when present, or the default slot payload when absent.
         /// </summary>
-        /// <remarks>
-        /// Slot zero/default is valid. Callers must check <see cref="IsPresent"/> before consuming
-        /// this value as a resolved slot.
-        /// </remarks>
         public AtlasFieldSlot Slot
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -239,6 +206,26 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Gets whether this present binding proves full logical content after execution.
+        /// </summary>
+        public bool WritesFullLogicalContent
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => IsPresent &&
+                   Access.WritesFullLogicalContent;
+        }
+
+        /// <summary>
+        /// Gets whether this present binding writes partial logical content, sparse content, or appended records.
+        /// </summary>
+        public bool WritesPartialContent
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => IsPresent &&
+                   Access.WritesPartialContent;
+        }
+
+        /// <summary>
         /// Gets whether the operation declaration reads field contents regardless of optional resolution.
         /// </summary>
         public bool DeclaresContentRead
@@ -254,6 +241,15 @@ namespace Lokrain.Atlas.Compilation
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => Access.WritesContent;
+        }
+
+        /// <summary>
+        /// Gets whether the operation declaration proves full logical content regardless of optional resolution.
+        /// </summary>
+        public bool DeclaresFullLogicalWrite
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Access.WritesFullLogicalContent;
         }
 
         /// <summary>
@@ -287,13 +283,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a present compiled binding from a resolved contract.
         /// </summary>
-        /// <param name="bindingIndex">Zero-based operation-local binding index.</param>
-        /// <param name="access">Source operation access declaration.</param>
-        /// <param name="contract">Resolved field contract.</param>
-        /// <returns>A validated present compiled binding.</returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when arguments do not form a valid resolved binding.
-        /// </exception>
         public static AtlasCompiledBinding PresentBinding(
             int bindingIndex,
             AtlasOperationAccess access,
@@ -312,12 +301,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a missing compiled binding for an absent optional access declaration.
         /// </summary>
-        /// <param name="bindingIndex">Zero-based operation-local binding index.</param>
-        /// <param name="access">Source optional operation access declaration.</param>
-        /// <returns>A validated missing optional compiled binding.</returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="access"/> is invalid or not optional.
-        /// </exception>
         public static AtlasCompiledBinding MissingOptionalBinding(
             int bindingIndex,
             AtlasOperationAccess access)
@@ -335,19 +318,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Resolves an operation access declaration against a contract table.
         /// </summary>
-        /// <param name="bindingIndex">Zero-based operation-local binding index.</param>
-        /// <param name="access">Source operation access declaration.</param>
-        /// <param name="contracts">Contract table used for field resolution.</param>
-        /// <returns>
-        /// A present compiled binding when the field exists, or a missing optional binding when the
-        /// field is absent and the access declaration is optional.
-        /// </returns>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="contracts"/> is <c>null</c>.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the access declaration is invalid or required field access cannot be resolved.
-        /// </exception>
         public static AtlasCompiledBinding Resolve(
             int bindingIndex,
             AtlasOperationAccess access,
@@ -388,11 +358,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Throws when this compiled binding is invalid.
         /// </summary>
-        /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
-        /// <exception cref="ArgumentException">
-        /// Thrown when this binding has a negative index, invalid access declaration, invalid
-        /// presence state, missing required contract, or mismatched field identity.
-        /// </exception>
         public void ValidateOrThrow(string parameterName = null)
         {
             var name = parameterName ?? nameof(AtlasCompiledBinding);
@@ -459,10 +424,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Throws when this binding is not present.
         /// </summary>
-        /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when this binding is missing.
-        /// </exception>
         public void ThrowIfMissing(string parameterName = null)
         {
             _ = parameterName;
@@ -482,10 +443,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets the resolved contract or throws when this binding is missing.
         /// </summary>
-        /// <returns>The resolved field contract.</returns>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when this binding is missing.
-        /// </exception>
         public AtlasContract GetRequiredContract()
         {
             ThrowIfMissing(nameof(Contract));
@@ -495,8 +452,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this binding is equal to another binding.
         /// </summary>
-        /// <param name="other">The binding to compare with this binding.</param>
-        /// <returns><c>true</c> when binding index, access declaration, contract, and presence state match.</returns>
         public bool Equals(AtlasCompiledBinding other)
         {
             return BindingIndex == other.BindingIndex &&
@@ -508,8 +463,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this binding is equal to an object instance.
         /// </summary>
-        /// <param name="obj">The object to compare with this binding.</param>
-        /// <returns><c>true</c> when <paramref name="obj"/> is an equal <see cref="AtlasCompiledBinding"/>.</returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasCompiledBinding other &&
@@ -519,7 +472,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a deterministic hash code for this binding.
         /// </summary>
-        /// <returns>A deterministic hash code derived from binding index, access, contract, and presence state.</returns>
         public override int GetHashCode()
         {
             unchecked
@@ -536,27 +488,28 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a diagnostic representation of this compiled binding.
         /// </summary>
-        /// <returns>A stable diagnostic string.</returns>
         public override string ToString()
         {
             return IsPresent
                 ? string.Format(
                     CultureInfo.InvariantCulture,
-                    "AtlasCompiledBinding(Index={0}, Binding={1}, Field={2}, Slot={3}, Mode={4}, Flags={5})",
+                    "AtlasCompiledBinding(Index={0}, Binding={1}, Field={2}, Slot={3}, Mode={4}, Flags={5}, Coverage={6})",
                     BindingIndex,
                     BindingName,
                     Contract.DebugName,
                     Contract.Slot.Index,
                     Mode,
-                    Flags)
+                    Flags,
+                    WriteCoverage)
                 : string.Format(
                     CultureInfo.InvariantCulture,
-                    "AtlasCompiledBinding(Index={0}, Binding={1}, MissingOptional=True, FieldId={2}, Mode={3}, Flags={4})",
+                    "AtlasCompiledBinding(Index={0}, Binding={1}, MissingOptional=True, FieldId={2}, Mode={3}, Flags={4}, Coverage={5})",
                     BindingIndex,
                     BindingName,
                     FieldId,
                     Mode,
-                    Flags);
+                    Flags,
+                    WriteCoverage);
         }
 
         /// <summary>

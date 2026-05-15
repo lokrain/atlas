@@ -62,6 +62,8 @@ Packages/com.lokrain.atlas/Runtime/Compilation/
  AtlasCompiledOperation.cs
  AtlasCompiledPlan.cs
  AtlasCompiledStage.cs
+ AtlasContentAvailability.cs
+ AtlasContentAvailabilityExtensions.cs
  AtlasDataflowValidationPolicy.cs
  AtlasDataflowValidationPolicyFlags.cs
  AtlasDataflowValidationPolicyFlagsExtensions.cs
@@ -70,6 +72,7 @@ Packages/com.lokrain.atlas/Runtime/Compilation/
  AtlasPlanValidator.cs
  AtlasResolvedShape.cs
  AtlasResolvedShapeSet.cs
+ AtlasShapeResolutionMath.cs
  AtlasShapeResolver.cs
  AtlasWriteHazardValidationPolicy.cs
  AtlasWriteHazardValidationPolicyFlags.cs
@@ -83,6 +86,7 @@ Packages/com.lokrain.atlas/Runtime/Contracts/
  AtlasShapeDomainKind.cs
  HashParticipation.cs
  LengthShape.cs
+ LengthShapeKind.cs
  LifetimePolicy.cs
  OwnershipPolicy.cs
  StorageFormat.cs

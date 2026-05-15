@@ -377,7 +377,15 @@ namespace Lokrain.Atlas.Artifacts
             WriteInt32(stream, (int)shape.Kind);
             WriteInt32(stream, shape.FixedLength);
             WriteStableDataId(stream, shape.SourceFieldId);
-            WriteInt32(stream, BitConverter.SingleToInt32Bits(shape.CapacityMultiplier));
+
+            WriteInt32(stream, shape.Name.Length);
+            for (var i = 0; i < shape.Name.Length; i++)
+            {
+                stream.WriteByte(shape.Name[i]);
+            }
+
+            WriteInt32(stream, shape.CapacityMultiplierNumerator);
+            WriteInt32(stream, shape.CapacityMultiplierDenominator);
             WriteInt32(stream, shape.CapacityPadding);
         }
 

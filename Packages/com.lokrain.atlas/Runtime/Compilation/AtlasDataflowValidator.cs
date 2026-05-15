@@ -6,7 +6,8 @@
 // Purpose
 // - Validate compiled-plan content dataflow before executable planning.
 // - Detect content reads before a prior write or explicitly allowed initial input.
-// - Track Field content availability across flattened stage/operation order.
+// - Distinguish partial write coverage from full logical-content availability.
+// - Track field content availability across flattened stage/operation order.
 // - Keep dataflow validation separate from route policy, workspace memory, and scheduler validation.
 //
 // Design notes
@@ -18,8 +19,10 @@
 // - Shape-only bindings do not require content and do not establish content.
 // - Missing optional bindings do not require content and do not establish content.
 // - Consume requires prior content and removes content availability for later operations.
-// - Append and discard-before-write writes establish content availability.
-// - Preserve-existing writes and read-write bindings require prior content and then keep/establish availability.
+// - Append establishes partial content unless external/full coverage is explicitly declared by the operation access.
+// - FullLogicalLength and FullCapacity writes establish full logical availability.
+// - PartialLogicalLength and SparseIndexed writes establish partial availability.
+// - Preserve-existing writes and read-write bindings require prior full logical content.
 
 using System;
 using System.Collections.Generic;
@@ -34,25 +37,6 @@ namespace Lokrain.Atlas.Compilation
     /// <summary>
     /// Validates compiled-plan content dataflow.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="AtlasDataflowValidator"/> walks a compiled plan in flattened execution order
-    /// and tracks which Fields have initialized content available for content reads.
-    /// </para>
-    ///
-    /// <para>
-    /// This validator is intentionally narrower than route validation. It does not know whether
-    /// a continental route requires a specific stage set, whether a stage may repeat, or whether
-    /// a route-specific Field must be produced by a specific operation. It only validates content
-    /// availability across compiled operation order.
-    /// </para>
-    ///
-    /// <para>
-    /// Runtime memory still belongs to workspace and memory-resolution validation. A Field being
-    /// considered available by this validator means the compiled metadata has a plausible producer
-    /// or initial-content source. It does not prove that a concrete <c>NativeArray</c> exists.
-    /// </para>
-    /// </remarks>
     public static class AtlasDataflowValidator
     {
         private static readonly AtlasDiagnosticCode ReadBeforeWriteCode =
@@ -67,15 +51,15 @@ namespace Lokrain.Atlas.Compilation
         private static readonly AtlasDiagnosticCode InvalidPresentContractCode =
             AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 103);
 
+        private static readonly AtlasDiagnosticCode ReadAfterPartialWriteCode =
+            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 104);
+
+        private static readonly AtlasDiagnosticCode PreserveAfterPartialWriteCode =
+            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 105);
+
         /// <summary>
         /// Compiles, structurally validates, and dataflow-validates a pipeline using production-default dataflow policy.
         /// </summary>
-        /// <param name="pipeline">Authored pipeline definition to compile.</param>
-        /// <param name="contracts">Contract table used to resolve operation Field access.</param>
-        /// <returns>
-        /// A successful result with a structurally and dataflow-valid compiled plan, or a failed
-        /// result with deterministic diagnostics.
-        /// </returns>
         public static AtlasCompilationResult TryCompileAndValidateDataflow(
             Pipelines.AtlasPipelineDefinition pipeline,
             AtlasContractTable contracts)
@@ -89,13 +73,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Compiles, structurally validates, and dataflow-validates a pipeline using explicit dataflow policy.
         /// </summary>
-        /// <param name="pipeline">Authored pipeline definition to compile.</param>
-        /// <param name="contracts">Contract table used to resolve operation Field access.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <returns>
-        /// A successful result with a structurally and dataflow-valid compiled plan, or a failed
-        /// result with deterministic diagnostics.
-        /// </returns>
         public static AtlasCompilationResult TryCompileAndValidateDataflow(
             Pipelines.AtlasPipelineDefinition pipeline,
             AtlasContractTable contracts,
@@ -127,8 +104,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Structurally validates and dataflow-validates a compiled plan using production-default dataflow policy.
         /// </summary>
-        /// <param name="plan">Compiled plan to validate.</param>
-        /// <returns>Diagnostics in deterministic traversal order.</returns>
         public static AtlasDiagnosticBuffer Validate(AtlasCompiledPlan plan)
         {
             return Validate(
@@ -139,9 +114,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Structurally validates and dataflow-validates a compiled plan using explicit dataflow policy.
         /// </summary>
-        /// <param name="plan">Compiled plan to validate.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <returns>Diagnostics in deterministic traversal order.</returns>
         public static AtlasDiagnosticBuffer Validate(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy)
@@ -164,13 +136,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Structurally validates and dataflow-validates a compiled plan into an existing diagnostic buffer.
         /// </summary>
-        /// <param name="plan">Compiled plan to validate.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <param name="diagnostics">Diagnostic buffer to append to.</param>
-        /// <returns>The supplied diagnostic buffer.</returns>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="diagnostics"/> is <c>null</c>.
-        /// </exception>
         public static AtlasDiagnosticBuffer Validate(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy,
@@ -201,8 +166,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Dataflow-validates an already structurally valid compiled plan using production-default policy.
         /// </summary>
-        /// <param name="plan">Structurally valid compiled plan.</param>
-        /// <returns>Dataflow diagnostics in deterministic traversal order.</returns>
         public static AtlasDiagnosticBuffer ValidateDataflowOnly(AtlasCompiledPlan plan)
         {
             return ValidateDataflowOnly(
@@ -213,9 +176,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Dataflow-validates an already structurally valid compiled plan using explicit policy.
         /// </summary>
-        /// <param name="plan">Structurally valid compiled plan.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <returns>Dataflow diagnostics in deterministic traversal order.</returns>
         public static AtlasDiagnosticBuffer ValidateDataflowOnly(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy)
@@ -233,13 +193,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Dataflow-validates an already structurally valid compiled plan into an existing diagnostic buffer.
         /// </summary>
-        /// <param name="plan">Structurally valid compiled plan.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <param name="diagnostics">Diagnostic buffer to append to.</param>
-        /// <returns>The supplied diagnostic buffer.</returns>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="plan"/> or <paramref name="diagnostics"/> is <c>null</c>.
-        /// </exception>
         public static AtlasDiagnosticBuffer ValidateDataflowOnly(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy,
@@ -255,7 +208,7 @@ namespace Lokrain.Atlas.Compilation
                 throw new ArgumentNullException(nameof(diagnostics));
             }
 
-            var availableContent = new HashSet<StableDataId>();
+            var availableContent = new Dictionary<StableDataId, AtlasContentAvailability>();
 
             SeedInitiallyReadableContent(
                 plan,
@@ -268,8 +221,10 @@ namespace Lokrain.Atlas.Compilation
 
                 for (var operationIndex = 0; operationIndex < stage.Count; operationIndex++)
                 {
+                    var operation = stage[operationIndex];
+
                     ValidateOperationInputs(
-                        stage[operationIndex],
+                        operation,
                         stageIndex,
                         operationIndex,
                         policy,
@@ -277,7 +232,8 @@ namespace Lokrain.Atlas.Compilation
                         diagnostics);
 
                     ApplyOperationContentEffects(
-                        stage[operationIndex],
+                        operation,
+                        policy,
                         availableContent);
                 }
             }
@@ -288,10 +244,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Throws when a compiled plan fails structural or dataflow validation using production-default policy.
         /// </summary>
-        /// <param name="plan">Compiled plan to validate.</param>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when validation reports at least one error or fatal diagnostic.
-        /// </exception>
         public static void ValidateOrThrow(AtlasCompiledPlan plan)
         {
             ValidateOrThrow(
@@ -302,11 +254,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Throws when a compiled plan fails structural or dataflow validation using explicit policy.
         /// </summary>
-        /// <param name="plan">Compiled plan to validate.</param>
-        /// <param name="policy">Dataflow policy controlling allowed initial content reads.</param>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when validation reports at least one error or fatal diagnostic.
-        /// </exception>
         public static void ValidateOrThrow(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy)
@@ -327,15 +274,16 @@ namespace Lokrain.Atlas.Compilation
         private static void SeedInitiallyReadableContent(
             AtlasCompiledPlan plan,
             AtlasDataflowValidationPolicy policy,
-            HashSet<StableDataId> availableContent)
+            Dictionary<StableDataId, AtlasContentAvailability> availableContent)
         {
             for (var i = 0; i < plan.Contracts.Count; i++)
             {
                 var contract = plan.Contracts[i];
+                var availability = policy.InitialAvailability(contract);
 
-                if (policy.AllowsInitialRead(contract))
+                if (availability.HasAnyContent())
                 {
-                    availableContent.Add(contract.StableId);
+                    availableContent[contract.StableId] = availability;
                 }
             }
         }
@@ -345,7 +293,7 @@ namespace Lokrain.Atlas.Compilation
             int stageIndex,
             int operationIndex,
             AtlasDataflowValidationPolicy policy,
-            HashSet<StableDataId> availableContent,
+            Dictionary<StableDataId, AtlasContentAvailability> availableContent,
             AtlasDiagnosticBuffer diagnostics)
         {
             for (var bindingIndex = 0; bindingIndex < operation.Count; bindingIndex++)
@@ -376,24 +324,39 @@ namespace Lokrain.Atlas.Compilation
                     continue;
                 }
 
-                if (availableContent.Contains(binding.FieldId))
+                if (!availableContent.TryGetValue(binding.FieldId, out var availability) ||
+                    !availability.HasAnyContent())
                 {
+                    AddMissingPriorContentDiagnostic(
+                        operation,
+                        binding,
+                        stageIndex,
+                        operationIndex,
+                        bindingIndex,
+                        diagnostics);
+
                     continue;
                 }
 
-                AddMissingPriorContentDiagnostic(
-                    operation,
-                    binding,
-                    stageIndex,
-                    operationIndex,
-                    bindingIndex,
-                    diagnostics);
+                if (policy.RequiresFullPriorContent(binding) &&
+                    !availability.HasFullLogicalContent())
+                {
+                    AddInsufficientPriorContentDiagnostic(
+                        operation,
+                        binding,
+                        availability,
+                        stageIndex,
+                        operationIndex,
+                        bindingIndex,
+                        diagnostics);
+                }
             }
         }
 
         private static void ApplyOperationContentEffects(
             AtlasCompiledOperation operation,
-            HashSet<StableDataId> availableContent)
+            AtlasDataflowValidationPolicy policy,
+            Dictionary<StableDataId, AtlasContentAvailability> availableContent)
         {
             for (var bindingIndex = 0; bindingIndex < operation.Count; bindingIndex++)
             {
@@ -410,10 +373,22 @@ namespace Lokrain.Atlas.Compilation
                     continue;
                 }
 
-                if (binding.WritesContent)
+                var established = policy.EstablishedAvailability(binding);
+
+                if (!established.HasAnyContent())
                 {
-                    availableContent.Add(binding.FieldId);
+                    continue;
                 }
+
+                if (availableContent.TryGetValue(binding.FieldId, out var existing))
+                {
+                    availableContent[binding.FieldId] = existing.Max(established);
+                    continue;
+                }
+
+                availableContent.Add(
+                    binding.FieldId,
+                    established);
             }
         }
 
@@ -441,6 +416,30 @@ namespace Lokrain.Atlas.Compilation
                 ToMessage($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires prior content for Field '{contractName}' in mode '{modeText}', but no previous operation produced it and the dataflow policy does not allow it as initial input."));
         }
 
+        private static void AddInsufficientPriorContentDiagnostic(
+            AtlasCompiledOperation operation,
+            AtlasCompiledBinding binding,
+            AtlasContentAvailability availability,
+            int stageIndex,
+            int operationIndex,
+            int bindingIndex,
+            AtlasDiagnosticBuffer diagnostics)
+        {
+            var code = GetInsufficientPriorContentCode(binding);
+            var operationName = GetDiagnosticName(operation.DebugName);
+            var bindingName = GetDiagnosticName(binding.BindingName);
+            var contractName = GetDiagnosticName(binding.Contract.DebugName);
+
+            diagnostics.AddError(
+                code,
+                CreateBindingLocation(
+                    binding,
+                    stageIndex,
+                    operationIndex,
+                    bindingIndex),
+                ToMessage($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires full logical content for Field '{contractName}', but current availability is '{availability}'. Partial, sparse, or appended content is not sufficient for this access."));
+        }
+
         private static AtlasDiagnosticCode GetMissingPriorContentCode(AtlasCompiledBinding binding)
         {
             if (binding.Mode == AtlasOperationAccessMode.Consume)
@@ -455,6 +454,17 @@ namespace Lokrain.Atlas.Compilation
             }
 
             return ReadBeforeWriteCode;
+        }
+
+        private static AtlasDiagnosticCode GetInsufficientPriorContentCode(AtlasCompiledBinding binding)
+        {
+            if (binding.WritesContent &&
+                binding.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent))
+            {
+                return PreserveAfterPartialWriteCode;
+            }
+
+            return ReadAfterPartialWriteCode;
         }
 
         private static AtlasDiagnosticLocation CreateBindingLocation(

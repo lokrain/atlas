@@ -125,7 +125,7 @@ namespace Lokrain.Atlas.Artifacts
         public readonly FixedString64Bytes PipelineName;
 
         /// <summary>
-        /// Number of field contracts in the source Contract table.
+        /// Number of field contracts in the source contract table.
         /// </summary>
         public readonly int ContractCount;
 
@@ -578,7 +578,7 @@ namespace Lokrain.Atlas.Artifacts
             if (plan.Contracts == null)
             {
                 throw new ArgumentException(
-                    "Compiled plan does not reference a Contract table.",
+                    "Compiled plan does not reference a contract table.",
                     nameof(plan));
             }
 
@@ -592,21 +592,21 @@ namespace Lokrain.Atlas.Artifacts
             if (shapes.Contracts == null)
             {
                 throw new ArgumentException(
-                    "Resolved shape set does not reference a Contract table.",
+                    "Resolved shape set does not reference a contract table.",
                     nameof(shapes));
             }
 
             if (plan.Contracts.Count != shapes.Contracts.Count)
             {
                 throw new ArgumentException(
-                    $"Compiled plan Contract table contains '{plan.Contracts.Count}' fields, but shape Contract table contains '{shapes.Contracts.Count}' fields.",
+                    $"Compiled plan contract table contains '{plan.Contracts.Count}' fields, but shape contract table contains '{shapes.Contracts.Count}' fields.",
                     nameof(shapes));
             }
 
             if (plan.Contracts.Count != shapes.Count)
             {
                 throw new ArgumentException(
-                    $"Compiled plan Contract table contains '{plan.Contracts.Count}' fields, but shape set contains '{shapes.Count}' shapes.",
+                    $"Compiled plan contract table contains '{plan.Contracts.Count}' fields, but shape set contains '{shapes.Count}' shapes.",
                     nameof(shapes));
             }
 
@@ -625,7 +625,7 @@ namespace Lokrain.Atlas.Artifacts
                     shape.DeclaredShape != contract.LengthShape)
                 {
                     throw new ArgumentException(
-                        $"Shape at index '{i}' does not match compiled plan Contract '{contract.GetDiagnosticName()}'.",
+                        $"Shape at index '{i}' does not match compiled plan contract '{contract.GetDiagnosticName()}'.",
                         nameof(shapes));
                 }
             }
@@ -769,7 +769,9 @@ namespace Lokrain.Atlas.Artifacts
             AppendInt(ref hash, (int)shape.Kind);
             AppendInt(ref hash, shape.FixedLength);
             AppendStableDataId(ref hash, shape.SourceFieldId);
-            AppendInt(ref hash, BitConverter.SingleToInt32Bits(shape.CapacityMultiplier));
+            AppendFixedString64(ref hash, shape.Name);
+            AppendInt(ref hash, shape.CapacityMultiplierNumerator);
+            AppendInt(ref hash, shape.CapacityMultiplierDenominator);
             AppendInt(ref hash, shape.CapacityPadding);
         }
 
@@ -780,6 +782,18 @@ namespace Lokrain.Atlas.Artifacts
             AppendULong(ref hash, stableId.High);
             AppendULong(ref hash, stableId.Low);
             AppendUShort(ref hash, stableId.Version);
+        }
+
+        private static void AppendFixedString64(
+            ref ulong hash,
+            FixedString64Bytes value)
+        {
+            AppendInt(ref hash, value.Length);
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                AppendByte(ref hash, value[i]);
+            }
         }
 
         private static void AppendLong(

@@ -6,7 +6,8 @@
 // Purpose
 // - Define policy for compiled-plan content dataflow validation.
 // - Decide which present bindings may be read before a prior producing operation.
-// - Decide which write modes can establish initialized content for later operations.
+// - Decide what content availability a write establishes.
+// - Distinguish partial writes from full logical-content writes.
 // - Keep read-before-write validation explicit instead of hard-coding route assumptions.
 //
 // Design notes
@@ -17,6 +18,7 @@
 // - default(AtlasDataflowValidationPolicy) is valid and strict.
 // - ProductionDefault allows external/imported/adopted/borrowed/external-lifetime inputs
 //   to be treated as initially readable.
+// - DiscardBeforeWrite is not write coverage. AtlasWriteCoverage decides what is available.
 
 using System;
 using System.Runtime.CompilerServices;
@@ -29,25 +31,6 @@ namespace Lokrain.Atlas.Compilation
     /// <summary>
     /// Policy used by compiled-plan content dataflow validation.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="AtlasDataflowValidationPolicy"/> answers a narrow question: when walking a
-    /// compiled operation sequence, is a content read satisfied by prior produced content or by
-    /// an explicitly allowed initial-content source?
-    /// </para>
-    ///
-    /// <para>
-    /// The policy intentionally does not infer that canonical, support, scratch, payload, or
-    /// diagnostic Fields are initially readable. Those Fields must be produced earlier in the
-    /// compiled sequence unless a route-specific validator or future authored input model says
-    /// otherwise.
-    /// </para>
-    ///
-    /// <para>
-    /// This type is safe to default-initialize. The default value is strict and treats no Field as
-    /// initially readable.
-    /// </para>
-    /// </remarks>
     public readonly struct AtlasDataflowValidationPolicy :
         IEquatable<AtlasDataflowValidationPolicy>
     {
@@ -57,19 +40,11 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Strict dataflow policy.
         /// </summary>
-        /// <remarks>
-        /// No content read is allowed before a prior producing operation, except shape-only access
-        /// and absent optional bindings, which do not require content.
-        /// </remarks>
         public static readonly AtlasDataflowValidationPolicy Strict = default;
 
         /// <summary>
         /// Recommended default policy for production compiled-plan validation.
         /// </summary>
-        /// <remarks>
-        /// This allows externally supplied storage to be used as initial input while still requiring
-        /// Atlas-owned internal Fields to be produced before content reads.
-        /// </remarks>
         public static readonly AtlasDataflowValidationPolicy ProductionDefault =
             new(
                 AtlasDataflowValidationPolicyFlags.AllowExternalRoleInitialRead |
@@ -87,7 +62,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a dataflow validation policy from explicit flags.
         /// </summary>
-        /// <param name="flags">Policy flags.</param>
         public AtlasDataflowValidationPolicy(AtlasDataflowValidationPolicyFlags flags)
         {
             Flags = flags;
@@ -103,7 +77,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether external-role Fields are allowed as initial content.
+        /// Gets whether external-role fields are allowed as initial content.
         /// </summary>
         public bool AllowsExternalRoleInitialRead
         {
@@ -112,7 +86,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether external-owned Fields are allowed as initial content.
+        /// Gets whether external-owned fields are allowed as initial content.
         /// </summary>
         public bool AllowsExternalOwnedInitialRead
         {
@@ -121,7 +95,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether borrowed Fields are allowed as initial content.
+        /// Gets whether borrowed fields are allowed as initial content.
         /// </summary>
         public bool AllowsBorrowedInitialRead
         {
@@ -130,7 +104,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether imported Fields are allowed as initial content.
+        /// Gets whether imported fields are allowed as initial content.
         /// </summary>
         public bool AllowsImportedInitialRead
         {
@@ -139,7 +113,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether adopted Fields are allowed as initial content.
+        /// Gets whether adopted fields are allowed as initial content.
         /// </summary>
         public bool AllowsAdoptedInitialRead
         {
@@ -148,7 +122,7 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Gets whether external-lifetime Fields are allowed as initial content.
+        /// Gets whether external-lifetime fields are allowed as initial content.
         /// </summary>
         public bool AllowsExternalLifetimeInitialRead
         {
@@ -159,8 +133,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a policy with additional flags enabled.
         /// </summary>
-        /// <param name="flags">Flags to enable.</param>
-        /// <returns>A policy with the supplied flags enabled.</returns>
         public AtlasDataflowValidationPolicy WithFlags(AtlasDataflowValidationPolicyFlags flags)
         {
             return new AtlasDataflowValidationPolicy(Flags | flags);
@@ -169,75 +141,97 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a policy with flags disabled.
         /// </summary>
-        /// <param name="flags">Flags to disable.</param>
-        /// <returns>A policy with the supplied flags disabled.</returns>
         public AtlasDataflowValidationPolicy WithoutFlags(AtlasDataflowValidationPolicyFlags flags)
         {
             return new AtlasDataflowValidationPolicy(Flags & ~flags);
         }
 
         /// <summary>
-        /// Returns whether a Contract may be treated as initially readable.
+        /// Returns whether a contract may be treated as initially readable.
         /// </summary>
-        /// <param name="contract">Resolved Field Contract.</param>
-        /// <returns>
-        /// <c>true</c> when the Contract matches one of the policy's allowed initial-content sources;
-        /// otherwise <c>false</c>.
-        /// </returns>
         public bool AllowsInitialRead(AtlasContract contract)
+        {
+            return InitialAvailability(contract).HasAnyContent();
+        }
+
+        /// <summary>
+        /// Returns the initial content availability supplied by policy for a contract.
+        /// </summary>
+        public AtlasContentAvailability InitialAvailability(AtlasContract contract)
         {
             if (!contract.IsTableReady)
             {
-                return false;
+                return AtlasContentAvailability.None;
             }
 
             if (AllowsExternalRoleInitialRead && contract.Role == AtlasFieldRole.External)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
             if (AllowsExternalOwnedInitialRead && contract.Ownership == OwnershipPolicy.ExternalOwned)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
             if (AllowsBorrowedInitialRead && contract.Ownership == OwnershipPolicy.Borrowed)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
             if (AllowsImportedInitialRead && contract.Ownership == OwnershipPolicy.Imported)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
             if (AllowsAdoptedInitialRead && contract.Ownership == OwnershipPolicy.Adopted)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
             if (AllowsExternalLifetimeInitialRead && contract.Lifetime == LifetimePolicy.External)
             {
-                return true;
+                return AtlasContentAvailability.ExternalContractContent;
             }
 
-            return false;
+            return AtlasContentAvailability.None;
         }
 
         /// <summary>
-        /// Returns whether a compiled binding requires previously initialized content before execution.
+        /// Returns whether a compiled binding requires any previous content before execution.
         /// </summary>
-        /// <param name="binding">Compiled binding to inspect.</param>
-        /// <returns>
-        /// <c>true</c> when the binding reads existing content, consumes existing content, performs
-        /// read-write access, or declares preservation of existing content; otherwise <c>false</c>.
-        /// </returns>
-        /// <remarks>
-        /// Shape-only bindings and missing optional bindings do not require content.
-        /// </remarks>
         public bool RequiresPriorContent(AtlasCompiledBinding binding)
         {
             if (!binding.IsPresent || binding.IsShapeOnly)
+            {
+                return false;
+            }
+
+            if (binding.Mode == AtlasOperationAccessMode.Consume)
+            {
+                return true;
+            }
+
+            if (binding.ReadsContent)
+            {
+                return true;
+            }
+
+            return binding.WritesContent &&
+                   binding.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent);
+        }
+
+        /// <summary>
+        /// Returns whether a compiled binding requires full logical previous content before execution.
+        /// </summary>
+        public bool RequiresFullPriorContent(AtlasCompiledBinding binding)
+        {
+            if (!binding.IsPresent || binding.IsShapeOnly)
+            {
+                return false;
+            }
+
+            if (binding.Mode == AtlasOperationAccessMode.Consume)
             {
                 return false;
             }
@@ -254,14 +248,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns whether a compiled binding can write content without requiring previous content.
         /// </summary>
-        /// <param name="binding">Compiled binding to inspect.</param>
-        /// <returns>
-        /// <c>true</c> for append access and discard-before-write writes; otherwise <c>false</c>.
-        /// </returns>
-        /// <remarks>
-        /// Read-write and consume access are not first writes. They require already initialized
-        /// content before they can safely execute.
-        /// </remarks>
         public bool CanProduceWithoutPriorContent(AtlasCompiledBinding binding)
         {
             if (!binding.IsPresent || binding.IsShapeOnly || !binding.WritesContent)
@@ -269,36 +255,64 @@ namespace Lokrain.Atlas.Compilation
                 return false;
             }
 
-            return binding.Mode == AtlasOperationAccessMode.Append ||
-                   (binding.Mode == AtlasOperationAccessMode.Write &&
-                    binding.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite));
+            if (binding.Mode == AtlasOperationAccessMode.Append)
+            {
+                return true;
+            }
+
+            if (binding.Mode != AtlasOperationAccessMode.Write)
+            {
+                return false;
+            }
+
+            return binding.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite) &&
+                   binding.WriteCoverage.WritesAnyContent();
         }
 
         /// <summary>
-        /// Returns whether a compiled binding establishes content availability for later bindings.
+        /// Returns the content availability established by a binding after execution.
         /// </summary>
-        /// <param name="binding">Compiled binding to inspect.</param>
-        /// <returns>
-        /// <c>true</c> when the binding writes, appends, consumes, or mutates present content;
-        /// otherwise <c>false</c>.
-        /// </returns>
-        /// <remarks>
-        /// This method answers only whether the binding may make the Field available after the
-        /// operation has run. A validator must still separately verify that any required prior
-        /// content was available before the operation.
-        /// </remarks>
+        public AtlasContentAvailability EstablishedAvailability(AtlasCompiledBinding binding)
+        {
+            if (!binding.IsPresent || binding.IsShapeOnly || !binding.WritesContent)
+            {
+                return AtlasContentAvailability.None;
+            }
+
+            if (binding.Mode == AtlasOperationAccessMode.Consume)
+            {
+                return AtlasContentAvailability.None;
+            }
+
+            if (binding.WriteCoverage == AtlasWriteCoverage.ExternalContract)
+            {
+                return AtlasContentAvailability.ExternalContractContent;
+            }
+
+            if (binding.WriteCoverage.MakesFullLogicalContentAvailable())
+            {
+                return AtlasContentAvailability.FullLogicalContent;
+            }
+
+            if (binding.WriteCoverage.IsPartialContentWrite())
+            {
+                return AtlasContentAvailability.PartialContent;
+            }
+
+            return AtlasContentAvailability.None;
+        }
+
+        /// <summary>
+        /// Compatibility predicate for callers that only need to know whether a binding establishes any content.
+        /// </summary>
         public bool EstablishesContentForLaterReads(AtlasCompiledBinding binding)
         {
-            return binding.IsPresent &&
-                   !binding.IsShapeOnly &&
-                   binding.WritesContent;
+            return EstablishedAvailability(binding).HasAnyContent();
         }
 
         /// <summary>
         /// Determines whether this policy equals another policy.
         /// </summary>
-        /// <param name="other">Policy to compare against.</param>
-        /// <returns><c>true</c> when flags match; otherwise <c>false</c>.</returns>
         public bool Equals(AtlasDataflowValidationPolicy other)
         {
             return Flags == other.Flags;
@@ -307,11 +321,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this policy equals an object instance.
         /// </summary>
-        /// <param name="obj">Object to compare against.</param>
-        /// <returns>
-        /// <c>true</c> when <paramref name="obj"/> is an <see cref="AtlasDataflowValidationPolicy"/>
-        /// with the same flags; otherwise <c>false</c>.
-        /// </returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasDataflowValidationPolicy other && Equals(other);
@@ -320,7 +329,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a managed hash code for this policy.
         /// </summary>
-        /// <returns>A managed hash code.</returns>
         public override int GetHashCode()
         {
             unchecked
@@ -332,7 +340,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a compact policy label.
         /// </summary>
-        /// <returns>A compact policy label.</returns>
         public override string ToString()
         {
             return $"AtlasDataflowValidationPolicy({Flags})";
