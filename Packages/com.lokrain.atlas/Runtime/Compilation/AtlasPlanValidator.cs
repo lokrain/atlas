@@ -21,7 +21,6 @@
 using System;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Diagnostics;
-using Unity.Collections;
 
 namespace Lokrain.Atlas.Compilation
 {
@@ -253,8 +252,8 @@ namespace Lokrain.Atlas.Compilation
             {
                 diagnostics.AddFatal(
                     NullPlanCode,
-                    AtlasDiagnosticLocation.Package(ToName("AtlasPlanValidator")),
-                    ToMessage("Atlas compiled plan validation requires a non-null compiled plan."));
+                    AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanValidator")),
+                    AtlasDiagnosticText.Message("Atlas compiled plan validation requires a non-null compiled plan."));
 
                 return false;
             }
@@ -266,7 +265,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidPipelineIdCode,
                     location,
-                    ToMessage("Atlas compiled plan has an invalid pipeline id."));
+                    AtlasDiagnosticText.Message("Atlas compiled plan has an invalid pipeline id."));
             }
 
             if (plan.DebugName.IsEmpty)
@@ -274,7 +273,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyPipelineDebugNameCode,
                     location,
-                    ToMessage("Atlas compiled plan has an empty pipeline debug name."));
+                    AtlasDiagnosticText.Message("Atlas compiled plan has an empty pipeline debug name."));
             }
 
             if (plan.Contracts == null)
@@ -282,7 +281,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddFatal(
                     NullContractTableCode,
                     location,
-                    ToMessage("Atlas compiled plan has no Contract table."));
+                    AtlasDiagnosticText.Message("Atlas compiled plan has no Contract table."));
 
                 return false;
             }
@@ -292,7 +291,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyContractTableCode,
                     AtlasDiagnosticLocation.Contract(default, plan.Contracts.Name),
-                    ToMessage("Atlas compiled plan uses an empty Contract table."));
+                    AtlasDiagnosticText.Message("Atlas compiled plan uses an empty Contract table."));
             }
 
             if (plan.IsEmpty)
@@ -300,7 +299,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyPlanCode,
                     location,
-                    ToMessage("Atlas compiled plan contains no compiled stage occurrences."));
+                    AtlasDiagnosticText.Message("Atlas compiled plan contains no compiled stage occurrences."));
 
                 return false;
             }
@@ -310,7 +309,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     StageCountMismatchCode,
                     location,
-                    ToMessage($"Atlas compiled plan reports StageCount '{plan.StageCount}', but Count is '{plan.Count}'."));
+                    AtlasDiagnosticText.Message($"Atlas compiled plan reports StageCount '{plan.StageCount}', but Count is '{plan.Count}'."));
             }
 
             return true;
@@ -343,8 +342,8 @@ namespace Lokrain.Atlas.Compilation
                     AtlasDiagnosticLocation.CompiledStage(
                         default,
                         expectedStageIndex,
-                        ToName("null-stage")),
-                    ToMessage($"Atlas compiled plan contains a null stage at index '{expectedStageIndex}'."));
+                        AtlasDiagnosticText.Name64("null-stage")),
+                    AtlasDiagnosticText.Message($"Atlas compiled plan contains a null stage at index '{expectedStageIndex}'."));
 
                 return;
             }
@@ -358,7 +357,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     StageIndexMismatchCode,
                     location,
-                    ToMessage($"Atlas compiled stage '{GetDiagnosticName(stage.DebugName)}' has StageIndex '{stage.StageIndex}', but appears at index '{expectedStageIndex}'."));
+                    AtlasDiagnosticText.Message($"Atlas compiled stage '{AtlasDiagnosticText.Name(stage.DebugName)}' has StageIndex '{stage.StageIndex}', but appears at index '{expectedStageIndex}'."));
             }
 
             if (!stage.StageId.IsValid)
@@ -366,7 +365,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidStageIdCode,
                     location,
-                    ToMessage($"Atlas compiled stage at index '{expectedStageIndex}' has an invalid stage id."));
+                    AtlasDiagnosticText.Message($"Atlas compiled stage at index '{expectedStageIndex}' has an invalid stage id."));
             }
 
             if (stage.DebugName.IsEmpty)
@@ -374,7 +373,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyStageDebugNameCode,
                     location,
-                    ToMessage($"Atlas compiled stage at index '{expectedStageIndex}' has an empty debug name."));
+                    AtlasDiagnosticText.Message($"Atlas compiled stage at index '{expectedStageIndex}' has an empty debug name."));
             }
 
             if (stage.IsEmpty)
@@ -382,7 +381,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyStageCode,
                     location,
-                    ToMessage($"Atlas compiled stage '{GetDiagnosticName(stage.DebugName)}' contains no compiled operation occurrences."));
+                    AtlasDiagnosticText.Message($"Atlas compiled stage '{AtlasDiagnosticText.Name(stage.DebugName)}' contains no compiled operation occurrences."));
 
                 return;
             }
@@ -415,8 +414,8 @@ namespace Lokrain.Atlas.Compilation
                         default,
                         stageIndex,
                         expectedOperationIndex,
-                        ToName("null-operation")),
-                    ToMessage($"Atlas compiled stage '{GetDiagnosticName(stage.DebugName)}' contains a null operation at index '{expectedOperationIndex}'."));
+                        AtlasDiagnosticText.Name64("null-operation")),
+                    AtlasDiagnosticText.Message($"Atlas compiled stage '{AtlasDiagnosticText.Name(stage.DebugName)}' contains a null operation at index '{expectedOperationIndex}'."));
 
                 return;
             }
@@ -431,7 +430,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     OperationIndexMismatchCode,
                     location,
-                    ToMessage($"Atlas compiled operation '{GetDiagnosticName(operation.DebugName)}' has OperationIndex '{operation.OperationIndex}', but appears at index '{expectedOperationIndex}'."));
+                    AtlasDiagnosticText.Message($"Atlas compiled operation '{AtlasDiagnosticText.Name(operation.DebugName)}' has OperationIndex '{operation.OperationIndex}', but appears at index '{expectedOperationIndex}'."));
             }
 
             if (!operation.OperationId.IsValid)
@@ -439,7 +438,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidOperationIdCode,
                     location,
-                    ToMessage($"Atlas compiled operation at stage '{stageIndex}', index '{expectedOperationIndex}', has an invalid operation id."));
+                    AtlasDiagnosticText.Message($"Atlas compiled operation at stage '{stageIndex}', index '{expectedOperationIndex}', has an invalid operation id."));
             }
 
             if (operation.DebugName.IsEmpty)
@@ -447,7 +446,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyOperationDebugNameCode,
                     location,
-                    ToMessage($"Atlas compiled operation at stage '{stageIndex}', index '{expectedOperationIndex}', has an empty debug name."));
+                    AtlasDiagnosticText.Message($"Atlas compiled operation at stage '{stageIndex}', index '{expectedOperationIndex}', has an empty debug name."));
             }
 
             if (operation.IsEmpty)
@@ -455,7 +454,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyOperationCode,
                     location,
-                    ToMessage($"Atlas compiled operation '{GetDiagnosticName(operation.DebugName)}' contains no compiled bindings."));
+                    AtlasDiagnosticText.Message($"Atlas compiled operation '{AtlasDiagnosticText.Name(operation.DebugName)}' contains no compiled bindings."));
 
                 return;
             }
@@ -493,7 +492,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidBindingCode,
                     location,
-                    ToMessage($"Atlas compiled binding at stage '{stageIndex}', operation '{operationIndex}', binding '{expectedBindingIndex}' is invalid."));
+                    AtlasDiagnosticText.Message($"Atlas compiled binding at stage '{stageIndex}', operation '{operationIndex}', binding '{expectedBindingIndex}' is invalid."));
 
                 return;
             }
@@ -503,7 +502,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     BindingIndexMismatchCode,
                     location,
-                    ToMessage($"Atlas compiled binding '{GetDiagnosticName(binding.BindingName)}' has BindingIndex '{binding.BindingIndex}', but appears at index '{expectedBindingIndex}'."));
+                    AtlasDiagnosticText.Message($"Atlas compiled binding '{AtlasDiagnosticText.Name(binding.BindingName)}' has BindingIndex '{binding.BindingIndex}', but appears at index '{expectedBindingIndex}'."));
             }
 
             if (binding.IsMissingOptional)
@@ -538,7 +537,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     MissingOptionalCarriesContractCode,
                     location,
-                    ToMessage($"Atlas missing optional binding '{GetDiagnosticName(binding.BindingName)}' in operation '{GetDiagnosticName(operation.DebugName)}' carries a non-empty Contract."));
+                    AtlasDiagnosticText.Message($"Atlas missing optional binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' carries a non-empty Contract."));
             }
 
             if (binding.RequiresContentMemory)
@@ -546,7 +545,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     MissingOptionalRequiresMemoryCode,
                     location,
-                    ToMessage($"Atlas missing optional binding '{GetDiagnosticName(binding.BindingName)}' in operation '{GetDiagnosticName(operation.DebugName)}' incorrectly requires content memory."));
+                    AtlasDiagnosticText.Message($"Atlas missing optional binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' incorrectly requires content memory."));
             }
 
             if (plan.Contracts.TryGetContract(binding.FieldId, out var resolvedContract))
@@ -554,7 +553,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     MissingOptionalButContractPresentCode,
                     location,
-                    ToMessage($"Atlas binding '{GetDiagnosticName(binding.BindingName)}' is marked missing optional, but Contract '{GetDiagnosticName(resolvedContract.DebugName)}' is present in table '{GetDiagnosticName(plan.Contracts.Name)}'."));
+                    AtlasDiagnosticText.Message($"Atlas binding '{AtlasDiagnosticText.Name(binding.BindingName)}' is marked missing optional, but Contract '{AtlasDiagnosticText.Name(resolvedContract.DebugName)}' is present in table '{AtlasDiagnosticText.Name(plan.Contracts.Name)}'."));
             }
         }
 
@@ -570,7 +569,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     PresentBindingContractNotTableReadyCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' in operation '{GetDiagnosticName(operation.DebugName)}' has a Contract that is not table-ready."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' has a Contract that is not table-ready."));
             }
 
             if (binding.Contract.StableId != binding.FieldId)
@@ -578,7 +577,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     PresentBindingFieldIdMismatchCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' has access Field id '{binding.FieldId}' but Contract Field id '{binding.Contract.StableId}'."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' has access Field id '{binding.FieldId}' but Contract Field id '{binding.Contract.StableId}'."));
             }
 
             if (!plan.Contracts.TryGetContract(binding.FieldId, out var resolvedContract))
@@ -586,7 +585,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     PresentBindingContractMissingCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' references Field id '{binding.FieldId}', but Contract table '{GetDiagnosticName(plan.Contracts.Name)}' does not contain that Field."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' references Field id '{binding.FieldId}', but Contract table '{AtlasDiagnosticText.Name(plan.Contracts.Name)}' does not contain that Field."));
 
                 return;
             }
@@ -596,7 +595,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     PresentBindingContractMismatchCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' does not match the Contract currently resolved from table '{GetDiagnosticName(plan.Contracts.Name)}'."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' does not match the Contract currently resolved from table '{AtlasDiagnosticText.Name(plan.Contracts.Name)}'."));
             }
 
             if (binding.Slot != binding.Contract.Slot)
@@ -604,7 +603,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     PresentBindingSlotMismatchCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' reports slot '{binding.Slot}', but its Contract reports slot '{binding.Contract.Slot}'."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' reports slot '{binding.Slot}', but its Contract reports slot '{binding.Contract.Slot}'."));
             }
 
             if (binding.RequiresContentMemory && binding.IsShapeOnly)
@@ -612,7 +611,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     ShapeOnlyRequiresMemoryCode,
                     location,
-                    ToMessage($"Atlas present binding '{GetDiagnosticName(binding.BindingName)}' is shape-only but incorrectly requires content memory."));
+                    AtlasDiagnosticText.Message($"Atlas present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' is shape-only but incorrectly requires content memory."));
             }
         }
 
@@ -620,7 +619,7 @@ namespace Lokrain.Atlas.Compilation
         {
             if (plan == null)
             {
-                return AtlasDiagnosticLocation.Package(ToName("AtlasPlanValidator"));
+                return AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanValidator"));
             }
 
             var stableId = plan.PipelineId.IsValid
@@ -641,7 +640,7 @@ namespace Lokrain.Atlas.Compilation
                 return AtlasDiagnosticLocation.CompiledStage(
                     default,
                     stageIndex,
-                    ToName("null-stage"));
+                    AtlasDiagnosticText.Name64("null-stage"));
             }
 
             var stableId = stage.StageId.IsValid
@@ -665,7 +664,7 @@ namespace Lokrain.Atlas.Compilation
                     default,
                     stageIndex,
                     operationIndex,
-                    ToName("null-operation"));
+                    AtlasDiagnosticText.Name64("null-operation"));
             }
 
             var stableId = operation.OperationId.IsValid
@@ -693,39 +692,5 @@ namespace Lokrain.Atlas.Compilation
                 binding.BindingName);
         }
 
-        private static FixedString64Bytes ToName(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? default
-                : new FixedString64Bytes(Truncate(value, 63));
-        }
-
-        private static FixedString512Bytes ToMessage(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? new FixedString512Bytes("<empty diagnostic message>")
-                : new FixedString512Bytes(Truncate(value, 511));
-        }
-
-        private static string Truncate(
-            string value,
-            int maxLength)
-        {
-            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            {
-                return value;
-            }
-
-            return value.Substring(
-                0,
-                maxLength);
-        }
-
-        private static string GetDiagnosticName(FixedString64Bytes name)
-        {
-            return name.IsEmpty
-                ? "<unnamed>"
-                : name.ToString();
-        }
     }
 }

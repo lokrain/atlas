@@ -22,7 +22,6 @@ using System;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Diagnostics;
 using Lokrain.Atlas.Operations;
-using Unity.Collections;
 
 namespace Lokrain.Atlas.Compilation
 {
@@ -404,7 +403,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidBindingCode,
                     location,
-                    ToMessage($"Atlas write-hazard validation found an invalid binding at stage '{stageIndex}', operation '{operationIndex}', binding '{bindingIndex}'."));
+                    AtlasDiagnosticText.Message($"Atlas write-hazard validation found an invalid binding at stage '{stageIndex}', operation '{operationIndex}', binding '{bindingIndex}'."));
 
                 return;
             }
@@ -426,7 +425,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidPresentContractCode,
                     location,
-                    ToMessage($"Atlas write-hazard validation found present binding '{GetDiagnosticName(binding.BindingName)}' with a Contract that is not table-ready."));
+                    AtlasDiagnosticText.Message($"Atlas write-hazard validation found present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' with a Contract that is not table-ready."));
 
                 return;
             }
@@ -494,7 +493,7 @@ namespace Lokrain.Atlas.Compilation
             diagnostics.AddError(
                 ShapeOnlyWriteCode,
                 location,
-                ToMessage($"Atlas binding '{GetDiagnosticName(binding.BindingName)}' in operation '{GetDiagnosticName(operation.DebugName)}' is shape-only but declares write-related access semantics."));
+                AtlasDiagnosticText.Message($"Atlas binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' is shape-only but declares write-related access semantics."));
         }
 
         private static void ValidateWriteAuthorization(
@@ -509,7 +508,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     WriteOwnershipRejectedCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' writes Field '{GetDiagnosticName(binding.Contract.DebugName)}', but ownership policy '{binding.Contract.Ownership}' is not writable under the active write-hazard policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but ownership policy '{binding.Contract.Ownership}' is not writable under the active write-hazard policy."));
             }
 
             if (!policy.AllowsWriteLifetime(binding.Contract))
@@ -517,7 +516,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     WriteLifetimeRejectedCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' writes Field '{GetDiagnosticName(binding.Contract.DebugName)}', but lifetime policy '{binding.Contract.Lifetime}' is not writable under the active write-hazard policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but lifetime policy '{binding.Contract.Lifetime}' is not writable under the active write-hazard policy."));
             }
 
             if (!policy.AllowsWriteStorage(binding.Contract))
@@ -525,7 +524,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     WriteStorageRejectedCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' writes Field '{GetDiagnosticName(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not writable under the active write-hazard policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not writable under the active write-hazard policy."));
             }
         }
 
@@ -542,7 +541,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     AppendStorageRejectedCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' appends to Field '{GetDiagnosticName(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not append-compatible under the active write-hazard policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' appends to Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not append-compatible under the active write-hazard policy."));
             }
 
             if (binding.Mode == AtlasOperationAccessMode.Consume &&
@@ -551,7 +550,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     ConsumeStorageRejectedCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' consumes Field '{GetDiagnosticName(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not consume-compatible under the active write-hazard policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' consumes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not consume-compatible under the active write-hazard policy."));
             }
         }
 
@@ -567,7 +566,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     MissingWriteContentPolicyCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' writes Field '{GetDiagnosticName(binding.Contract.DebugName)}' without an explicit write content policy."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' without an explicit write content policy."));
             }
 
             if (policy.HasContradictoryWriteContentPolicy(binding))
@@ -575,7 +574,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     ContradictoryWriteContentPolicyCode,
                     location,
-                    ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' declares both discard-before-write and preserve-existing-content for Field '{GetDiagnosticName(binding.Contract.DebugName)}'."));
+                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares both discard-before-write and preserve-existing-content for Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}'."));
             }
         }
 
@@ -592,13 +591,13 @@ namespace Lokrain.Atlas.Compilation
             }
 
             var reason = binding.WritesContent
-                ? $"Field '{GetDiagnosticName(binding.Contract.DebugName)}' does not declare compatible parallel-write permission."
+                ? $"Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' does not declare compatible parallel-write permission."
                 : "the binding does not write content.";
 
             diagnostics.AddError(
                 ParallelWriteRejectedCode,
                 location,
-                ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' declares parallel write access, but {reason}"));
+                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares parallel write access, but {reason}"));
         }
 
         private static void ValidateExclusiveDeclaration(
@@ -616,7 +615,7 @@ namespace Lokrain.Atlas.Compilation
             diagnostics.AddError(
                 ExclusiveWriteRejectedCode,
                 location,
-                ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' declares exclusive write access, but the binding does not write content."));
+                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares exclusive write access, but the binding does not write content."));
         }
 
         private static void ValidateDeterministicOrdering(
@@ -634,7 +633,7 @@ namespace Lokrain.Atlas.Compilation
             diagnostics.AddError(
                 DeterministicWriteOrderRejectedCode,
                 location,
-                ToMessage($"Atlas operation '{GetDiagnosticName(operation.DebugName)}' binding '{GetDiagnosticName(binding.BindingName)}' writes Field '{GetDiagnosticName(binding.Contract.DebugName)}' without the deterministic-order declaration required by the active write-hazard policy."));
+                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' without the deterministic-order declaration required by the active write-hazard policy."));
         }
 
         private static AtlasDiagnosticLocation CreateBindingLocation(
@@ -651,32 +650,5 @@ namespace Lokrain.Atlas.Compilation
                 binding.BindingName);
         }
 
-        private static FixedString512Bytes ToMessage(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? new FixedString512Bytes("<empty diagnostic message>")
-                : new FixedString512Bytes(Truncate(value, 511));
-        }
-
-        private static string Truncate(
-            string value,
-            int maxLength)
-        {
-            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            {
-                return value;
-            }
-
-            return value.Substring(
-                0,
-                maxLength);
-        }
-
-        private static string GetDiagnosticName(FixedString64Bytes name)
-        {
-            return name.IsEmpty
-                ? "<unnamed>"
-                : name.ToString();
-        }
     }
 }

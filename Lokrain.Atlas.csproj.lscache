@@ -109,6 +109,7 @@ Packages/com.lokrain.atlas/Runtime/Diagnostics/
  AtlasDiagnosticCode.cs
  AtlasDiagnosticLocation.cs
  AtlasDiagnosticSeverity.cs
+ AtlasDiagnosticText.cs
  AtlasTypeHash.cs
 Packages/com.lokrain.atlas/Runtime/Execution/
  AtlasExecutionContext.cs

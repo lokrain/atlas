@@ -268,6 +268,12 @@ namespace Lokrain.Atlas.Executors
                 throw new InvalidOperationException(
                     $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' does not declare '{AtlasOperationAccessFlags.DiscardBeforeWrite}'. Clear operations must explicitly discard previous contents.");
             }
+
+            if (binding.WriteCoverage != AtlasWriteCoverage.FullCapacity)
+            {
+                throw new InvalidOperationException(
+                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' declares write coverage '{binding.WriteCoverage}'. Clear operations must declare '{AtlasWriteCoverage.FullCapacity}' because the executor clears full byte capacity.");
+            }
         }
 
         private static bool HasEarlierPresentBindingForSameSlot(

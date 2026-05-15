@@ -4,7 +4,7 @@
 // Namespace: Lokrain.Atlas.Operations
 //
 // Purpose
-// - Provide allocation-free write-coverage predicates for validators and compiler code.
+// - Provide allocation-free write-coverage predicates for compiler validators and executor policy.
 
 using System.Runtime.CompilerServices;
 
@@ -25,17 +25,18 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Gets whether this coverage proves all logical content is available after the operation.
+        /// Gets whether this coverage proves all logical field content is available after the operation.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool MakesFullLogicalContentAvailable(this AtlasWriteCoverage coverage)
         {
             return coverage == AtlasWriteCoverage.FullLogicalLength ||
-                   coverage == AtlasWriteCoverage.FullCapacity;
+                   coverage == AtlasWriteCoverage.FullCapacity ||
+                   coverage == AtlasWriteCoverage.ExternalContract;
         }
 
         /// <summary>
-        /// Gets whether this coverage writes only part of the logical content.
+        /// Gets whether this coverage writes only a subset of logical content or appends records.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsPartialContentWrite(this AtlasWriteCoverage coverage)
@@ -46,30 +47,43 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Gets whether this coverage mutates or consumes producer-consumer state.
+        /// Gets whether this coverage is valid for a write/read-write field overwrite binding.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool ConsumesContainerState(this AtlasWriteCoverage coverage)
+        public static bool IsFieldWriteCoverage(this AtlasWriteCoverage coverage)
+        {
+            return coverage == AtlasWriteCoverage.FullLogicalLength ||
+                   coverage == AtlasWriteCoverage.FullCapacity ||
+                   coverage == AtlasWriteCoverage.PartialLogicalLength ||
+                   coverage == AtlasWriteCoverage.SparseIndexed ||
+                   coverage == AtlasWriteCoverage.ExternalContract;
+        }
+
+        /// <summary>
+        /// Gets whether this coverage is valid for an append binding.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsAppendCoverage(this AtlasWriteCoverage coverage)
+        {
+            return coverage == AtlasWriteCoverage.AppendRecords;
+        }
+
+        /// <summary>
+        /// Gets whether this coverage is valid for a consume binding.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsConsumeCoverage(this AtlasWriteCoverage coverage)
         {
             return coverage == AtlasWriteCoverage.ConsumeRecords;
         }
 
         /// <summary>
-        /// Gets whether this coverage is controlled outside workspace-owned memory.
+        /// Gets whether this coverage declares externally fenced content availability.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsExternalContract(this AtlasWriteCoverage coverage)
         {
             return coverage == AtlasWriteCoverage.ExternalContract;
-        }
-
-        /// <summary>
-        /// Gets whether this coverage is a concrete declaration for a write-capable access mode.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsConcreteWriteCoverage(this AtlasWriteCoverage coverage)
-        {
-            return coverage != AtlasWriteCoverage.None;
         }
     }
 }

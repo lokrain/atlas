@@ -12,7 +12,9 @@
 // Design notes
 // - default(AtlasOperationAccess) is a valid value object, but it is not a concrete access declaration.
 // - StableDataId default/zero is valid.
-// - Missing lookup state must be represented by bool-returning APIs or explicit presence flags.
+// - AtlasOperationAccess.Empty is a compatibility alias for default, not an invalid sentinel.
+// - AtlasOperationAccess.Invalid is a compatibility alias for default, not an invalid sentinel.
+// - Missing lookup results must be represented by bool-returning APIs or explicit presence flags.
 // - AtlasOperationAccessMode.None is valid as a default enum value, but not valid for concrete declarations.
 // - BindingName is diagnostic/ABI metadata, not dispatch identity.
 // - DiscardBeforeWrite does not prove full overwrite. WriteCoverage owns that proof.
@@ -68,10 +70,6 @@ namespace Lokrain.Atlas.Operations
         /// <summary>
         /// Declared write coverage for this binding.
         /// </summary>
-        /// <remarks>
-        /// This value tells validators whether a write produces full logical content, partial
-        /// content, appended records, consumed records, or externally fenced content.
-        /// </remarks>
         public readonly AtlasWriteCoverage WriteCoverage;
 
         /// <summary>
@@ -80,7 +78,7 @@ namespace Lokrain.Atlas.Operations
         public readonly FixedString64Bytes BindingName;
 
         /// <summary>
-        /// Creates an operation access declaration from explicit fields.
+        /// Creates an operation access declaration from explicit fields and explicit write coverage.
         /// </summary>
         public AtlasOperationAccess(
             StableDataId fieldId,
@@ -93,6 +91,22 @@ namespace Lokrain.Atlas.Operations
             Mode = mode;
             Flags = flags;
             WriteCoverage = writeCoverage;
+            BindingName = bindingName;
+        }
+
+        /// <summary>
+        /// Creates an operation access declaration from legacy fields and inferred write coverage.
+        /// </summary>
+        public AtlasOperationAccess(
+            StableDataId fieldId,
+            AtlasOperationAccessMode mode,
+            AtlasOperationAccessFlags flags,
+            FixedString64Bytes bindingName)
+        {
+            FieldId = fieldId;
+            Mode = mode;
+            Flags = flags;
+            WriteCoverage = InferWriteCoverage(mode, flags);
             BindingName = bindingName;
         }
 
@@ -123,38 +137,34 @@ namespace Lokrain.Atlas.Operations
         public bool ReadsContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => !IsShapeOnly &&
-                   Mode.Reads();
+            get => !IsShapeOnly && Mode.Reads();
         }
 
         /// <summary>
-        /// Gets whether this declaration writes field contents or mutates container state.
+        /// Gets whether this declaration requires field contents or container state to be written.
         /// </summary>
         public bool WritesContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => !IsShapeOnly &&
-                   Mode.Writes();
+            get => !IsShapeOnly && Mode.Writes();
         }
 
         /// <summary>
-        /// Gets whether this declaration proves full logical content after execution.
+        /// Gets whether this write declaration proves full logical content availability after execution.
         /// </summary>
         public bool WritesFullLogicalContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => WritesContent &&
-                   WriteCoverage.MakesFullLogicalContentAvailable();
+            get => WritesContent && WriteCoverage.MakesFullLogicalContentAvailable();
         }
 
         /// <summary>
-        /// Gets whether this declaration writes only partial logical content or appended records.
+        /// Gets whether this write declaration only establishes partial, sparse, or appended content.
         /// </summary>
         public bool WritesPartialContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => WritesContent &&
-                   WriteCoverage.IsPartialContentWrite();
+            get => WritesContent && WriteCoverage.IsPartialContentWrite();
         }
 
         /// <summary>
@@ -176,7 +186,7 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Gets whether this declaration requires deterministic ordering for records.
+        /// Gets whether this declaration requires deterministic ordering for produced or consumed records.
         /// </summary>
         public bool RequiresDeterministicOrder
         {
@@ -209,7 +219,18 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Creates a full-overwrite access declaration for a typed field.
+        /// Creates a full-logical-overwrite access declaration for a typed field.
+        /// </summary>
+        public static AtlasOperationAccess Write<TField, TElement>(
+            FixedString64Bytes bindingName = default)
+            where TField : struct, IAtlasField<TElement>
+            where TElement : unmanaged
+        {
+            return WriteFull<TField, TElement>(bindingName);
+        }
+
+        /// <summary>
+        /// Creates a full-logical-overwrite access declaration for a typed field.
         /// </summary>
         public static AtlasOperationAccess WriteFull<TField, TElement>(
             FixedString64Bytes bindingName = default)
@@ -218,13 +239,13 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Write,
-                AtlasOperationAccessFlags.DiscardBeforeWrite,
+                AtlasOperationAccessFlags.DiscardBeforeWrite | AtlasOperationAccessFlags.RequiresExclusiveWrite,
                 AtlasWriteCoverage.FullLogicalLength,
                 bindingName);
         }
 
         /// <summary>
-        /// Creates a capacity-clearing write access declaration for a typed field.
+        /// Creates a full-capacity overwrite access declaration for a typed field.
         /// </summary>
         public static AtlasOperationAccess WriteFullCapacity<TField, TElement>(
             FixedString64Bytes bindingName = default)
@@ -233,13 +254,13 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Write,
-                AtlasOperationAccessFlags.DiscardBeforeWrite,
+                AtlasOperationAccessFlags.DiscardBeforeWrite | AtlasOperationAccessFlags.RequiresExclusiveWrite,
                 AtlasWriteCoverage.FullCapacity,
                 bindingName);
         }
 
         /// <summary>
-        /// Creates a partial write access declaration for a typed field.
+        /// Creates a partial-logical write access declaration for a typed field.
         /// </summary>
         public static AtlasOperationAccess WritePartial<TField, TElement>(
             FixedString64Bytes bindingName = default)
@@ -248,7 +269,7 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Write,
-                AtlasOperationAccessFlags.DiscardBeforeWrite,
+                AtlasOperationAccessFlags.DiscardBeforeWrite | AtlasOperationAccessFlags.RequiresExclusiveWrite,
                 AtlasWriteCoverage.PartialLogicalLength,
                 bindingName);
         }
@@ -263,13 +284,26 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Write,
-                AtlasOperationAccessFlags.DiscardBeforeWrite,
+                AtlasOperationAccessFlags.DiscardBeforeWrite | AtlasOperationAccessFlags.RequiresExclusiveWrite,
                 AtlasWriteCoverage.SparseIndexed,
                 bindingName);
         }
 
         /// <summary>
         /// Creates a read-write access declaration for a typed field.
+        /// </summary>
+        public static AtlasOperationAccess ReadWrite<TField, TElement>(
+            FixedString64Bytes bindingName = default)
+            where TField : struct, IAtlasField<TElement>
+            where TElement : unmanaged
+        {
+            return ReadWrite<TField, TElement>(
+                AtlasWriteCoverage.PartialLogicalLength,
+                bindingName);
+        }
+
+        /// <summary>
+        /// Creates a read-write access declaration for a typed field with explicit write coverage.
         /// </summary>
         public static AtlasOperationAccess ReadWrite<TField, TElement>(
             AtlasWriteCoverage writeCoverage,
@@ -279,7 +313,7 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.ReadWrite,
-                AtlasOperationAccessFlags.PreserveExistingContent,
+                AtlasOperationAccessFlags.PreserveExistingContent | AtlasOperationAccessFlags.RequiresExclusiveWrite,
                 writeCoverage,
                 bindingName);
         }
@@ -294,7 +328,7 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Append,
-                AtlasOperationAccessFlags.RequiresDeterministicOrder,
+                AtlasOperationAccessFlags.AllowsParallelWrite | AtlasOperationAccessFlags.RequiresDeterministicOrder,
                 AtlasWriteCoverage.AppendRecords,
                 bindingName);
         }
@@ -309,7 +343,7 @@ namespace Lokrain.Atlas.Operations
         {
             return Create<TField, TElement>(
                 AtlasOperationAccessMode.Consume,
-                AtlasOperationAccessFlags.RequiresDeterministicOrder,
+                AtlasOperationAccessFlags.RequiresExclusiveWrite | AtlasOperationAccessFlags.RequiresDeterministicOrder,
                 AtlasWriteCoverage.ConsumeRecords,
                 bindingName);
         }
@@ -330,7 +364,24 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Creates an operation access declaration for a typed field.
+        /// Creates an operation access declaration for a typed field using inferred legacy write coverage.
+        /// </summary>
+        public static AtlasOperationAccess Create<TField, TElement>(
+            AtlasOperationAccessMode mode,
+            AtlasOperationAccessFlags flags,
+            FixedString64Bytes bindingName = default)
+            where TField : struct, IAtlasField<TElement>
+            where TElement : unmanaged
+        {
+            return Create<TField, TElement>(
+                mode,
+                flags,
+                InferWriteCoverage(mode, flags),
+                bindingName);
+        }
+
+        /// <summary>
+        /// Creates an operation access declaration for a typed field using explicit write coverage.
         /// </summary>
         public static AtlasOperationAccess Create<TField, TElement>(
             AtlasOperationAccessMode mode,
@@ -357,7 +408,24 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Creates an operation access declaration from an explicit field identifier.
+        /// Creates an operation access declaration from an explicit field identifier using inferred legacy write coverage.
+        /// </summary>
+        public static AtlasOperationAccess Create(
+            StableDataId fieldId,
+            AtlasOperationAccessMode mode,
+            AtlasOperationAccessFlags flags,
+            FixedString64Bytes bindingName)
+        {
+            return Create(
+                fieldId,
+                mode,
+                flags,
+                InferWriteCoverage(mode, flags),
+                bindingName);
+        }
+
+        /// <summary>
+        /// Creates an operation access declaration from an explicit field identifier using explicit write coverage.
         /// </summary>
         public static AtlasOperationAccess Create(
             StableDataId fieldId,
@@ -410,7 +478,17 @@ namespace Lokrain.Atlas.Operations
         }
 
         /// <summary>
-        /// Creates a copy of this declaration with a different access mode.
+        /// Creates a copy of this declaration with a different access mode and inferred legacy write coverage.
+        /// </summary>
+        public AtlasOperationAccess WithMode(AtlasOperationAccessMode mode)
+        {
+            return WithMode(
+                mode,
+                InferWriteCoverage(mode, Flags));
+        }
+
+        /// <summary>
+        /// Creates a copy of this declaration with a different access mode and explicit write coverage.
         /// </summary>
         public AtlasOperationAccess WithMode(
             AtlasOperationAccessMode mode,
@@ -587,12 +665,7 @@ namespace Lokrain.Atlas.Operations
 
         private bool IsWriteCoverageCombinationValid()
         {
-            if (IsShapeOnly)
-            {
-                return WriteCoverage == AtlasWriteCoverage.None;
-            }
-
-            if (!Mode.Writes())
+            if (IsShapeOnly || !Mode.Writes())
             {
                 return WriteCoverage == AtlasWriteCoverage.None;
             }
@@ -607,15 +680,14 @@ namespace Lokrain.Atlas.Operations
                 return WriteCoverage == AtlasWriteCoverage.ConsumeRecords;
             }
 
-            if (WriteCoverage == AtlasWriteCoverage.None ||
-                WriteCoverage == AtlasWriteCoverage.AppendRecords ||
-                WriteCoverage == AtlasWriteCoverage.ConsumeRecords)
+            if (!WriteCoverage.IsFieldWriteCoverage())
             {
                 return false;
             }
 
             if (Mode == AtlasOperationAccessMode.Write &&
-                Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent))
+                WriteCoverage.MakesFullLogicalContentAvailable() &&
+                !Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite))
             {
                 return false;
             }
@@ -722,17 +794,12 @@ namespace Lokrain.Atlas.Operations
                     parameterName);
             }
 
-            if (Mode == AtlasOperationAccessMode.Write ||
-                Mode == AtlasOperationAccessMode.ReadWrite)
+            if ((Mode == AtlasOperationAccessMode.Write || Mode == AtlasOperationAccessMode.ReadWrite) &&
+                !WriteCoverage.IsFieldWriteCoverage())
             {
-                if (WriteCoverage == AtlasWriteCoverage.None ||
-                    WriteCoverage == AtlasWriteCoverage.AppendRecords ||
-                    WriteCoverage == AtlasWriteCoverage.ConsumeRecords)
-                {
-                    throw new ArgumentException(
-                        $"Atlas operation access '{BindingName}' uses mode '{Mode}' with invalid write coverage '{WriteCoverage}'.",
-                        parameterName);
-                }
+                throw new ArgumentException(
+                    $"Atlas operation access '{BindingName}' uses mode '{Mode}' with invalid write coverage '{WriteCoverage}'.",
+                    parameterName);
             }
 
             if (Mode == AtlasOperationAccessMode.Write &&
@@ -753,11 +820,52 @@ namespace Lokrain.Atlas.Operations
             }
         }
 
+        private static AtlasWriteCoverage InferWriteCoverage(
+            AtlasOperationAccessMode mode,
+            AtlasOperationAccessFlags flags)
+        {
+            if (flags.HasAny(AtlasOperationAccessFlags.ShapeOnly) ||
+                !mode.Writes())
+            {
+                return AtlasWriteCoverage.None;
+            }
+
+            if (mode == AtlasOperationAccessMode.Append)
+            {
+                return AtlasWriteCoverage.AppendRecords;
+            }
+
+            if (mode == AtlasOperationAccessMode.Consume)
+            {
+                return AtlasWriteCoverage.ConsumeRecords;
+            }
+
+            if (mode == AtlasOperationAccessMode.ReadWrite &&
+                flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent))
+            {
+                return AtlasWriteCoverage.PartialLogicalLength;
+            }
+
+            if (mode == AtlasOperationAccessMode.Write &&
+                flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite))
+            {
+                return AtlasWriteCoverage.FullLogicalLength;
+            }
+
+            return AtlasWriteCoverage.None;
+        }
+
+        /// <summary>
+        /// Determines whether two operation access declarations are equal.
+        /// </summary>
         public static bool operator ==(AtlasOperationAccess left, AtlasOperationAccess right)
         {
             return left.Equals(right);
         }
 
+        /// <summary>
+        /// Determines whether two operation access declarations are not equal.
+        /// </summary>
         public static bool operator !=(AtlasOperationAccess left, AtlasOperationAccess right)
         {
             return !left.Equals(right);

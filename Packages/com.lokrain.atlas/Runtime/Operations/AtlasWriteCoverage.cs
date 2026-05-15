@@ -4,26 +4,26 @@
 // Namespace: Lokrain.Atlas.Operations
 //
 // Purpose
-// - Describe the semantic coverage of an operation's write to a field.
-// - Distinguish "does not read old contents" from "overwrites all logical contents".
+// - Describe the semantic coverage of an operation write to a field.
+// - Distinguish "previous content is discarded" from "all logical content is written".
 // - Give dataflow validation enough information to prove whether later reads are safe.
+//
+// Design notes
+// - This is symbolic operation metadata, not a runtime memory container.
+// - Coverage is declared per operation binding.
+// - DiscardBeforeWrite is a read-dependency policy; it does not prove full write coverage.
+// - FullCapacity implies full logical content for dataflow, but also states the operation owns slack bytes.
+// - Partial and sparse writes establish content existence, not ordinary full-field readability.
 
 namespace Lokrain.Atlas.Operations
 {
     /// <summary>
-    /// Defines how much of a field's content an operation writes or mutates.
+    /// Defines how much content an operation writes or mutates for one field binding.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Write coverage is not a storage clearing policy. <see cref="AtlasOperationAccessFlags.DiscardBeforeWrite"/>
-    /// means previous contents are not semantically read. It does not prove every logical element
-    /// is overwritten. This enum supplies the missing proof used by dataflow validation.
-    /// </para>
-    /// </remarks>
     public enum AtlasWriteCoverage : byte
     {
         /// <summary>
-        /// The access does not write content.
+        /// The binding does not write content.
         /// </summary>
         None = 0,
 
@@ -38,7 +38,7 @@ namespace Lokrain.Atlas.Operations
         FullCapacity = 2,
 
         /// <summary>
-        /// The operation writes a known subset of logical elements.
+        /// The operation writes a known subset of logical elements while preserving the rest through prior content.
         /// </summary>
         PartialLogicalLength = 3,
 
@@ -48,7 +48,7 @@ namespace Lokrain.Atlas.Operations
         SparseIndexed = 4,
 
         /// <summary>
-        /// The operation appends records to a variable-length payload.
+        /// The operation appends records to a variable-length field.
         /// </summary>
         AppendRecords = 5,
 
@@ -58,7 +58,7 @@ namespace Lokrain.Atlas.Operations
         ConsumeRecords = 6,
 
         /// <summary>
-        /// Coverage is controlled by an explicit external storage grant.
+        /// Content availability is controlled by an explicitly validated external storage contract.
         /// </summary>
         ExternalContract = 7
     }

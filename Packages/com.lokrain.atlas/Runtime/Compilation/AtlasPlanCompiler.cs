@@ -23,7 +23,6 @@ using System;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Diagnostics;
 using Lokrain.Atlas.Pipelines;
-using Unity.Collections;
 
 namespace Lokrain.Atlas.Compilation
 {
@@ -155,7 +154,7 @@ namespace Lokrain.Atlas.Compilation
                     diagnostics.AddFatal(
                         NullCompiledPlanCode,
                         CreatePipelineLocation(pipeline),
-                        ToMessage("Atlas compilation returned a null compiled plan."));
+                        AtlasDiagnosticText.Message("Atlas compilation returned a null compiled plan."));
 
                     return AtlasCompilationResult.Failure(diagnostics);
                 }
@@ -169,7 +168,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddFatal(
                     CompilationExceptionCode,
                     CreatePipelineLocation(pipeline),
-                    ToMessage($"Atlas compilation failed with '{exception.GetType().Name}': {exception.Message}"));
+                    AtlasDiagnosticText.Message($"Atlas compilation failed with '{exception.GetType().Name}': {exception.Message}"));
 
                 return AtlasCompilationResult.Failure(diagnostics);
             }
@@ -225,8 +224,8 @@ namespace Lokrain.Atlas.Compilation
             {
                 diagnostics.AddError(
                     NullPipelineCode,
-                    AtlasDiagnosticLocation.Package(ToName("AtlasPlanCompiler")),
-                    ToMessage("Atlas pipeline compilation requires a non-null pipeline definition."));
+                    AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanCompiler")),
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a non-null pipeline definition."));
 
                 return;
             }
@@ -238,7 +237,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     InvalidPipelineIdCode,
                     location,
-                    ToMessage("Atlas pipeline compilation requires a valid pipeline id."));
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a valid pipeline id."));
             }
 
             if (pipeline.DebugName.IsEmpty)
@@ -246,7 +245,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyPipelineDebugNameCode,
                     location,
-                    ToMessage("Atlas pipeline compilation requires a non-empty pipeline debug name."));
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a non-empty pipeline debug name."));
             }
 
             if (pipeline.IsEmpty)
@@ -254,7 +253,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyPipelineCode,
                     location,
-                    ToMessage("Atlas pipeline compilation requires at least one stage occurrence."));
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires at least one stage occurrence."));
             }
         }
 
@@ -266,8 +265,8 @@ namespace Lokrain.Atlas.Compilation
             {
                 diagnostics.AddError(
                     NullContractTableCode,
-                    AtlasDiagnosticLocation.Package(ToName("AtlasPlanCompiler")),
-                    ToMessage("Atlas pipeline compilation requires a non-null Contract table."));
+                    AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanCompiler")),
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a non-null Contract table."));
 
                 return;
             }
@@ -277,7 +276,7 @@ namespace Lokrain.Atlas.Compilation
                 diagnostics.AddError(
                     EmptyContractTableCode,
                     AtlasDiagnosticLocation.Contract(default, contracts.Name),
-                    ToMessage("Atlas pipeline compilation requires a non-empty Contract table."));
+                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a non-empty Contract table."));
             }
         }
 
@@ -329,7 +328,7 @@ namespace Lokrain.Atlas.Compilation
         {
             if (pipeline == null)
             {
-                return AtlasDiagnosticLocation.Package(ToName("AtlasPlanCompiler"));
+                return AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanCompiler"));
             }
 
             var stableId = pipeline.PipelineId.IsValid
@@ -339,34 +338,6 @@ namespace Lokrain.Atlas.Compilation
             return AtlasDiagnosticLocation.Pipeline(
                 stableId,
                 pipeline.DebugName);
-        }
-
-        private static FixedString64Bytes ToName(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? default
-                : new FixedString64Bytes(Truncate(value, 63));
-        }
-
-        private static FixedString512Bytes ToMessage(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? new FixedString512Bytes("<empty diagnostic message>")
-                : new FixedString512Bytes(Truncate(value, 511));
-        }
-
-        private static string Truncate(
-            string value,
-            int maxLength)
-        {
-            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            {
-                return value;
-            }
-
-            return value.Substring(
-                0,
-                maxLength);
         }
     }
 }

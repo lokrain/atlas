@@ -314,7 +314,7 @@ namespace Lokrain.Atlas.Compilation
                             stageIndex,
                             operationIndex,
                             bindingIndex),
-                        ToMessage($"Atlas dataflow validation found a present binding '{GetDiagnosticName(binding.BindingName)}' with a Contract that is not table-ready."));
+                        AtlasDiagnosticText.Message($"Atlas dataflow validation found a present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' with a Contract that is not table-ready."));
 
                     continue;
                 }
@@ -402,9 +402,9 @@ namespace Lokrain.Atlas.Compilation
         {
             var code = GetMissingPriorContentCode(binding);
             var modeText = binding.Mode.ToString();
-            var operationName = GetDiagnosticName(operation.DebugName);
-            var bindingName = GetDiagnosticName(binding.BindingName);
-            var contractName = GetDiagnosticName(binding.Contract.DebugName);
+            var operationName = AtlasDiagnosticText.Name(operation.DebugName);
+            var bindingName = AtlasDiagnosticText.Name(binding.BindingName);
+            var contractName = AtlasDiagnosticText.Name(binding.Contract.DebugName);
 
             diagnostics.AddError(
                 code,
@@ -413,7 +413,7 @@ namespace Lokrain.Atlas.Compilation
                     stageIndex,
                     operationIndex,
                     bindingIndex),
-                ToMessage($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires prior content for Field '{contractName}' in mode '{modeText}', but no previous operation produced it and the dataflow policy does not allow it as initial input."));
+                AtlasDiagnosticText.Message($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires prior content for Field '{contractName}' in mode '{modeText}', but no previous operation produced it and the dataflow policy does not allow it as initial input."));
         }
 
         private static void AddInsufficientPriorContentDiagnostic(
@@ -426,9 +426,9 @@ namespace Lokrain.Atlas.Compilation
             AtlasDiagnosticBuffer diagnostics)
         {
             var code = GetInsufficientPriorContentCode(binding);
-            var operationName = GetDiagnosticName(operation.DebugName);
-            var bindingName = GetDiagnosticName(binding.BindingName);
-            var contractName = GetDiagnosticName(binding.Contract.DebugName);
+            var operationName = AtlasDiagnosticText.Name(operation.DebugName);
+            var bindingName = AtlasDiagnosticText.Name(binding.BindingName);
+            var contractName = AtlasDiagnosticText.Name(binding.Contract.DebugName);
 
             diagnostics.AddError(
                 code,
@@ -437,7 +437,7 @@ namespace Lokrain.Atlas.Compilation
                     stageIndex,
                     operationIndex,
                     bindingIndex),
-                ToMessage($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires full logical content for Field '{contractName}', but current availability is '{availability}'. Partial, sparse, or appended content is not sufficient for this access."));
+                AtlasDiagnosticText.Message($"Atlas dataflow violation: operation '{operationName}' binding '{bindingName}' requires full logical content for Field '{contractName}', but current availability is '{availability}'. Partial, sparse, or appended content is not sufficient for this access."));
         }
 
         private static AtlasDiagnosticCode GetMissingPriorContentCode(AtlasCompiledBinding binding)
@@ -479,34 +479,6 @@ namespace Lokrain.Atlas.Compilation
                 operationIndex,
                 bindingIndex,
                 binding.BindingName);
-        }
-
-        private static FixedString512Bytes ToMessage(string value)
-        {
-            return string.IsNullOrEmpty(value)
-                ? new FixedString512Bytes("<empty diagnostic message>")
-                : new FixedString512Bytes(Truncate(value, 511));
-        }
-
-        private static string Truncate(
-            string value,
-            int maxLength)
-        {
-            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            {
-                return value;
-            }
-
-            return value.Substring(
-                0,
-                maxLength);
-        }
-
-        private static string GetDiagnosticName(FixedString64Bytes name)
-        {
-            return name.IsEmpty
-                ? "<unnamed>"
-                : name.ToString();
         }
     }
 }

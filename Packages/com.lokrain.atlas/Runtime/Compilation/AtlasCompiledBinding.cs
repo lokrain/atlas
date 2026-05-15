@@ -191,8 +191,7 @@ namespace Lokrain.Atlas.Compilation
         public bool ReadsContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsPresent &&
-                   Access.ReadsContent;
+            get => IsPresent && Access.ReadsContent;
         }
 
         /// <summary>
@@ -201,8 +200,7 @@ namespace Lokrain.Atlas.Compilation
         public bool WritesContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsPresent &&
-                   Access.WritesContent;
+            get => IsPresent && Access.WritesContent;
         }
 
         /// <summary>
@@ -211,8 +209,7 @@ namespace Lokrain.Atlas.Compilation
         public bool WritesFullLogicalContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsPresent &&
-                   Access.WritesFullLogicalContent;
+            get => IsPresent && Access.WritesFullLogicalContent;
         }
 
         /// <summary>
@@ -221,8 +218,7 @@ namespace Lokrain.Atlas.Compilation
         public bool WritesPartialContent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsPresent &&
-                   Access.WritesPartialContent;
+            get => IsPresent && Access.WritesPartialContent;
         }
 
         /// <summary>
@@ -267,8 +263,7 @@ namespace Lokrain.Atlas.Compilation
         public bool RequiresContentMemory
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsPresent &&
-                   !Access.IsShapeOnly;
+            get => IsPresent && !Access.IsShapeOnly;
         }
 
         /// <summary>

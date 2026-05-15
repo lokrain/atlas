@@ -264,10 +264,24 @@ namespace Lokrain.Atlas.Compilation
                 return true;
             }
 
-            if (binding.Mode == AtlasOperationAccessMode.Append ||
-                binding.Mode == AtlasOperationAccessMode.Consume)
+            if (!binding.WriteCoverage.WritesAnyContent())
             {
-                return true;
+                return false;
+            }
+
+            if (binding.Mode == AtlasOperationAccessMode.Append)
+            {
+                return binding.WriteCoverage == AtlasWriteCoverage.AppendRecords;
+            }
+
+            if (binding.Mode == AtlasOperationAccessMode.Consume)
+            {
+                return binding.WriteCoverage == AtlasWriteCoverage.ConsumeRecords;
+            }
+
+            if (!binding.WriteCoverage.IsFieldWriteCoverage())
+            {
+                return false;
             }
 
             return binding.Flags.HasAny(
@@ -455,4 +469,4 @@ namespace Lokrain.Atlas.Compilation
             return !left.Equals(right);
         }
     }
-} 
+}
