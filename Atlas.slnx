@@ -1,0 +1,4 @@
+﻿<Solution>
+  <Project Path="Lokrain.Atlas.csproj" />
+  <Project Path="Lokrain.Atlas.Editor.csproj" />
+</Solution>

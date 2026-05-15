@@ -1,0 +1,11 @@
+{
+    "name": "Lokrain.Atlas.Tests",
+    "references": [
+        "Lokrain.Atlas"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": []
+}

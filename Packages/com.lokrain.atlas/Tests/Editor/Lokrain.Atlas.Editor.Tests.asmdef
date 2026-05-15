@@ -1,0 +1,14 @@
+{
+    "name": "Lokrain.Atlas.Editor.Tests",
+    "references": [
+        "Lokrain.Atlas.Editor",
+        "Lokrain.Atlas"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}
