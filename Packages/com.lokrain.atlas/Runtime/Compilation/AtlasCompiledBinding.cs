@@ -19,7 +19,7 @@
 // - Operation access order is significant and must not be sorted.
 // - default(AtlasCompiledBinding) is a valid value object, but it is not a meaningful compiled binding.
 // - Missing/present state is represented explicitly by IsPresent / IsMissingOptional.
-// - AtlasContract.Empty/default is only an inert payload for missing optional bindings; the presence flag owns meaning.
+// - default(AtlasContract) is only an inert payload for missing optional bindings; the presence flag owns meaning.
 // - AtlasFieldSlot default/zero is valid and must not be used as missing state.
 // - StableDataId default/zero is valid and must not be used as missing state.
 // - DiscardBeforeWrite does not prove full write coverage; WriteCoverage owns that proof.
@@ -55,10 +55,6 @@ namespace Lokrain.Atlas.Compilation
         /// </summary>
         public static readonly AtlasCompiledBinding Empty = default;
 
-        /// <summary>
-        /// Compatibility alias for <see cref="Empty"/>.
-        /// </summary>
-        public static readonly AtlasCompiledBinding Invalid = default;
 
         private readonly byte _presence;
 
@@ -120,14 +116,6 @@ namespace Lokrain.Atlas.Compilation
                    IsPresenceValid();
         }
 
-        /// <summary>
-        /// Gets whether this compiled binding is not semantically valid metadata.
-        /// </summary>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => !IsValid;
-        }
 
         /// <summary>
         /// Gets the stable field identifier declared by the operation access.

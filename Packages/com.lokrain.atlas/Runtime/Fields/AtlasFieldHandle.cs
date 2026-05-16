@@ -134,30 +134,7 @@ namespace Lokrain.Atlas.Fields
             get => _resolutionState != ResolvedState;
         }
 
-        /// <summary>
-        /// Gets whether this handle is structurally valid.
-        /// </summary>
-        /// <remarks>
-        /// Every bit pattern is valid as a value object. Unresolved does not mean invalid.
-        /// </remarks>
-        public bool IsValid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => true;
-        }
 
-        /// <summary>
-        /// Gets whether this handle is invalid.
-        /// </summary>
-        /// <remarks>
-        /// This type has no invalid value. This property always returns <c>false</c> and exists only
-        /// for source compatibility with older call sites.
-        /// </remarks>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => false;
-        }
 
         /// <summary>
         /// Gets the field declaration value used as the metadata source.

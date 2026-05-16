@@ -28,25 +28,6 @@ namespace Lokrain.Atlas.Executors
     /// <summary>
     /// Immutable registry mapping durable operation identities to managed operation executors.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="AtlasOperationExecutorRegistry"/> is the managed dispatch table used by operation
-    /// runners. The compiled plan contains durable <see cref="AtlasOperationId"/> values; this
-    /// registry maps those identities to concrete <see cref="IAtlasOperationExecutor"/> instances.
-    /// </para>
-    ///
-    /// <para>
-    /// The registry deliberately dispatches by operation id rather than generic C# type. Atlas
-    /// operation identity belongs to the authored/catalog/compiler model, not to an executor class
-    /// name. Executor classes may be renamed or refactored without changing durable operation
-    /// identity.
-    /// </para>
-    ///
-    /// <para>
-    /// This type does not own workspace memory, does not schedule jobs, does not write artifacts,
-    /// and does not render debug output. It only resolves operation ids to managed executor objects.
-    /// </para>
-    /// </remarks>
     public sealed class AtlasOperationExecutorRegistry :
         IReadOnlyList<IAtlasOperationExecutor>
     {
@@ -79,8 +60,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Gets the registered executor at a deterministic registration index.
         /// </summary>
-        /// <param name="index">Zero-based registration index.</param>
-        /// <returns>The registered executor.</returns>
         public IAtlasOperationExecutor this[int index]
         {
             get
@@ -93,16 +72,12 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Gets the registered executor for an operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <returns>The registered executor.</returns>
         public IAtlasOperationExecutor this[AtlasOperationId operationId] =>
             GetRequiredExecutor(operationId);
 
         /// <summary>
         /// Creates an immutable registry from explicitly ordered executor instances.
         /// </summary>
-        /// <param name="executors">Executor instances in deterministic registration order.</param>
-        /// <returns>An immutable operation executor registry.</returns>
         public static AtlasOperationExecutorRegistry Create(
             params IAtlasOperationExecutor[] executors)
         {
@@ -122,8 +97,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Creates an immutable registry from an enumerable executor source.
         /// </summary>
-        /// <param name="executors">Executor instances in deterministic registration order.</param>
-        /// <returns>An immutable operation executor registry.</returns>
         public static AtlasOperationExecutorRegistry Create(
             IEnumerable<IAtlasOperationExecutor> executors)
         {
@@ -150,8 +123,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Returns whether an executor is registered for the supplied operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <returns><c>true</c> when an executor is registered; otherwise, <c>false</c>.</returns>
         public bool Contains(
             AtlasOperationId operationId)
         {
@@ -163,8 +134,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Returns whether an executor is registered for the supplied operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <returns><c>true</c> when an executor is registered; otherwise, <c>false</c>.</returns>
         public bool ContainsExecutor(
             AtlasOperationId operationId)
         {
@@ -174,9 +143,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Attempts to get the registration index for an operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <param name="index">Registration index when found; otherwise, -1.</param>
-        /// <returns><c>true</c> when an executor is registered; otherwise, <c>false</c>.</returns>
         public bool TryGetIndex(
             AtlasOperationId operationId,
             out int index)
@@ -195,9 +161,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Attempts to get the executor registered for an operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <param name="executor">Executor when found; otherwise, null.</param>
-        /// <returns><c>true</c> when an executor is registered; otherwise, <c>false</c>.</returns>
         public bool TryGetExecutor(
             AtlasOperationId operationId,
             out IAtlasOperationExecutor executor)
@@ -217,11 +180,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Gets the executor registered for an operation id.
         /// </summary>
-        /// <param name="operationId">Durable operation identity.</param>
-        /// <returns>The registered executor.</returns>
-        /// <exception cref="KeyNotFoundException">
-        /// Thrown when no executor is registered for <paramref name="operationId"/>.
-        /// </exception>
         public IAtlasOperationExecutor GetRequiredExecutor(
             AtlasOperationId operationId)
         {
@@ -237,7 +195,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Copies registered executors into a caller-provided destination array.
         /// </summary>
-        /// <param name="destination">Destination array.</param>
         public void CopyTo(
             IAtlasOperationExecutor[] destination)
         {
@@ -259,7 +216,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Creates a managed copy of registered executors in deterministic registration order.
         /// </summary>
-        /// <returns>A new executor array.</returns>
         public IAtlasOperationExecutor[] ToArray()
         {
             var copy = new IAtlasOperationExecutor[_executors.Length];
@@ -270,7 +226,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Gets an enumerator over registered executors in deterministic registration order.
         /// </summary>
-        /// <returns>An executor enumerator.</returns>
         public IEnumerator<IAtlasOperationExecutor> GetEnumerator()
         {
             for (var i = 0; i < _executors.Length; i++)
@@ -282,7 +237,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Gets an enumerator over registered executors in deterministic registration order.
         /// </summary>
-        /// <returns>An executor enumerator.</returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
@@ -291,7 +245,6 @@ namespace Lokrain.Atlas.Executors
         /// <summary>
         /// Returns a diagnostic representation of this registry.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
             return $"AtlasOperationExecutorRegistry(Count={Count})";

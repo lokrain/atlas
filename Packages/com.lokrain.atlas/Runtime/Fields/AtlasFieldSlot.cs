@@ -11,8 +11,6 @@
 //
 // Design notes
 // - default(AtlasFieldSlot) is valid and represents slot zero.
-// - AtlasFieldSlot.Invalid is retained only as a source-compatibility alias for default.
-// - AtlasFieldSlot.Invalid is not invalid and must not be used as a sentinel.
 // - A slot is table-local compiled metadata, not durable field identity.
 // - Durable identity belongs to StableDataId or the production field catalog.
 // - GetHashCode is deterministic and does not use System.HashCode.
@@ -48,14 +46,6 @@ namespace Lokrain.Atlas.Fields
         private const int HashSeed = 17;
         private const int HashMultiplier = 397;
 
-        /// <summary>
-        /// Legacy alias for the default slot.
-        /// </summary>
-        /// <remarks>
-        /// This value is slot zero. It is valid. It is not an invalid sentinel. The member is kept
-        /// only for source compatibility with older code.
-        /// </remarks>
-        public static readonly AtlasFieldSlot Invalid = default;
 
         /// <summary>
         /// The first valid field slot index.
@@ -83,30 +73,7 @@ namespace Lokrain.Atlas.Fields
             _value = value;
         }
 
-        /// <summary>
-        /// Gets whether this slot is structurally valid.
-        /// </summary>
-        /// <remarks>
-        /// Every bit pattern is valid. This property is retained for source compatibility.
-        /// </remarks>
-        public bool IsValid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => true;
-        }
 
-        /// <summary>
-        /// Gets whether this slot is invalid.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="AtlasFieldSlot"/> has no invalid value. This property always returns
-        /// <c>false</c> and is retained only for source compatibility.
-        /// </remarks>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => false;
-        }
 
         /// <summary>
         /// Gets the zero-based slot value.
@@ -126,17 +93,6 @@ namespace Lokrain.Atlas.Fields
             get => _value;
         }
 
-        /// <summary>
-        /// Legacy alias for <see cref="Value"/>.
-        /// </summary>
-        /// <remarks>
-        /// There is no invalid slot payload. This member is retained only for source compatibility.
-        /// </remarks>
-        public ushort ValueOrInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _value;
-        }
 
         /// <summary>
         /// Creates a field slot from a zero-based table index.

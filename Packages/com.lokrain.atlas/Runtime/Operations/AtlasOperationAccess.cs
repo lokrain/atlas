@@ -12,8 +12,7 @@
 // Design notes
 // - default(AtlasOperationAccess) is a valid value object, but it is not a concrete access declaration.
 // - StableDataId default/zero is valid.
-// - AtlasOperationAccess.Empty is a compatibility alias for default, not an invalid sentinel.
-// - AtlasOperationAccess.Invalid is a compatibility alias for default, not an invalid sentinel.
+// - AtlasOperationAccess.Empty is a default payload for bool-returning lookup APIs, not an invalid sentinel.
 // - Missing lookup results must be represented by bool-returning APIs or explicit presence flags.
 // - AtlasOperationAccessMode.None is valid as a default enum value, but not valid for concrete declarations.
 // - BindingName is diagnostic/ABI metadata, not dispatch identity.
@@ -43,14 +42,10 @@ namespace Lokrain.Atlas.Operations
         private const int HashMultiplier = 397;
 
         /// <summary>
-        /// Compatibility alias for the default operation access payload.
+        /// Default operation access payload used by Try-style APIs when no access is found.
         /// </summary>
         public static readonly AtlasOperationAccess Empty = default;
 
-        /// <summary>
-        /// Compatibility alias for the default operation access payload.
-        /// </summary>
-        public static readonly AtlasOperationAccess Invalid = default;
 
         /// <summary>
         /// Stable identity of the field accessed by the operation.
@@ -122,14 +117,6 @@ namespace Lokrain.Atlas.Operations
                    IsWriteCoverageCombinationValid();
         }
 
-        /// <summary>
-        /// Gets whether this value is structurally invalid.
-        /// </summary>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => false;
-        }
 
         /// <summary>
         /// Gets whether this declaration requires field contents to be read.

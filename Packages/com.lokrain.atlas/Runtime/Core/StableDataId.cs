@@ -35,7 +35,7 @@ namespace Lokrain.Atlas.Core
     ///
     /// <para>
     /// This value is suitable for unmanaged/Burst-facing metadata because every bit pattern is valid.
-    /// Code must not use <see cref="Zero"/>, <see cref="Empty"/>, or <c>default</c> as an invalid
+    /// Code must not use <see cref="Zero"/> or <c>default</c> as an invalid
     /// sentinel.
     /// </para>
     /// </remarks>
@@ -55,13 +55,6 @@ namespace Lokrain.Atlas.Core
         /// </remarks>
         public static readonly StableDataId Zero = default;
 
-        /// <summary>
-        /// Legacy alias for <see cref="Zero"/>.
-        /// </summary>
-        /// <remarks>
-        /// This value is valid. The name is kept for source compatibility only.
-        /// </remarks>
-        public static readonly StableDataId Empty = default;
 
         /// <summary>
         /// Gets the high 64 bits of the durable 128-bit identity.
@@ -106,30 +99,7 @@ namespace Lokrain.Atlas.Core
             get => High == 0UL && Low == 0UL && Version == 0;
         }
 
-        /// <summary>
-        /// Legacy alias for <see cref="IsZero"/>.
-        /// </summary>
-        /// <remarks>
-        /// Empty does not mean invalid. This property is kept for source compatibility only.
-        /// </remarks>
-        public bool IsEmpty
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsZero;
-        }
 
-        /// <summary>
-        /// Gets whether this value is structurally valid.
-        /// </summary>
-        /// <remarks>
-        /// Every bit pattern is valid. This property is kept for source compatibility with older code
-        /// that expected an <c>IsValid</c> member.
-        /// </remarks>
-        public bool IsValid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => true;
-        }
 
         /// <summary>
         /// Returns a copy of this identifier with a different semantic version.

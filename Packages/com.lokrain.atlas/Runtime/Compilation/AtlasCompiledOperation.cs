@@ -5,7 +5,7 @@
 //
 // Purpose
 // - Represent one operation occurrence after symbolic Field access has been resolved.
-// - Preserve operation occurrence index and operation binding order.
+// - Preserve operation occurrence index, semantic role, and operation binding order.
 // - Bind a durable operation contract to compiled bindings resolved against an Atlas Contract table.
 // - Keep compiled operation metadata separate from concrete job schedulers and native memory.
 //
@@ -76,19 +76,27 @@ namespace Lokrain.Atlas.Compilation
         /// </summary>
         public readonly FixedString64Bytes DebugName;
 
+        /// <summary>
+        /// Semantic operation category from the source operation definition.
+        /// </summary>
+        public readonly AtlasOperationRole Role;
+
         private AtlasCompiledOperation(
             int operationIndex,
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             AtlasCompiledBinding[] bindings)
         {
             OperationIndex = operationIndex;
             OperationId = operationId;
             DebugName = debugName;
+            Role = role;
             _bindings = CopyAndValidateBindings(
                 operationIndex,
                 operationId,
                 debugName,
+                role,
                 bindings);
         }
 
@@ -349,6 +357,7 @@ namespace Lokrain.Atlas.Compilation
                 operationIndex,
                 operation.OperationId,
                 operation.DebugName,
+                operation.Role,
                 operation.Count);
 
             var bindings = new AtlasCompiledBinding[operation.Count];
@@ -365,6 +374,7 @@ namespace Lokrain.Atlas.Compilation
                 operationIndex,
                 operation.OperationId,
                 operation.DebugName,
+                operation.Role,
                 bindings);
         }
 
@@ -374,6 +384,7 @@ namespace Lokrain.Atlas.Compilation
         /// <param name="operationIndex">Zero-based operation occurrence index.</param>
         /// <param name="operationId">Stable, versioned source operation identity.</param>
         /// <param name="debugName">Stable diagnostic operation name.</param>
+        /// <param name="role">Semantic operation category.</param>
         /// <param name="bindings">Compiled bindings in operation-local binding order.</param>
         /// <returns>A validated compiled operation occurrence.</returns>
         /// <exception cref="ArgumentNullException">
@@ -386,12 +397,14 @@ namespace Lokrain.Atlas.Compilation
             int operationIndex,
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             params AtlasCompiledBinding[] bindings)
         {
             return new AtlasCompiledOperation(
                 operationIndex,
                 operationId,
                 debugName,
+                role,
                 bindings);
         }
 
@@ -422,10 +435,6 @@ namespace Lokrain.Atlas.Compilation
         /// <returns>The matching binding index, or <c>-1</c> when absent.</returns>
         public int IndexOf(StableDataId fieldId)
         {
-            if (!fieldId.IsValid)
-            {
-                return InvalidBindingIndex;
-            }
 
             for (var i = 0; i < _bindings.Length; i++)
             {
@@ -699,19 +708,21 @@ namespace Lokrain.Atlas.Compilation
         /// <returns>A string containing operation name, id, occurrence index, and binding counts.</returns>
         public override string ToString()
         {
-            return $"AtlasCompiledOperation(Index={OperationIndex}, Name={DebugName}, Id={OperationId}, Bindings={Count}, Present={PresentBindingCount}, MissingOptional={MissingOptionalBindingCount})";
+            return $"AtlasCompiledOperation(Index={OperationIndex}, Name={DebugName}, Id={OperationId}, Role={Role}, Bindings={Count}, Present={PresentBindingCount}, MissingOptional={MissingOptionalBindingCount})";
         }
 
         private static AtlasCompiledBinding[] CopyAndValidateBindings(
             int operationIndex,
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             AtlasCompiledBinding[] bindings)
         {
             ValidateOperationHeaderOrThrow(
                 operationIndex,
                 operationId,
                 debugName,
+                role,
                 bindings == null ? 0 : bindings.Length);
 
             if (bindings == null)
@@ -743,6 +754,7 @@ namespace Lokrain.Atlas.Compilation
             int operationIndex,
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             int bindingCount)
         {
             if (operationIndex < 0)
@@ -760,6 +772,13 @@ namespace Lokrain.Atlas.Compilation
                 throw new ArgumentException(
                     "Compiled Atlas operation must have a non-empty debug name.",
                     nameof(debugName));
+            }
+
+            if (role == AtlasOperationRole.None)
+            {
+                throw new ArgumentException(
+                    "Compiled Atlas operation must have a concrete semantic role.",
+                    nameof(role));
             }
 
             if (bindingCount <= 0)

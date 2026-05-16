@@ -176,6 +176,7 @@ namespace Lokrain.Atlas.Compilation.Tests
             return AtlasOperationDefinition.Create(
                 WriteOperationId,
                 new FixedString64Bytes("workflow.write"),
+                AtlasOperationRole.WorkspacePreparation,
                 AtlasOperationAccess.Create(
                     WritableFieldId,
                     AtlasOperationAccessMode.Write,
@@ -189,6 +190,7 @@ namespace Lokrain.Atlas.Compilation.Tests
             return AtlasOperationDefinition.Create(
                 ReadAndBlobWriteOperationId,
                 new FixedString64Bytes("workflow.read.and.blob.write"),
+                AtlasOperationRole.Validation,
                 AtlasOperationAccess.Create(
                     ReadOnlyFieldId,
                     AtlasOperationAccessMode.Read,
@@ -207,6 +209,7 @@ namespace Lokrain.Atlas.Compilation.Tests
             return AtlasOperationDefinition.Create(
                 BlobWriteOperationId,
                 new FixedString64Bytes("workflow.blob.write"),
+                AtlasOperationRole.ArtifactProduction,
                 AtlasOperationAccess.Create(
                     BlobFieldId,
                     AtlasOperationAccessMode.Write,
@@ -255,6 +258,7 @@ namespace Lokrain.Atlas.Compilation.Tests
                 StorageKind.NativeArray,
                 OwnershipPolicy.AtlasOwned,
                 LifetimePolicy.Frame,
+                AtlasShapeDomain.LinearRows(new FixedString64Bytes("workflow.rows")),
                 LengthShape.Fixed(4),
                 AtlasFieldFlags.None,
                 HashParticipation.Default,
@@ -271,6 +275,7 @@ namespace Lokrain.Atlas.Compilation.Tests
                 StorageKind.Blob,
                 OwnershipPolicy.AtlasOwned,
                 LifetimePolicy.Frame,
+                AtlasShapeDomain.LinearRows(new FixedString64Bytes("workflow.rows")),
                 LengthShape.Fixed(4),
                 AtlasFieldFlags.None,
                 HashParticipation.Default,

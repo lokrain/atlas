@@ -12,7 +12,6 @@
 // Design notes
 // - default(AtlasPipelineId) is valid.
 // - AtlasPipelineId.Zero is valid.
-// - AtlasPipelineId.Empty is a compatibility alias for Zero, not an invalid sentinel.
 // - Version 0 is valid.
 // - This type does not encode missing, unsupported, undeclared, or disabled state.
 // - Pipeline declaration/support belongs to pipeline/profile catalog metadata.
@@ -78,22 +77,7 @@ namespace Lokrain.Atlas.Pipelines
         /// </remarks>
         public static readonly AtlasPipelineId Zero = default;
 
-        /// <summary>
-        /// Compatibility alias for <see cref="Zero"/>.
-        /// </summary>
-        /// <remarks>
-        /// This value is valid. It is not an invalid or missing sentinel.
-        /// </remarks>
-        public static readonly AtlasPipelineId Empty = default;
 
-        /// <summary>
-        /// Compatibility alias for <see cref="Zero"/>.
-        /// </summary>
-        /// <remarks>
-        /// This value is valid. It is retained only for older call sites and must not be used to
-        /// represent invalid state.
-        /// </remarks>
-        public static readonly AtlasPipelineId Invalid = default;
 
         /// <summary>
         /// High 64 bits of the durable pipeline identity.
@@ -143,42 +127,8 @@ namespace Lokrain.Atlas.Pipelines
                    Version == 0;
         }
 
-        /// <summary>
-        /// Compatibility alias for <see cref="IsZero"/>.
-        /// </summary>
-        /// <remarks>
-        /// Empty does not mean invalid. This property is retained only for source compatibility.
-        /// </remarks>
-        public bool IsEmpty
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => IsZero;
-        }
 
-        /// <summary>
-        /// Gets whether this pipeline identifier is structurally valid.
-        /// </summary>
-        /// <remarks>
-        /// Every bit pattern is valid. This property is retained for compatibility with older call
-        /// sites that expected an <c>IsValid</c> member.
-        /// </remarks>
-        public bool IsValid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => true;
-        }
 
-        /// <summary>
-        /// Gets whether this pipeline identifier is structurally invalid.
-        /// </summary>
-        /// <remarks>
-        /// This type has no invalid value. This property always returns <c>false</c>.
-        /// </remarks>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => false;
-        }
 
         /// <summary>
         /// Creates a pipeline identifier with the same durable identity and a different version.

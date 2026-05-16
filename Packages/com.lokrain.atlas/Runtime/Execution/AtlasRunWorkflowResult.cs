@@ -16,7 +16,7 @@
 // - The workspace remains native memory and must be disposed.
 // - A successful workflow result owns the returned workspace unless ownership is explicitly released.
 // - Failed workflow results may still own a partially allocated workspace.
-// - Disposing the result disposes owned workspace memory only.
+// - Disposing the result completes any scheduled owned execution dependency before disposing workspace memory.
 // - Disposing the result does not dispose artifact/debug-map managed data because those are ordinary managed objects.
 
 using System;
@@ -555,7 +555,7 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Disposes owned workspace memory.
+        /// Completes any scheduled owned execution dependency, then disposes owned workspace memory.
         /// </summary>
         public void Dispose()
         {
@@ -566,12 +566,24 @@ namespace Lokrain.Atlas.Execution
 
             if (_ownsWorkspace && _workspace != null)
             {
+                CompleteOwnedScheduledExecutionBeforeDisposingWorkspace();
                 _workspace.Dispose();
             }
 
             _ownsWorkspace = false;
             _state = DisposedState;
             GC.SuppressFinalize(this);
+        }
+
+
+        private void CompleteOwnedScheduledExecutionBeforeDisposingWorkspace()
+        {
+            if (Execution == null || !Execution.IsScheduled)
+            {
+                return;
+            }
+
+            Execution.FinalDependency.Complete();
         }
 
         /// <summary>

@@ -232,13 +232,6 @@ namespace Lokrain.Atlas.Compilation
 
             var location = CreatePipelineLocation(pipeline);
 
-            if (!pipeline.PipelineId.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidPipelineIdCode,
-                    location,
-                    AtlasDiagnosticText.Message("Atlas pipeline compilation requires a valid pipeline id."));
-            }
 
             if (pipeline.DebugName.IsEmpty)
             {
@@ -287,12 +280,6 @@ namespace Lokrain.Atlas.Compilation
                 throw new ArgumentNullException(nameof(pipeline));
             }
 
-            if (!pipeline.PipelineId.IsValid)
-            {
-                throw new ArgumentException(
-                    "Atlas pipeline compilation requires a valid pipeline id.",
-                    nameof(pipeline));
-            }
 
             if (pipeline.DebugName.IsEmpty)
             {
@@ -331,9 +318,7 @@ namespace Lokrain.Atlas.Compilation
                 return AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanCompiler"));
             }
 
-            var stableId = pipeline.PipelineId.IsValid
-                ? pipeline.PipelineId.ToStableDataId()
-                : default;
+            var stableId = pipeline.PipelineId.ToStableDataId();
 
             return AtlasDiagnosticLocation.Pipeline(
                 stableId,

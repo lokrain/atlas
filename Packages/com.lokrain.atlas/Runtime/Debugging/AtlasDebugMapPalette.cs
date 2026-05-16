@@ -96,7 +96,7 @@ namespace Lokrain.Atlas.Debugging
         public static AtlasDebugColor32 TransparentBlack
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new AtlasDebugColor32(0, 0, 0, 0);
+            get => new(0, 0, 0, 0);
         }
 
         /// <summary>
@@ -105,7 +105,7 @@ namespace Lokrain.Atlas.Debugging
         public static AtlasDebugColor32 Black
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new AtlasDebugColor32(0, 0, 0, 255);
+            get => new(0, 0, 0, 255);
         }
 
         /// <summary>
@@ -114,7 +114,7 @@ namespace Lokrain.Atlas.Debugging
         public static AtlasDebugColor32 White
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new AtlasDebugColor32(255, 255, 255, 255);
+            get => new(255, 255, 255, 255);
         }
 
         /// <summary>
@@ -123,7 +123,7 @@ namespace Lokrain.Atlas.Debugging
         public static AtlasDebugColor32 Magenta
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new AtlasDebugColor32(255, 0, 255, 255);
+            get => new(255, 0, 255, 255);
         }
 
         /// <summary>

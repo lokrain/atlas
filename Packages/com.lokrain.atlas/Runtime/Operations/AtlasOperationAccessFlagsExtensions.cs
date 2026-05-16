@@ -12,8 +12,7 @@
 // Design notes
 // - default(AtlasOperationAccess) is a valid value object, but it is not a concrete access declaration.
 // - StableDataId default/zero is valid.
-// - AtlasOperationAccess.Empty is a compatibility alias for default, not an invalid sentinel.
-// - AtlasOperationAccess.Invalid is a compatibility alias for default, not an invalid sentinel.
+// - AtlasOperationAccess.Empty is a default payload for bool-returning lookup APIs, not an invalid sentinel.
 // - Missing lookup results must be represented by bool-returning APIs or explicit presence flags.
 // - AtlasOperationAccessMode.None is valid as a default enum value, but not valid for concrete declarations.
 // - BindingName is diagnostic/ABI metadata, not dispatch identity.

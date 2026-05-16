@@ -431,8 +431,7 @@ namespace Lokrain.Atlas.Contracts
 
                 case LengthShapeKind.MatchFieldLength:
                 case LengthShapeKind.PrefixSumPayload:
-                    if (SourceFieldId.IsValid &&
-                        FixedLength == 0 &&
+                    if (FixedLength == 0 &&
                         HasDefaultCapacityRatio() &&
                         CapacityPadding == 0)
                     {
@@ -455,8 +454,7 @@ namespace Lokrain.Atlas.Contracts
                     break;
 
                 case LengthShapeKind.CapacityFromField:
-                    if (SourceFieldId.IsValid &&
-                        FixedLength == 0 &&
+                    if (FixedLength == 0 &&
                         CapacityMultiplierNumerator >= 0 &&
                         CapacityMultiplierDenominator > 0 &&
                         CapacityPadding >= 0)

@@ -19,7 +19,7 @@
 // - Do not infer slot assignment from Slot == default.
 // - ShapeDomain describes what resolved length/capacity means.
 // - LengthShape describes how resolved length/capacity is produced.
-// - Empty and Invalid are compatibility aliases for default; they are not invalid sentinels.
+// - Empty/default is an inert payload for bool-returning lookup APIs, not an invalid sentinel.
 // - Missing lookup results must be represented by a bool-returning API, not by returning default.
 // - This type describes schema metadata only. It does not own storage.
 // - Jobs should not consume AtlasContract directly in hot loops. Jobs should receive compiled
@@ -75,24 +75,6 @@ namespace Lokrain.Atlas.Contracts
         private const byte SlotUnassigned = 0;
         private const byte SlotAssigned = 1;
 
-        /// <summary>
-        /// Compatibility alias for the default contract value.
-        /// </summary>
-        /// <remarks>
-        /// This value is not an invalid sentinel. It is retained only for source compatibility with
-        /// older code that used <c>Empty</c> as a missing lookup payload. Missing lookup state must
-        /// be represented by a boolean return value.
-        /// </remarks>
-        public static readonly AtlasContract Empty = default;
-
-        /// <summary>
-        /// Compatibility alias for the default contract value.
-        /// </summary>
-        /// <remarks>
-        /// This value is not an invalid sentinel. It is retained only for source compatibility with
-        /// older code. Do not use this value to represent absence.
-        /// </remarks>
-        public static readonly AtlasContract Invalid = default;
 
         private readonly byte _slotPresence;
 
@@ -244,18 +226,6 @@ namespace Lokrain.Atlas.Contracts
                    !DebugName.IsEmpty;
         }
 
-        /// <summary>
-        /// Gets whether this value is structurally invalid.
-        /// </summary>
-        /// <remarks>
-        /// No bit pattern is structurally invalid. This property is retained for source
-        /// compatibility and always returns <c>false</c>.
-        /// </remarks>
-        public bool IsInvalid
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => false;
-        }
 
         /// <summary>
         /// Gets whether this contract has an assigned canonical table-local field slot.

@@ -425,12 +425,6 @@ namespace Lokrain.Atlas.Pipelines
             {
                 var id = source[i];
 
-                if (!id.IsValid)
-                {
-                    throw new ArgumentException(
-                        $"Atlas pipeline validation policy contains an invalid stage id at index '{i}'.",
-                        parameterName);
-                }
 
                 copy[i] = id;
             }
@@ -453,12 +447,6 @@ namespace Lokrain.Atlas.Pipelines
             {
                 var id = source[i];
 
-                if (!id.IsValid)
-                {
-                    throw new ArgumentException(
-                        $"Atlas pipeline validation policy contains an invalid operation id at index '{i}'.",
-                        parameterName);
-                }
 
                 copy[i] = id;
             }

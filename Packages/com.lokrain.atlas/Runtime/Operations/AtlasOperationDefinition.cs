@@ -5,13 +5,14 @@
 //
 // Purpose
 // - Define one durable Atlas operation contract.
-// - Preserve operation identity, diagnostic name, symbolic field access, and access declaration order.
+// - Preserve operation identity, semantic role, diagnostic name, symbolic field access, and access declaration order.
 // - Validate explicit write coverage at operation-construction boundaries.
 // - Keep operation definitions independent from executors, jobs, native memory, and runtime storage.
 //
 // Design notes
 // - OperationId is durable identity.
 // - DebugName is diagnostic ABI metadata.
+// - Role is semantic ABI metadata and is required for every operation definition.
 // - Access declaration order is operation ABI and must not be sorted.
 // - WriteCoverage is required for write-capable bindings.
 // - Jobs must not receive this type.
@@ -44,15 +45,22 @@ namespace Lokrain.Atlas.Operations
         /// </summary>
         public readonly FixedString64Bytes DebugName;
 
+        /// <summary>
+        /// Semantic operation category used by validation, diagnostics, tooling, and policy.
+        /// </summary>
+        public readonly AtlasOperationRole Role;
+
         private AtlasOperationDefinition(
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             AtlasOperationAccess[] accesses)
         {
             OperationId = operationId;
             DebugName = debugName;
+            Role = role;
 
-            ValidateHeaderOrThrow(operationId, debugName);
+            ValidateHeaderOrThrow(operationId, debugName, role);
 
             _accesses = CopyAndValidateAccesses(accesses);
             _accessIndexByFieldId = BuildFieldLookup(_accesses);
@@ -201,11 +209,13 @@ namespace Lokrain.Atlas.Operations
         public static AtlasOperationDefinition Create(
             AtlasOperationId operationId,
             FixedString64Bytes debugName,
+            AtlasOperationRole role,
             params AtlasOperationAccess[] accesses)
         {
             return new AtlasOperationDefinition(
                 operationId,
                 debugName,
+                role,
                 accesses);
         }
 
@@ -214,8 +224,7 @@ namespace Lokrain.Atlas.Operations
         /// </summary>
         public bool ContainsField(StableDataId fieldId)
         {
-            return fieldId.IsValid &&
-                   _accessIndexByFieldId.ContainsKey(fieldId);
+            return _accessIndexByFieldId.ContainsKey(fieldId);
         }
 
         /// <summary>
@@ -234,8 +243,7 @@ namespace Lokrain.Atlas.Operations
             StableDataId fieldId,
             out AtlasOperationAccess access)
         {
-            if (fieldId.IsValid &&
-                _accessIndexByFieldId.TryGetValue(fieldId, out var index))
+            if (_accessIndexByFieldId.TryGetValue(fieldId, out var index))
             {
                 access = _accesses[index];
                 return true;
@@ -347,23 +355,29 @@ namespace Lokrain.Atlas.Operations
         /// </summary>
         public override string ToString()
         {
-            return $"AtlasOperationDefinition(Name={DebugName}, Id={OperationId}, Accesses={Count})";
+            return $"AtlasOperationDefinition(Name={DebugName}, Id={OperationId}, Role={Role}, Accesses={Count})";
         }
 
         private static void ValidateHeaderOrThrow(
             AtlasOperationId operationId,
-            FixedString64Bytes debugName)
+            FixedString64Bytes debugName,
+            AtlasOperationRole role)
         {
             operationId.ValidateOrThrow(nameof(operationId));
 
-            if (!debugName.IsEmpty)
+            if (debugName.IsEmpty)
             {
-                return;
+                throw new ArgumentException(
+                    "Atlas operation definition must declare a non-empty debug name.",
+                    nameof(debugName));
             }
 
-            throw new ArgumentException(
-                "Atlas operation definition must declare a non-empty debug name.",
-                nameof(debugName));
+            if (role == AtlasOperationRole.None)
+            {
+                throw new ArgumentException(
+                    "Atlas operation definition must declare a concrete semantic role.",
+                    nameof(role));
+            }
         }
 
         private static AtlasOperationAccess[] CopyAndValidateAccesses(AtlasOperationAccess[] accesses)

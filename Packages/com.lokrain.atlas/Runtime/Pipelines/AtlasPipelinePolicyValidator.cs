@@ -296,13 +296,6 @@ namespace Lokrain.Atlas.Pipelines
 
             var location = CreatePipelineLocation(pipeline);
 
-            if (!pipeline.PipelineId.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidPipelineIdCode,
-                    location,
-                    AtlasDiagnosticText.Message("Atlas pipeline policy validation requires a valid pipeline id."));
-            }
 
             if (pipeline.DebugName.IsEmpty)
             {
@@ -380,13 +373,6 @@ namespace Lokrain.Atlas.Pipelines
                     stage,
                     stageIndex);
 
-                if (!stage.StageId.IsValid)
-                {
-                    diagnostics.AddError(
-                        InvalidStageIdCode,
-                        location,
-                        AtlasDiagnosticText.Message($"Atlas pipeline '{AtlasDiagnosticText.Name(pipeline.DebugName)}' contains stage '{AtlasDiagnosticText.Name(stage.DebugName)}' with an invalid stage id at index '{stageIndex}'."));
-                }
 
                 if (stage.DebugName.IsEmpty)
                 {
@@ -404,8 +390,7 @@ namespace Lokrain.Atlas.Pipelines
                         AtlasDiagnosticText.Message($"Atlas pipeline '{AtlasDiagnosticText.Name(pipeline.DebugName)}' contains empty stage '{AtlasDiagnosticText.Name(stage.DebugName)}' at index '{stageIndex}'."));
                 }
 
-                if (stage.StageId.IsValid &&
-                    !policy.AllowsStage(stage.StageId))
+                if (!policy.AllowsStage(stage.StageId))
                 {
                     diagnostics.AddError(
                         StageNotAllowedCode,
@@ -413,8 +398,7 @@ namespace Lokrain.Atlas.Pipelines
                         AtlasDiagnosticText.Message($"Atlas pipeline '{AtlasDiagnosticText.Name(pipeline.DebugName)}' contains stage '{AtlasDiagnosticText.Name(stage.DebugName)}' which is not allowed by policy '{AtlasDiagnosticText.Name(policy.Name)}'."));
                 }
 
-                if (stage.StageId.IsValid &&
-                    policy.ForbidsStage(stage.StageId))
+                if (policy.ForbidsStage(stage.StageId))
                 {
                     diagnostics.AddError(
                         StageForbiddenCode,
@@ -441,7 +425,7 @@ namespace Lokrain.Atlas.Pipelines
             {
                 var left = pipeline[i];
 
-                if (left == null || !left.StageId.IsValid)
+                if (left == null)
                 {
                     continue;
                 }
@@ -450,7 +434,7 @@ namespace Lokrain.Atlas.Pipelines
                 {
                     var right = pipeline[j];
 
-                    if (right == null || !right.StageId.IsValid)
+                    if (right == null)
                     {
                         continue;
                     }
@@ -602,13 +586,6 @@ namespace Lokrain.Atlas.Pipelines
                     stageIndex,
                     operationIndex);
 
-                if (!operation.OperationId.IsValid)
-                {
-                    diagnostics.AddError(
-                        InvalidOperationIdCode,
-                        location,
-                        AtlasDiagnosticText.Message($"Atlas stage '{AtlasDiagnosticText.Name(stage.DebugName)}' contains operation '{AtlasDiagnosticText.Name(operation.DebugName)}' with an invalid operation id at index '{operationIndex}'."));
-                }
 
                 if (operation.DebugName.IsEmpty)
                 {
@@ -626,8 +603,7 @@ namespace Lokrain.Atlas.Pipelines
                         AtlasDiagnosticText.Message($"Atlas stage '{AtlasDiagnosticText.Name(stage.DebugName)}' contains empty operation '{AtlasDiagnosticText.Name(operation.DebugName)}' at index '{operationIndex}'."));
                 }
 
-                if (operation.OperationId.IsValid &&
-                    !policy.AllowsOperation(operation.OperationId))
+                if (!policy.AllowsOperation(operation.OperationId))
                 {
                     diagnostics.AddError(
                         OperationNotAllowedCode,
@@ -635,8 +611,7 @@ namespace Lokrain.Atlas.Pipelines
                         AtlasDiagnosticText.Message($"Atlas pipeline '{AtlasDiagnosticText.Name(pipeline.DebugName)}' contains operation '{AtlasDiagnosticText.Name(operation.DebugName)}' which is not allowed by policy '{AtlasDiagnosticText.Name(policy.Name)}'."));
                 }
 
-                if (operation.OperationId.IsValid &&
-                    policy.ForbidsOperation(operation.OperationId))
+                if (policy.ForbidsOperation(operation.OperationId))
                 {
                     diagnostics.AddError(
                         OperationForbiddenCode,
@@ -670,7 +645,7 @@ namespace Lokrain.Atlas.Pipelines
             {
                 var left = stage[i];
 
-                if (left == null || !left.OperationId.IsValid)
+                if (left == null)
                 {
                     continue;
                 }
@@ -679,7 +654,7 @@ namespace Lokrain.Atlas.Pipelines
                 {
                     var right = stage[j];
 
-                    if (right == null || !right.OperationId.IsValid)
+                    if (right == null)
                     {
                         continue;
                     }
@@ -726,7 +701,7 @@ namespace Lokrain.Atlas.Pipelines
             {
                 var left = occurrences[i];
 
-                if (left.Operation == null || !left.Operation.OperationId.IsValid)
+                if (left.Operation == null)
                 {
                     continue;
                 }
@@ -735,7 +710,7 @@ namespace Lokrain.Atlas.Pipelines
                 {
                     var right = occurrences[j];
 
-                    if (right.Operation == null || !right.Operation.OperationId.IsValid)
+                    if (right.Operation == null)
                     {
                         continue;
                     }
@@ -853,7 +828,6 @@ namespace Lokrain.Atlas.Pipelines
                 var stage = pipeline[i];
 
                 if (stage != null &&
-                    stage.StageId.IsValid &&
                     stage.StageId == stageId)
                 {
                     return i;
@@ -873,7 +847,6 @@ namespace Lokrain.Atlas.Pipelines
                 var operation = occurrences[i].Operation;
 
                 if (operation != null &&
-                    operation.OperationId.IsValid &&
                     operation.OperationId == operationId)
                 {
                     return i;
@@ -915,9 +888,7 @@ namespace Lokrain.Atlas.Pipelines
                 return AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPipelinePolicyValidator"));
             }
 
-            var stableId = pipeline.PipelineId.IsValid
-                ? pipeline.PipelineId.ToStableDataId()
-                : default;
+            var stableId = pipeline.PipelineId.ToStableDataId();
 
             return AtlasDiagnosticLocation.Pipeline(
                 stableId,
@@ -939,9 +910,7 @@ namespace Lokrain.Atlas.Pipelines
                     AtlasDiagnosticText.Name64("null-stage"));
             }
 
-            var stableId = stage.StageId.IsValid
-                ? stage.StageId.ToStableDataId()
-                : default;
+            var stableId = stage.StageId.ToStableDataId();
 
             return AtlasDiagnosticLocation.Create(
                 AtlasDiagnosticLocationKind.Stage,
@@ -968,9 +937,7 @@ namespace Lokrain.Atlas.Pipelines
                     AtlasDiagnosticText.Name64("null-operation"));
             }
 
-            var stableId = operation.OperationId.IsValid
-                ? operation.OperationId.ToStableDataId()
-                : default;
+            var stableId = operation.OperationId.ToStableDataId();
 
             return AtlasDiagnosticLocation.Create(
                 AtlasDiagnosticLocationKind.Operation,

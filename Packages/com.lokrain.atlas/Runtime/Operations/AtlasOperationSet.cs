@@ -233,10 +233,6 @@ namespace Lokrain.Atlas.Operations
         /// <returns>The first matching occurrence index, or <c>-1</c> when absent.</returns>
         public int IndexOfFirst(AtlasOperationId operationId)
         {
-            if (!operationId.IsValid)
-            {
-                return InvalidOperationIndex;
-            }
 
             for (var i = 0; i < _operations.Length; i++)
             {
@@ -421,10 +417,6 @@ namespace Lokrain.Atlas.Operations
         /// <returns>The number of matching operation occurrences.</returns>
         public int CountOf(AtlasOperationId operationId)
         {
-            if (!operationId.IsValid)
-            {
-                return 0;
-            }
 
             var count = 0;
 
@@ -494,10 +486,6 @@ namespace Lokrain.Atlas.Operations
                     nameof(destination));
             }
 
-            if (!operationId.IsValid)
-            {
-                return 0;
-            }
 
             var writeIndex = 0;
 

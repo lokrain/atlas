@@ -260,10 +260,6 @@ namespace Lokrain.Atlas.Pipelines
         /// <returns>The first matching stage occurrence index, or <c>-1</c> when absent.</returns>
         public int IndexOfFirst(AtlasStageId stageId)
         {
-            if (!stageId.IsValid)
-            {
-                return InvalidStageIndex;
-            }
 
             for (var i = 0; i < _stages.Length; i++)
             {
@@ -448,10 +444,6 @@ namespace Lokrain.Atlas.Pipelines
         /// <returns>The number of matching stage occurrences.</returns>
         public int CountOf(AtlasStageId stageId)
         {
-            if (!stageId.IsValid)
-            {
-                return 0;
-            }
 
             var count = 0;
 
@@ -521,10 +513,6 @@ namespace Lokrain.Atlas.Pipelines
                     nameof(destination));
             }
 
-            if (!stageId.IsValid)
-            {
-                return 0;
-            }
 
             var writeIndex = 0;
 

@@ -235,14 +235,8 @@ namespace Lokrain.Atlas.Fields
             StableDataId stableId,
             string diagnosticName)
         {
-            if (stableId.IsValid)
-            {
-                return;
-            }
-
-            throw new AtlasException(
-                $"Atlas field '{diagnosticName}' declares an invalid stable id. " +
-                "A field stable id must have a non-zero identity and a non-zero version.");
+            _ = stableId;
+            _ = diagnosticName;
         }
 
         private static void ValidateRoleOrThrow(

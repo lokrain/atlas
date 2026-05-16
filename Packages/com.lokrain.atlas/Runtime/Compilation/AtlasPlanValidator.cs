@@ -260,13 +260,6 @@ namespace Lokrain.Atlas.Compilation
 
             var location = CreatePlanLocation(plan);
 
-            if (!plan.PipelineId.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidPipelineIdCode,
-                    location,
-                    AtlasDiagnosticText.Message("Atlas compiled plan has an invalid pipeline id."));
-            }
 
             if (plan.DebugName.IsEmpty)
             {
@@ -360,13 +353,6 @@ namespace Lokrain.Atlas.Compilation
                     AtlasDiagnosticText.Message($"Atlas compiled stage '{AtlasDiagnosticText.Name(stage.DebugName)}' has StageIndex '{stage.StageIndex}', but appears at index '{expectedStageIndex}'."));
             }
 
-            if (!stage.StageId.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidStageIdCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas compiled stage at index '{expectedStageIndex}' has an invalid stage id."));
-            }
 
             if (stage.DebugName.IsEmpty)
             {
@@ -433,13 +419,6 @@ namespace Lokrain.Atlas.Compilation
                     AtlasDiagnosticText.Message($"Atlas compiled operation '{AtlasDiagnosticText.Name(operation.DebugName)}' has OperationIndex '{operation.OperationIndex}', but appears at index '{expectedOperationIndex}'."));
             }
 
-            if (!operation.OperationId.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidOperationIdCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas compiled operation at stage '{stageIndex}', index '{expectedOperationIndex}', has an invalid operation id."));
-            }
 
             if (operation.DebugName.IsEmpty)
             {
@@ -532,12 +511,12 @@ namespace Lokrain.Atlas.Compilation
             AtlasDiagnosticLocation location,
             AtlasDiagnosticBuffer diagnostics)
         {
-            if (binding.Contract != AtlasContract.Empty)
+            if (binding.Contract.IsValid)
             {
                 diagnostics.AddError(
                     MissingOptionalCarriesContractCode,
                     location,
-                    AtlasDiagnosticText.Message($"Atlas missing optional binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' carries a non-empty Contract."));
+                    AtlasDiagnosticText.Message($"Atlas missing optional binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' carries a valid Contract."));
             }
 
             if (binding.RequiresContentMemory)
@@ -622,9 +601,7 @@ namespace Lokrain.Atlas.Compilation
                 return AtlasDiagnosticLocation.Package(AtlasDiagnosticText.Name64("AtlasPlanValidator"));
             }
 
-            var stableId = plan.PipelineId.IsValid
-                ? plan.PipelineId.ToStableDataId()
-                : default;
+            var stableId = plan.PipelineId.ToStableDataId();
 
             return AtlasDiagnosticLocation.CompiledPlan(
                 stableId,
@@ -643,9 +620,7 @@ namespace Lokrain.Atlas.Compilation
                     AtlasDiagnosticText.Name64("null-stage"));
             }
 
-            var stableId = stage.StageId.IsValid
-                ? stage.StageId.ToStableDataId()
-                : default;
+            var stableId = stage.StageId.ToStableDataId();
 
             return AtlasDiagnosticLocation.CompiledStage(
                 stableId,
@@ -667,9 +642,7 @@ namespace Lokrain.Atlas.Compilation
                     AtlasDiagnosticText.Name64("null-operation"));
             }
 
-            var stableId = operation.OperationId.IsValid
-                ? operation.OperationId.ToStableDataId()
-                : default;
+            var stableId = operation.OperationId.ToStableDataId();
 
             return AtlasDiagnosticLocation.CompiledOperation(
                 stableId,
