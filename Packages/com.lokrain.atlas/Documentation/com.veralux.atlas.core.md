@@ -1,169 +1,455 @@
->>>
-**_Package Documentation Template_**
+# Lokrain Atlas
 
-Use this template to create preliminary, high-level documentation meant to introduce users to the feature and the sample files included in this package. When writing your documentation, do the following:
+## Package
 
-1. Follow instructions in blockquotes.
+```text
+com.lokrain.atlas
+````
 
-2. Replace angle brackets with the appropriate text. For example, replace "&lt;package name&gt;" with the official name of the package.
- 
-3. Delete sections that do not apply to your package. For example, a package containing only sample files does not have a "Using &lt;package_name&gt;" section, so this section can be removed.
- 
-4. After documentation is completed, make sure you delete all instructions and examples in blockquotes including this preamble and its title:
+## Namespace
 
-		```
-		>>>
-		Delete all of the text between pairs of blockquote markdown.
-		>>>
-		```
->>>
+```text
+Lokrain.Atlas
+```
 
-# About &lt;package name&gt;
+## Summary
 
->>>
-Name the heading of the first topic after the **displayName** of the package as it appears in the package manifest.
+Lokrain Atlas is a deterministic procedural map-generation package for Unity 6.4.
 
-This first topic includes a brief, high-level explanation of the package and, if applicable, provides links to Unity Manual topics.
+The package produces canonical world/map data through a compiled, validated, seed-driven execution pipeline. It is designed for Burst, Jobs, Unity Collections, Unity.Mathematics, deterministic simulation, artifact export, and later presentation/runtime consumers.
 
-There are two types of packages:
+Atlas is not a rendering package. It does not own terrain meshes, GameObjects, HDRP materials, physics objects, navigation objects, or editor preview UI inside canonical generation. Those systems consume Atlas outputs; they do not define Atlas truth.
 
- - Packages that include features that augment the Unity Editor or Runtime.
- - Packages that include sample files.
+## Core Purpose
 
-Choose one of the following introductory paragraphs that best fits the package:
->>>
+Atlas exists to generate stable map data.
 
-Use the &lt;package name&gt; package to &lt;list of the main uses for the package&gt;. For example, use &lt;package name&gt; to create/generate/extend/capture &lt;mention major use case, or a good example of what the package can be used for&gt;. The &lt;package name&gt; package also includes &lt;other relevant features or uses&gt;.
+The package owns:
 
-> *or*
+```text
+field definitions
+operation definitions
+stage and pipeline structure
+compilation and validation
+workspace allocation
+operation execution
+job scheduling boundaries
+artifact capture
+debug data export
+deterministic generation algorithms
+```
 
-The &lt;package name&gt; package includes examples of &lt;name of asset type, model, prefabs, and/or other GameObjects in the package&gt;. For more information, see &lt;xref to topic in the Unity Manual&gt;.
+The package does not own:
 
->>>
-**_Examples:_** 
+```text
+UnityEngine terrain rendering
+GameObject preview scenes
+HDRP material authoring
+physics runtime objects
+navigation runtime objects
+editor tooling as canonical runtime truth
+```
 
-Here are some examples for reference only. Do not include these in the final documentation file:
+## Architectural Model
 
-*Use the Unity Recorder package to capture and save in-game data. For example, use Unity Recorder to record an mp4 file during a game session. The Unity Recorder package also includes an interface for setting-up and triggering recording sessions.*
+Atlas generation is organized as:
 
-*The Timeline Examples package includes examples of Timeline assets, Timeline Instances, animation, GameObjects, and scripts that illustrate how to use Unity's Timeline. For more information, see [ Unity's Timeline](https://docs.unity3d.com/Manual/TimelineSection.html) in the [Unity Manual](https://docs.unity3d.com). For licensing and usage, see Package Licensing.*
->>>
+```text
+Stage
+  semantic generation phase
 
-# Installing &lt;package name&gt;
->>>
-Begin this section with a cross-reference to the official Unity Manual topic on how to install packages. If the package requires special installation instructions, include these steps in this section.
->>>
+Operation
+  stable deterministic transform with input/output contract
 
-To install this package, follow the instructions in the [Package Manager documentation](https://docs.unity3d.com/Packages/com.unity.package-manager-ui@latest/index.html). 
+Route
+  selected algorithm family used to satisfy a stage or operation contract
 
->>>
-For some packages, there may be additional steps to complete the setup. You can add those here.
->>>
+Scheduler
+  ordered control flow for one operation's job graph
 
-In addition, you need to install the following Fields:
+Job
+  one Burst-executable data transformation
+```
 
- - &lt;name of Field&gt;: To install, open *Window > &lt;name of menu item&gt;*. The Field appears &lt;at this location&gt;.
- - &lt;name of sample&gt;: To install, open *Window > &lt;name of menu item&gt;*. The new sample folder appears &lt;at this location&gt;.
+The hierarchy is:
 
+```mermaid
+flowchart TD
+    A[Pipeline] --> B[Stage]
+    B --> C[Operation]
+    C --> D[Route]
+    D --> E[Scheduler]
+    E --> F[Job]
+    E --> G[Job]
+    E --> H[Job]
+```
 
-<a name="UsingPackageName"></a>
-# Using &lt;package name&gt;
->>>
-The contents of this section depends on the type of package.
+The important boundary is:
 
-For packages that augment the Unity Editor with additional features, this section should include workflow and/or reference documentation:
+```text
+Stages decide when work happens.
+Operations decide what result is produced.
+Routes decide which algorithm family produces it.
+Schedulers decide how jobs run.
+Jobs perform one deterministic transform.
+```
 
-* At a minimum, this section should include reference documentation that describes the windows, editors, and properties that the package adds to Unity. This reference documentation should include screen grabs (see how to add screens below), a list of settings, an explanation of what each setting does, and the default values of each setting.
-* Ideally, this section should also include a workflow: a list of steps that the user can easily follow that demonstrates how to use the feature. This list of steps should include screen grabs (see how to add screens below) to better describe how to use the feature.
+## Canonical Data Flow
 
-For packages that include sample files, this section may include detailed information on how the user can use these sample files in their projects and scenes. However, workflow diagrams or illustrations could be included if deemed appropriate.
+Atlas uses explicit data contracts. A generation run moves through these phases:
 
-## How to add images
+```mermaid
+flowchart LR
+    A[Authoring Definitions] --> B[Catalogs]
+    B --> C[Compilation]
+    C --> D[Resolved Shapes]
+    D --> E[Workspace Layout]
+    E --> F[Workspace Allocation]
+    F --> G[Execution]
+    G --> H[Artifacts]
+    H --> I[Debug / Consumers]
+```
 
-*(This section is for reference. Do not include in the final documentation file)* 
+The canonical runtime path is:
 
-If the [Using &lt;package name&gt;](#UsingPackageName) section includes screen grabs or diagrams, a link to the image must be added to this MD file, before or after the paragraph with the instruction or description that references the image. In addition, a caption should be added to the image link that includes the name of the screen or diagram. All images must be PNG files with underscores for spaces. No animated GIFs.
+```text
+contract catalog
+operation catalog
+stage schema
+pipeline schema
+compiled plan
+resolved field shapes
+workspace layout
+workspace memory
+operation execution
+artifact capture
+artifact read/write
+debug export
+```
 
-An example is included below:
+## Field Model
 
-![A cinematic in the Timeline Editor window.](images/example.png)
+Atlas fields are stable data contracts.
 
-Notice that the example screen shot is included in the images folder. All screen grabs and/or diagrams must be added and referenced from the images folder.
+A field definition describes:
 
-For more on the Unity documentation standards for creating and adding screen grabs, see this confluence page: https://confluence.hq.unity3d.com/pages/viewpage.action?pageId=13500715
->>>
+```text
+stable identity
+semantic role
+storage format
+ownership policy
+lifetime policy
+shape domain
+length shape
+hash participation
+debug name
+```
 
+Fields may be:
 
+```text
+canonical
+payload
+diagnostic
+stage-transient
+external
+```
 
-# Technical details
-## Requirements
->>>
-This subtopic includes a bullet list with the compatible versions of Unity. This subtopic may also include additional requirements or recommendations for 3rd party software or hardware. An example includes a dependency on other packages. If you need to include references to non-Unity products, make sure you refer to these products correctly and that all references include the proper trademarks (tm or r)
->>>
+### Canonical Fields
 
-This version of &lt;package name&gt; is compatible with the following versions of the Unity Editor:
+Canonical fields are durable map truth.
 
-* 2018.1 and later (recommended)
+Examples:
 
-To use this package, you must have the following 3rd party products:
+```text
+LandMask
+OceanMask
+LandLabel
+BaseElevation
+```
 
-* &lt;product name and version with trademark or registered trademark.&gt;
-* &lt;product name and version with trademark or registered trademark.&gt;
-* &lt;product name and version with trademark or registered trademark.&gt;
+Canonical fields may be consumed by later stages and may be captured into artifacts.
 
-## Known limitations
->>>
-This section lists the known limitations with this version of the package. If there are no known limitations, or if the limitations are trivial, exclude this section. An example is provided.
->>>
+### Payload Fields
 
-&lt;package name&gt; version &lt;package version&gt; includes the following known limitations:
+Payload fields are derived outputs for downstream systems.
 
-* &lt;brief one-line description of first limitation.&gt;
-* &lt;brief one-line description of second limitation.&gt;
-* &lt;and so on&gt;
+Examples:
 
->>>
-*Example (For reference. Do not include in the final documentation file):*
+```text
+presentation payload
+physics payload
+navigation payload
+```
 
-The Unity Recorder version 1.0 has the following limitations:*
+Payload fields are not allowed to redefine canonical world truth.
 
-* The Unity Recorder does not support sound.
-* The Recorder window and Recorder properties are not available in standalone players.
-* MP4 encoding is only available on Windows.
->>>
+### Diagnostic Fields
 
-## Package contents
->>>
-This section includes the location of important files you want the user to know about. For example, if this is a sample package containing textures, models, and materials separated by sample group, you may want to provide the folder location of each group.
->>>
+Diagnostic fields support validation, metrics, tooling, and debug output.
 
-The following table indicates the &lt;describe the breakdown you used here&gt;:
+Diagnostic fields are explicit. They are not hidden side effects.
 
-|Location|Description|
-|---|---|
-|`<folder>`|Contains &lt;describe what the folder contains&gt;.|
-|`<file>`|Contains &lt;describe what the file represents or implements&gt;.|
+### Stage-Transient Fields
 
->>>
-*Example (For reference. Do not include in the final documentation file):*
+Stage-transient fields are produced by one operation and consumed by another operation inside the same stage.
 
-The following table indicates the root folder of each type of sample in this package. Each sample's root folder contains its own Materials, Models, or Textures folders:
+They are allocated by the workspace and participate in compilation, but they are not canonical map truth and are not captured into artifacts by default.
 
-|Folder Location|Description|
-|---|---|
-|`WoodenCrate_Orange`|Root folder containing the assets for the orange crates.|
-|`WoodenCrate_Mahogany`|Root folder containing the assets for the mahogany crates.|
-|`WoodenCrate_Shared`|Root folder containing any material assets shared by all crates.|
->>>
+### Operation Scratch
 
-## Document revision history
->>>
-This section includes the revision history of the document. The revision history tracks when a document is created, edited, and updated. If you create or update a document, you must add a new row describing the revision.  The Documentation Team also uses this table to track when a document is edited and its editing level. An example is provided:
- 
-|Date|Reason|
-|---|---|
-|Sept 12, 2017|Unedited. Published to package.|
-|Sept 10, 2017|Document updated for package version 1.1.<br>New features: <li>audio support for capturing MP4s.<li>Instructions on saving Recorder prefabs|
-|Sept 5, 2017|Limited edit by Documentation Team. Published to package.|
-|Aug 25, 2017|Document created. Matches package version 1.0.|
->>>
+Operation scratch is private temporary native memory used only by jobs inside one operation.
+
+Scratch memory is not a field. It is not addressed by stable field IDs. It is not captured into artifacts. It must be disposed through the correct `JobHandle` dependency chain.
+
+## Execution Model
+
+Atlas execution uses compiled bindings.
+
+Jobs must not resolve fields by stable ID. Jobs receive typed native views, slices, or arrays prepared by operation executors and schedulers.
+
+The execution boundary is:
+
+```text
+compiled operation
+compiled bindings
+workspace views
+operation executor
+job scheduler
+Burst jobs
+final JobHandle
+```
+
+Operation executors own:
+
+```text
+operation-level contract validation
+compiled binding resolution
+parameter loading
+scheduler invocation
+final dependency return
+```
+
+Schedulers own:
+
+```text
+job order
+dependency chaining
+repeated subchains
+operation scratch ownership
+scratch disposal
+termination policy
+```
+
+Jobs own:
+
+```text
+one data transform
+no managed allocation
+no field lookup
+no artifact capture
+no pipeline inspection
+```
+
+## Determinism
+
+Atlas generation must be deterministic under the same:
+
+```text
+package version
+pipeline schema
+field contracts
+operation contracts
+route selection
+seed
+parameters
+dimensions
+```
+
+Canonical generation must avoid platform-dependent behavior.
+
+The default policy is:
+
+```text
+fixed-point or integer-first canonical math
+stable seed derivation
+package-owned deterministic noise
+deterministic reduction order
+explicit tie-break rules
+bounded iteration
+```
+
+Floating-point math may be used only when explicitly accepted by architecture and tested against the required determinism target.
+
+## Workspace Ownership
+
+The workspace owns native memory for a run.
+
+Workflow results may complete immediately or carry a scheduled dependency. Native memory and the `JobHandle` protecting it must not be separated accidentally.
+
+A scheduled result is logically:
+
+```text
+workspace + final dependency + disposal rule
+```
+
+Atlas uses explicit ownership transfer for this reason.
+
+The safe patterns are:
+
+```text
+complete execution, then inspect or release workspace
+transfer workspace through a lease that also carries the dependency
+dispose result or lease to complete dependency before memory disposal
+```
+
+## Artifact Model
+
+Artifacts are durable managed exports of completed workspace data.
+
+Artifact capture is separate from artifact data.
+
+Artifact writing is separate from binary serialization.
+
+Artifact reading is separate from file IO.
+
+The artifact layers are:
+
+```text
+AtlasArtifact
+  immutable artifact data/query object
+
+AtlasArtifactCapture
+  completed workspace -> artifact
+
+AtlasArtifactBinaryWriter
+  artifact -> stream bytes
+
+AtlasArtifactFileWriter
+  artifact -> file
+
+AtlasArtifactBinaryReader
+  stream bytes -> artifact
+
+AtlasArtifactFileReader
+  file -> artifact
+```
+
+Artifacts capture canonical and selected payload/diagnostic data. Stage-transient fields are excluded by default. Operation scratch is never captured.
+
+## Debug Output
+
+Debug output is derived from artifacts or completed workspace data.
+
+Debug requests are data. Exporters perform export work.
+
+Debug output must not become canonical world truth.
+
+## Landmass Direction
+
+The first major generation stage is:
+
+```text
+Landmass
+```
+
+The `Landmass` stage owns the first macro world shape:
+
+```text
+primary land/ocean topology
+initial full-map base elevation
+```
+
+The accepted direction is topology-first:
+
+```text
+shape land/ocean topology
+then compose base elevation constrained by topology
+```
+
+For the primary-continent route, the intended operation chain is:
+
+```text
+EvaluateContinentSuitability
+FormContinentCandidate
+PreserveMainContinent
+CompleteContinentArea
+ComposeBaseElevation
+```
+
+This keeps landmass topology from becoming an accidental side effect of raw noise thresholding.
+
+## Package Boundaries
+
+Runtime canonical generation must not depend on:
+
+```text
+UnityEngine.GameObject
+UnityEngine.Mesh
+Unity Terrain
+HDRP
+ECS Graphics
+Unity Physics runtime objects
+Unity Navigation runtime objects
+ScriptableObject authoring as runtime truth
+```
+
+Those systems may exist in separate presentation, editor, or integration packages/layers.
+
+## Testing Policy
+
+Atlas tests must protect invariants, not implementation accidents.
+
+Tests should verify:
+
+```text
+field and operation contracts
+zero-valid identity semantics
+compiled binding correctness
+dataflow validation
+write hazard validation
+workspace allocation and disposal
+operation execution
+scheduler dependency behavior
+artifact round-trip behavior
+debug export behavior
+deterministic generation output
+```
+
+Failing tests must be investigated from their actual assertion, exception, or XML export. Tests must not be weakened just to become green.
+
+## Documentation Policy
+
+This package uses:
+
+```text
+ADRs
+  frozen architectural decisions
+
+Design Specifications
+  detailed algorithms, contracts, job graphs, buffers, tests
+
+Implementation Plans
+  task order and delivery checkpoints
+```
+
+ADRs are authoritative only after acceptance in the restarted documentation set.
+
+Old documents and proposals are research material unless accepted by a new ADR.
+
+## Current Development Priority
+
+The current focus is:
+
+```text
+1. Freeze the restarted architecture documentation.
+2. Define stage/operation/route/scheduler/job boundaries.
+3. Define field lifetime and transient data policy.
+4. Define deterministic generation contracts.
+5. Define the Landmass stage contract.
+6. Implement the first production Landmass route.
+```
+
+Atlas should prefer production-grade architecture over temporary shortcuts. Every new operation should have a clear result, a clear contract, a scheduler-owned job graph, and tests that protect the intended invariant.
+
+```

@@ -153,17 +153,11 @@ namespace Lokrain.Atlas.Compilation
         /// </summary>
         public static bool CanResolveFromContractTableOnly(LengthShapeKind kind)
         {
-            switch (kind)
+            return kind switch
             {
-                case LengthShapeKind.Scalar:
-                case LengthShapeKind.Fixed:
-                case LengthShapeKind.MatchFieldLength:
-                case LengthShapeKind.CapacityFromField:
-                    return true;
-
-                default:
-                    return false;
-            }
+                LengthShapeKind.Scalar or LengthShapeKind.Fixed or LengthShapeKind.MatchFieldLength or LengthShapeKind.CapacityFromField => true,
+                _ => false,
+            };
         }
 
         /// <summary>

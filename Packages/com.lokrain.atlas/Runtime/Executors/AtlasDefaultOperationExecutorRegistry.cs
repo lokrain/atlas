@@ -52,7 +52,7 @@ namespace Lokrain.Atlas.Executors
         public const int DefaultClearFieldsInnerloopBatchCount = 256;
 
         private static readonly FixedString64Bytes ClearFieldsExecutorName =
-            new FixedString64Bytes("atlas.executor.clear-fields");
+            new("atlas.executor.clear-fields");
 
         /// <summary>
         /// Creates a default executor registry for all supported operation definitions in a pipeline.
@@ -239,14 +239,15 @@ namespace Lokrain.Atlas.Executors
         private static bool IsClearFieldsAccess(
             AtlasOperationAccess access)
         {
-            return access.IsValid &&
-                   access.Mode == AtlasOperationAccessMode.Write &&
-                   !access.IsShapeOnly &&
+            return access.Mode == AtlasOperationAccessMode.Write &&
+                   !access.BindingName.IsEmpty &&
+                   !access.Flags.HasAny(AtlasOperationAccessFlags.ShapeOnly) &&
+                   !access.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent) &&
                    !access.ReadsContent &&
                    access.WritesContent &&
                    access.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite) &&
                    access.Flags.HasAny(AtlasOperationAccessFlags.RequiresExclusiveWrite) &&
-                   access.WriteCoverage.MakesFullLogicalContentAvailable();
+                   access.WriteCoverage == AtlasWriteCoverage.FullCapacity;
         }
 
         private static void TryAddDefaultExecutor(

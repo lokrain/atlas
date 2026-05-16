@@ -10,10 +10,11 @@
 // - Keep debug-map export configuration out of run workflow parameter lists.
 //
 // Design notes
-// - This is managed orchestration data.
+// - This is managed debug-export request data.
 // - This is debug/export configuration, not canonical world truth.
 // - This does not own workspace memory.
 // - This does not write files.
+// - This does not execute export orchestration.
 // - This does not render UnityEngine objects.
 // - StableDataId zero/default is valid.
 // - AtlasFieldSlot zero/default is valid.
@@ -23,21 +24,19 @@
 
 using System;
 using System.Globalization;
-using Lokrain.Atlas.Artifacts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Fields;
 
 namespace Lokrain.Atlas.Debugging
 {
     /// <summary>
-    /// Explicit request to export one Atlas debug-map image.
+    /// Explicit request data for one Atlas debug-map image export.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasDebugMapRequest"/> is the production orchestration boundary between a run
-    /// workflow and debug-map export. It makes field selection, visualization mode, dimensions,
-    /// palette, path, and overwrite policy explicit without mixing them into workflow call
-    /// signatures as loose optional parameters.
+    /// <see cref="AtlasDebugMapRequest"/> is request metadata consumed by debug-map exporters. It
+    /// makes field selection, visualization mode, dimensions, palette, path, and overwrite policy
+    /// explicit without mixing them into workflow call signatures as loose optional parameters.
     /// </para>
     ///
     /// <para>
@@ -336,90 +335,6 @@ namespace Lokrain.Atlas.Debugging
                 Minimum,
                 Maximum,
                 FilePath);
-        }
-
-        /// <summary>
-        /// Writes the requested debug map from an already captured artifact.
-        /// </summary>
-        /// <param name="artifact">Source artifact.</param>
-        /// <returns>The written debug-map image.</returns>
-        public AtlasDebugMapImage ExportFromArtifact(
-            AtlasArtifact artifact)
-        {
-            if (artifact == null)
-            {
-                throw new ArgumentNullException(nameof(artifact));
-            }
-
-            ValidateOrThrow();
-
-            switch (Kind)
-            {
-                case AtlasDebugMapRequestKind.ByteMask:
-                    return TargetsStableId
-                        ? AtlasDebugMapWriter.WriteArtifactByteMaskToTgaFile(
-                            artifact,
-                            StableId,
-                            Width,
-                            Height,
-                            FilePath,
-                            Palette,
-                            Overwrite)
-                        : AtlasDebugMapWriter.WriteArtifactByteMaskToTgaFile(
-                            artifact,
-                            Slot,
-                            Width,
-                            Height,
-                            FilePath,
-                            Palette,
-                            Overwrite);
-
-                case AtlasDebugMapRequestKind.ByteRamp:
-                    return TargetsStableId
-                        ? AtlasDebugMapWriter.WriteArtifactByteRampToTgaFile(
-                            artifact,
-                            StableId,
-                            Width,
-                            Height,
-                            FilePath,
-                            Palette,
-                            Overwrite)
-                        : AtlasDebugMapWriter.WriteArtifactByteRampToTgaFile(
-                            artifact,
-                            Slot,
-                            Width,
-                            Height,
-                            FilePath,
-                            Palette,
-                            Overwrite);
-
-                case AtlasDebugMapRequestKind.Int32Ramp:
-                    return TargetsStableId
-                        ? AtlasDebugMapWriter.WriteArtifactInt32RampToTgaFile(
-                            artifact,
-                            StableId,
-                            Width,
-                            Height,
-                            Minimum,
-                            Maximum,
-                            FilePath,
-                            Palette,
-                            Overwrite)
-                        : AtlasDebugMapWriter.WriteArtifactInt32RampToTgaFile(
-                            artifact,
-                            Slot,
-                            Width,
-                            Height,
-                            Minimum,
-                            Maximum,
-                            FilePath,
-                            Palette,
-                            Overwrite);
-
-                default:
-                    throw new InvalidOperationException(
-                        $"Unsupported debug-map request kind '{Kind}'.");
-            }
         }
 
         /// <summary>

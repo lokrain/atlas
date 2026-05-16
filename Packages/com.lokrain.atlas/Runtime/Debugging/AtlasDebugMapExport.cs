@@ -498,13 +498,13 @@ namespace Lokrain.Atlas.Debugging
                 throw new ArgumentNullException(nameof(context));
             }
 
-            var artifact = AtlasArtifact.Capture(
+            var artifact = AtlasArtifactCapture.Capture(
                 context,
                 computeContentHashes);
 
             if (!string.IsNullOrWhiteSpace(artifactFilePath))
             {
-                AtlasArtifactWriter.WriteToFile(
+                AtlasArtifactFileWriter.WriteToFile(
                     artifact,
                     artifactFilePath,
                     overwrite);

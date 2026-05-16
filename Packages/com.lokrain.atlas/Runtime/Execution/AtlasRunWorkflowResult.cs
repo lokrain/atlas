@@ -25,6 +25,7 @@ using Lokrain.Atlas.Artifacts;
 using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Debugging;
 using Unity.Collections;
+using Unity.Jobs;
 
 namespace Lokrain.Atlas.Execution
 {
@@ -41,8 +42,8 @@ namespace Lokrain.Atlas.Execution
     ///
     /// <para>
     /// The result owns workflow-created workspace memory. Call <see cref="Dispose"/> when the caller
-    /// is done inspecting workspace fields. Use <see cref="ReleaseWorkspaceOwnership"/> only when
-    /// ownership is intentionally transferred to another owner.
+    /// is done inspecting workspace fields. Use <see cref="CompleteAndReleaseWorkspaceOwnership"/> when transferring a completed workspace,
+    /// or <see cref="ReleaseWorkspaceLease"/> when transferring a scheduled workspace with its dependency.
     /// </para>
     ///
     /// <para>
@@ -58,6 +59,7 @@ namespace Lokrain.Atlas.Execution
 
         private AtlasWorkspace _workspace;
         private bool _ownsWorkspace;
+        private bool _ownsExecutionDependency;
         private byte _state;
 
         private AtlasRunWorkflowResult(
@@ -99,6 +101,7 @@ namespace Lokrain.Atlas.Execution
             Shapes = shapes;
             _workspace = workspace;
             _ownsWorkspace = ownsWorkspace && workspace != null;
+            _ownsExecutionDependency = _ownsWorkspace && execution != null && execution.IsScheduled;
             ExecutionContext = executionContext;
             Execution = execution;
             Artifact = artifact;
@@ -157,7 +160,7 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Gets the operation execution result.
         /// </summary>
-        public AtlasExecutionResult Execution { get; }
+        public AtlasExecutionResult Execution { get; private set; }
 
         /// <summary>
         /// Gets the captured artifact, when artifact capture was requested and succeeded.
@@ -243,6 +246,29 @@ namespace Lokrain.Atlas.Execution
         /// Gets whether an execution result is attached.
         /// </summary>
         public bool HasExecution => Execution != null;
+
+        /// <summary>
+        /// Gets whether this result owns a pending execution dependency that protects the attached workspace.
+        /// </summary>
+        public bool HasPendingExecutionDependency =>
+            _ownsExecutionDependency &&
+            Execution != null &&
+            Execution.IsScheduled;
+
+        /// <summary>
+        /// Gets whether the attached execution result has completed.
+        /// </summary>
+        public bool HasCompletedExecution =>
+            Execution != null &&
+            Execution.IsCompleted;
+
+        /// <summary>
+        /// Gets the pending dependency owned by this result, or default when no dependency is pending.
+        /// </summary>
+        public JobHandle ExecutionDependency =>
+            HasPendingExecutionDependency
+                ? Execution.FinalDependency
+                : default;
 
         /// <summary>
         /// Gets whether an artifact is attached.
@@ -502,16 +528,36 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
-        /// Transfers workspace ownership out of this result.
+        /// Completes any pending owned execution dependency.
         /// </summary>
-        /// <returns>The attached workspace.</returns>
-        /// <remarks>
-        /// After calling this method, disposing this result will not dispose the returned workspace.
-        /// The caller becomes responsible for disposing it.
-        /// </remarks>
-        public AtlasWorkspace ReleaseWorkspaceOwnership()
+        public void Complete()
         {
             ThrowIfDisposed();
+            ThrowIfFailed();
+
+            if (!HasPendingExecutionDependency)
+            {
+                return;
+            }
+
+            Execution = Execution.Complete();
+            _ownsExecutionDependency = false;
+        }
+
+        /// <summary>
+        /// Completes execution, then transfers workspace ownership out of this result.
+        /// </summary>
+        /// <returns>The attached workspace after any pending owned execution dependency has completed.</returns>
+        /// <remarks>
+        /// After calling this method, disposing this result will not dispose the returned workspace.
+        /// The caller becomes responsible for disposing it. This is the blocking ownership-transfer
+        /// path. Use <see cref="ReleaseWorkspaceLease"/> when the caller needs to preserve a
+        /// scheduled dependency for downstream job chaining.
+        /// </remarks>
+        public AtlasWorkspace CompleteAndReleaseWorkspaceOwnership()
+        {
+            ThrowIfDisposed();
+            ThrowIfFailed();
 
             if (_workspace == null)
             {
@@ -519,11 +565,47 @@ namespace Lokrain.Atlas.Execution
                     "Atlas run workflow result does not contain a workspace to release.");
             }
 
+            Complete();
+
             var released = _workspace;
-            _ownsWorkspace = false;
             _workspace = null;
+            _ownsWorkspace = false;
+            _ownsExecutionDependency = false;
 
             return released;
+        }
+
+        /// <summary>
+        /// Transfers workspace ownership together with any pending execution dependency.
+        /// </summary>
+        /// <returns>A workspace lease carrying the workspace and dependency required before safe disposal.</returns>
+        /// <remarks>
+        /// This is the asynchronous ownership-transfer path. The returned lease becomes responsible
+        /// for completing the dependency before disposing the workspace. After this call, disposing
+        /// the workflow result will not dispose the released workspace.
+        /// </remarks>
+        public AtlasWorkspaceLease ReleaseWorkspaceLease()
+        {
+            ThrowIfDisposed();
+            ThrowIfFailed();
+
+            if (_workspace == null)
+            {
+                throw new InvalidOperationException(
+                    "Atlas run workflow result does not contain a workspace to release.");
+            }
+
+            var lease = new AtlasWorkspaceLease(
+                _workspace,
+                _ownsWorkspace,
+                ExecutionDependency,
+                HasPendingExecutionDependency);
+
+            _workspace = null;
+            _ownsWorkspace = false;
+            _ownsExecutionDependency = false;
+
+            return lease;
         }
 
         /// <summary>
@@ -570,20 +652,22 @@ namespace Lokrain.Atlas.Execution
                 _workspace.Dispose();
             }
 
+            _workspace = null;
             _ownsWorkspace = false;
+            _ownsExecutionDependency = false;
             _state = DisposedState;
             GC.SuppressFinalize(this);
         }
 
-
         private void CompleteOwnedScheduledExecutionBeforeDisposingWorkspace()
         {
-            if (Execution == null || !Execution.IsScheduled)
+            if (!HasPendingExecutionDependency)
             {
                 return;
             }
 
-            Execution.FinalDependency.Complete();
+            Execution = Execution.Complete();
+            _ownsExecutionDependency = false;
         }
 
         /// <summary>
@@ -776,6 +860,20 @@ namespace Lokrain.Atlas.Execution
             {
                 throw new ArgumentException(
                     "Successful Atlas run workflow results cannot contain failed execution.",
+                    nameof(execution));
+            }
+
+            if (request.CompleteExecution && !execution.IsCompleted)
+            {
+                throw new ArgumentException(
+                    "Successful Atlas run workflow result requires completed execution because the request requires completion.",
+                    nameof(execution));
+            }
+
+            if (request.RequiresArtifactCapture && !execution.IsCompleted)
+            {
+                throw new ArgumentException(
+                    "Successful Atlas run workflow result requires completed execution because artifact capture was requested.",
                     nameof(execution));
             }
 

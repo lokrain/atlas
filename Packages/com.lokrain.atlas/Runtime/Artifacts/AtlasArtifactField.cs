@@ -522,6 +522,46 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
+        /// Creates an artifact field entry from serialized artifact metadata.
+        /// </summary>
+        internal static AtlasArtifactField CreateFromSerialized(
+            int fieldIndex,
+            StableDataId stableId,
+            AtlasFieldSlot slot,
+            AtlasFieldRole role,
+            StorageFormat storageFormat,
+            AtlasShapeDomain shapeDomain,
+            LengthShape declaredShape,
+            FixedString64Bytes debugName,
+            int length,
+            int capacity,
+            long byteLength,
+            long byteCapacity,
+            long payloadByteLength,
+            long byteOffset,
+            ulong contentHash,
+            bool hasContentHash)
+        {
+            return new AtlasArtifactField(
+                fieldIndex,
+                stableId,
+                slot,
+                role,
+                storageFormat,
+                shapeDomain,
+                declaredShape,
+                debugName,
+                length,
+                capacity,
+                byteLength,
+                byteCapacity,
+                payloadByteLength,
+                byteOffset,
+                contentHash,
+                hasContentHash);
+        }
+
+        /// <summary>
         /// Creates a capacity-payload artifact field entry from a Contract row and matching resolved shape.
         /// </summary>
         public static AtlasArtifactField Create(

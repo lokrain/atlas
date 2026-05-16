@@ -135,27 +135,15 @@ namespace Lokrain.Atlas.Compilation
                 return false;
             }
 
-            switch (contract.Ownership)
+            return contract.Ownership switch
             {
-                case OwnershipPolicy.AtlasOwned:
-                case OwnershipPolicy.JobOwned:
-                    return true;
-
-                case OwnershipPolicy.Adopted:
-                    return Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowAdoptedWrites);
-
-                case OwnershipPolicy.ExternalOwned:
-                    return Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowExternalOwnedWrites);
-
-                case OwnershipPolicy.Borrowed:
-                    return Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowBorrowedWrites);
-
-                case OwnershipPolicy.Imported:
-                    return Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowImportedWrites);
-
-                default:
-                    return false;
-            }
+                OwnershipPolicy.AtlasOwned or OwnershipPolicy.JobOwned => true,
+                OwnershipPolicy.Adopted => Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowAdoptedWrites),
+                OwnershipPolicy.ExternalOwned => Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowExternalOwnedWrites),
+                OwnershipPolicy.Borrowed => Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowBorrowedWrites),
+                OwnershipPolicy.Imported => Flags.HasAny(AtlasWriteHazardValidationPolicyFlags.AllowImportedWrites),
+                _ => false,
+            };
         }
 
         /// <summary>

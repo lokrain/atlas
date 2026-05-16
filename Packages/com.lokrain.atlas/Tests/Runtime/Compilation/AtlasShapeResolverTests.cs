@@ -1,449 +1,440 @@
-// Packages/com.lokrain.atlas/Runtime/Compilation/AtlasShapeResolver.cs
+// Packages/com.lokrain.atlas/Tests/Runtime/Compilation/AtlasShapeResolverTests.cs
 //
 // Package: com.lokrain.atlas
-// Namespace: Lokrain.Atlas.Compilation
+// Namespace: Lokrain.Atlas.Compilation.Tests
 //
 // Purpose
-// - Resolve contract-table LengthShape metadata into concrete AtlasResolvedShape rows.
-// - Produce one resolved shape per contract-table slot.
-// - Resolve only shapes that can be computed from the contract table itself.
-// - Reject resolver-input-dependent shapes until explicit resolver context exists.
-//
-// Supported by this resolver:
-// - Scalar
-// - Fixed
-// - MatchFieldLength
-// - CapacityFromField
-//
-// Explicitly rejected here:
-// - QueryCount
-// - ChunkCount
-// - PrefixSumPayload
-// - External
-//
-// Design notes
-// - This is a managed compiler pass.
-// - This type does not allocate workspace memory.
-// - This type does not calculate byte offsets.
-// - This type does not schedule jobs.
-// - This type does not use field identity lookup in jobs.
-// - Field-relative shapes are resolved recursively, so source order in the contract table does not matter.
-// - Cyclic field-relative shape dependencies are rejected deterministically.
-// - Capacity scaling uses integer ratios only; no float shape metadata participates in resolution.
+// - Verify AtlasShapeResolver resolves Contract-table-only shapes deterministically.
+// - Verify resolved shapes preserve Contract identity, slot, storage format, and shape domain.
+// - Verify field-relative shapes resolve regardless of Contract-table source order.
+// - Verify resolver-input-dependent shapes are rejected until explicit resolver context exists.
+// - Verify invalid field-relative and shape-domain metadata fails at the earliest owning boundary.
 
 using System;
-using System.Globalization;
 using Lokrain.Atlas.Contracts;
+using Lokrain.Atlas.Core;
+using Lokrain.Atlas.Fields;
+using Lokrain.Atlas.Operations;
+using Lokrain.Atlas.Pipelines;
+using Lokrain.Atlas.Stages;
+using NUnit.Framework;
 using Unity.Collections;
 
-namespace Lokrain.Atlas.Compilation
+namespace Lokrain.Atlas.Compilation.Tests
 {
-    /// <summary>
-    /// Resolves symbolic Atlas contract-table length shapes into concrete runtime shape metadata.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="AtlasShapeResolver"/> is the compiler pass between validated contract metadata
-    /// and later memory-layout construction. It turns <see cref="LengthShape"/> rules into concrete
-    /// logical lengths, capacities, and byte sizes represented by <see cref="AtlasResolvedShape"/>.
-    /// </para>
-    ///
-    /// <para>
-    /// This resolver intentionally supports only shape rules that are computable from the
-    /// <see cref="AtlasContractTable"/> itself. Query counts, chunk counts, prefix-sum payloads,
-    /// and externally provided lengths need explicit resolver inputs and are therefore rejected
-    /// here instead of guessed.
-    /// </para>
-    ///
-    /// <para>
-    /// Shape resolution is recursive for field-relative dependencies. Contract-table order is not
-    /// required to place source fields before dependent fields. Cycles are rejected with a stable
-    /// diagnostic exception.
-    /// </para>
-    /// </remarks>
-    public static class AtlasShapeResolver
+    public sealed class AtlasShapeResolverTests
     {
-        private const byte Unvisited = 0;
-        private const byte Visiting = 1;
-        private const byte Resolved = 2;
+        private static readonly StableDataId ScalarFieldId =
+            new(0xA100_0000_0000_0001UL, 0xB100_0000_0000_0001UL, 1);
 
-        /// <summary>
-        /// Resolves all contract-table shapes using the contract table's diagnostic name.
-        /// </summary>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
-        public static AtlasResolvedShapeSet Resolve(
-            AtlasContractTable contracts)
+        private static readonly StableDataId FixedFieldId =
+            new(0xA100_0000_0000_0002UL, 0xB100_0000_0000_0002UL, 1);
+
+        private static readonly StableDataId MatchedFieldId =
+            new(0xA100_0000_0000_0003UL, 0xB100_0000_0000_0003UL, 1);
+
+        private static readonly StableDataId CapacityFieldId =
+            new(0xA100_0000_0000_0004UL, 0xB100_0000_0000_0004UL, 1);
+
+        private static readonly StableDataId MissingSourceFieldId =
+            new(0xA100_0000_0000_0005UL, 0xB100_0000_0000_0005UL, 1);
+
+        private static readonly StableDataId CycleLeftFieldId =
+            new(0xA100_0000_0000_0006UL, 0xB100_0000_0000_0006UL, 1);
+
+        private static readonly StableDataId CycleRightFieldId =
+            new(0xA100_0000_0000_0007UL, 0xB100_0000_0000_0007UL, 1);
+
+        private static readonly StableDataId PrefixSourceFieldId =
+            new(0xA100_0000_0000_0008UL, 0xB100_0000_0000_0008UL, 1);
+
+        private static readonly AtlasOperationId OperationId =
+            new(0xC100_0000_0000_0001UL, 0xD100_0000_0000_0001UL, 1);
+
+        private static readonly AtlasStageId StageId =
+            new(0xE100_0000_0000_0001UL, 0xF100_0000_0000_0001UL, 1);
+
+        private static readonly AtlasPipelineId PipelineId =
+            new(0x1100_0000_0000_0001UL, 0x1200_0000_0000_0001UL, 1);
+
+        [Test]
+        public void Resolve_ScalarContract_ResolvesLengthAndCapacityOneAndPreservesMetadata()
         {
-            if (contracts == null)
-            {
-                throw new ArgumentNullException(nameof(contracts));
-            }
+            var contracts = CreateContractTable(
+                CreateScalarContract(
+                    ScalarFieldId,
+                    "shape.scalar"));
 
-            return Resolve(
-                contracts.Name,
+            var shapes = AtlasShapeResolver.Resolve(contracts);
+
+            Assert.That(shapes.Count, Is.EqualTo(1));
+            Assert.That(shapes.Name.ToString(), Is.EqualTo("shape.tests.contracts"));
+            Assert.That(shapes.Contracts, Is.SameAs(contracts));
+
+            var shape = shapes[0];
+
+            Assert.That(shape.IsResolved, Is.True);
+            Assert.That(shape.StableId, Is.EqualTo(ScalarFieldId));
+            Assert.That(shape.Slot.Index, Is.EqualTo(0));
+            Assert.That(shape.Role, Is.EqualTo(AtlasFieldRole.Canonical));
+            Assert.That(shape.StorageFormat.Kind, Is.EqualTo(StorageKind.Scalar));
+            Assert.That(shape.ShapeDomain.Kind, Is.EqualTo(AtlasShapeDomainKind.Scalar));
+            Assert.That(shape.DeclaredShape.Kind, Is.EqualTo(LengthShapeKind.Scalar));
+            Assert.That(shape.DebugName.ToString(), Is.EqualTo("shape.scalar"));
+            Assert.That(shape.Length, Is.EqualTo(1));
+            Assert.That(shape.Capacity, Is.EqualTo(1));
+            Assert.That(shape.ByteLength, Is.EqualTo(sizeof(int)));
+            Assert.That(shape.ByteCapacity, Is.EqualTo(sizeof(int)));
+            Assert.That(shape.HasCapacitySlack, Is.False);
+        }
+
+        [Test]
+        public void Resolve_FixedContract_ResolvesLengthCapacityAndByteCounts()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.fixed",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.rows")),
+                    LengthShape.Fixed(7)));
+
+            var shapes = AtlasShapeResolver.Resolve(contracts);
+
+            Assert.That(shapes.Count, Is.EqualTo(1));
+
+            var shape = shapes[0];
+
+            Assert.That(shape.StableId, Is.EqualTo(FixedFieldId));
+            Assert.That(shape.Slot.Index, Is.EqualTo(0));
+            Assert.That(shape.ShapeDomain.Kind, Is.EqualTo(AtlasShapeDomainKind.LinearRows));
+            Assert.That(shape.DeclaredShape.Kind, Is.EqualTo(LengthShapeKind.Fixed));
+            Assert.That(shape.Length, Is.EqualTo(7));
+            Assert.That(shape.Capacity, Is.EqualTo(7));
+            Assert.That(shape.ByteLength, Is.EqualTo(7 * sizeof(int)));
+            Assert.That(shape.ByteCapacity, Is.EqualTo(7 * sizeof(int)));
+        }
+
+        [Test]
+        public void Resolve_MatchFieldLength_SourceOrderDoesNotMatter()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    MatchedFieldId,
+                    "shape.matched",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.matched.rows")),
+                    LengthShape.MatchFieldLength(FixedFieldId)),
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.source",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.source.rows")),
+                    LengthShape.Fixed(11)));
+
+            var shapes = AtlasShapeResolver.Resolve(contracts);
+
+            var source = shapes.GetRequiredShape(FixedFieldId);
+            var matched = shapes.GetRequiredShape(MatchedFieldId);
+
+            Assert.That(source.Length, Is.EqualTo(11));
+            Assert.That(source.Capacity, Is.EqualTo(11));
+            Assert.That(matched.Length, Is.EqualTo(source.Length));
+            Assert.That(matched.Capacity, Is.EqualTo(source.Length));
+            Assert.That(matched.DeclaredShape.Kind, Is.EqualTo(LengthShapeKind.MatchFieldLength));
+            Assert.That(matched.Slot.Index, Is.EqualTo(0));
+            Assert.That(source.Slot.Index, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Resolve_CapacityFromField_AppliesCeilingMultiplierAndPadding()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.source",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.source.rows")),
+                    LengthShape.Fixed(5)),
+                CreateNativeArrayContract(
+                    CapacityFieldId,
+                    "shape.capacity",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.capacity.rows")),
+                    LengthShape.CapacityFromField(
+                        FixedFieldId,
+                        multiplierNumerator: 3,
+                        multiplierDenominator: 2,
+                        padding: 4)));
+
+            var shapes = AtlasShapeResolver.Resolve(contracts);
+
+            var capacity = shapes.GetRequiredShape(CapacityFieldId);
+
+            Assert.That(capacity.DeclaredShape.Kind, Is.EqualTo(LengthShapeKind.CapacityFromField));
+            Assert.That(capacity.Length, Is.EqualTo(12));
+            Assert.That(capacity.Capacity, Is.EqualTo(12));
+            Assert.That(capacity.ByteLength, Is.EqualTo(12 * sizeof(int)));
+            Assert.That(capacity.ByteCapacity, Is.EqualTo(12 * sizeof(int)));
+        }
+
+        [Test]
+        public void CreateContractTable_MissingFieldRelativeSource_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                CreateContractTable(
+                    CreateNativeArrayContract(
+                        MatchedFieldId,
+                        "shape.missing.source.target",
+                        AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.target.rows")),
+                        LengthShape.MatchFieldLength(MissingSourceFieldId))));
+        }
+
+        [Test]
+        public void Resolve_CyclicFieldRelativeDependency_ThrowsInvalidOperationException()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    CycleLeftFieldId,
+                    "shape.cycle.left",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.cycle.left.rows")),
+                    LengthShape.MatchFieldLength(CycleRightFieldId)),
+                CreateNativeArrayContract(
+                    CycleRightFieldId,
+                    "shape.cycle.right",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.cycle.right.rows")),
+                    LengthShape.MatchFieldLength(CycleLeftFieldId)));
+
+            Assert.Throws<InvalidOperationException>(() =>
+                AtlasShapeResolver.Resolve(contracts));
+        }
+
+        [TestCase(LengthShapeKind.QueryCount)]
+        [TestCase(LengthShapeKind.ChunkCount)]
+        [TestCase(LengthShapeKind.PrefixSumPayload)]
+        [TestCase(LengthShapeKind.External)]
+        public void Resolve_ResolverInputDependentShape_ThrowsNotSupportedException(
+            LengthShapeKind kind)
+        {
+            var contracts = CreateUnsupportedResolverInputContractTable(kind);
+
+            Assert.Throws<NotSupportedException>(() =>
+                AtlasShapeResolver.Resolve(contracts));
+        }
+
+        [TestCase(LengthShapeKind.Scalar, true)]
+        [TestCase(LengthShapeKind.Fixed, true)]
+        [TestCase(LengthShapeKind.MatchFieldLength, true)]
+        [TestCase(LengthShapeKind.CapacityFromField, true)]
+        [TestCase(LengthShapeKind.QueryCount, false)]
+        [TestCase(LengthShapeKind.ChunkCount, false)]
+        [TestCase(LengthShapeKind.PrefixSumPayload, false)]
+        [TestCase(LengthShapeKind.External, false)]
+        [TestCase(LengthShapeKind.None, false)]
+        public void CanResolveFromContractTableOnly_ReturnsExpectedValue(
+            LengthShapeKind kind,
+            bool expected)
+        {
+            Assert.That(
+                AtlasShapeResolver.CanResolveFromContractTableOnly(kind),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ValidateResolvableFromContractTableOnlyOrThrow_ResolvableTable_DoesNotThrow()
+        {
+            var contracts = CreateContractTable(
+                CreateScalarContract(
+                    ScalarFieldId,
+                    "shape.scalar"),
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.fixed",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.rows")),
+                    LengthShape.Fixed(4)));
+
+            Assert.DoesNotThrow(() =>
+                AtlasShapeResolver.ValidateResolvableFromContractTableOnlyOrThrow(contracts));
+        }
+
+        [Test]
+        public void ValidateResolvableFromContractTableOnlyOrThrow_UnsupportedTable_ThrowsNotSupportedException()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.query",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.query.rows")),
+                    LengthShape.QueryCount(new FixedString64Bytes("shape.query.count"))));
+
+            Assert.Throws<NotSupportedException>(() =>
+                AtlasShapeResolver.ValidateResolvableFromContractTableOnlyOrThrow(contracts));
+        }
+
+        [Test]
+        public void Resolve_CompiledPlan_UsesPlanContractTable()
+        {
+            var contracts = CreateContractTable(
+                CreateNativeArrayContract(
+                    FixedFieldId,
+                    "shape.fixed",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.rows")),
+                    LengthShape.Fixed(9)));
+
+            var operation = AtlasOperationDefinition.Create(
+                OperationId,
+                new FixedString64Bytes("shape.operation"),
+                AtlasOperationRole.Validation,
+                AtlasOperationAccess.Create(
+                    FixedFieldId,
+                    AtlasOperationAccessMode.Read,
+                    AtlasOperationAccessFlags.None,
+                    AtlasWriteCoverage.None,
+                    new FixedString64Bytes("shape.fixed")));
+
+            var stage = AtlasStageDefinition.Create(
+                StageId,
+                new FixedString64Bytes("shape.stage"),
+                operation);
+
+            var pipeline = AtlasPipelineDefinition.Create(
+                PipelineId,
+                new FixedString64Bytes("shape.pipeline"),
+                stage);
+
+            var plan = AtlasPlanCompiler.Compile(
+                pipeline,
+                contracts);
+
+            var shapes = AtlasShapeResolver.Resolve(plan);
+
+            Assert.That(shapes.Contracts, Is.SameAs(contracts));
+            Assert.That(shapes.Name, Is.EqualTo(plan.DebugName));
+            Assert.That(shapes.Count, Is.EqualTo(1));
+            Assert.That(shapes.GetRequiredShape(FixedFieldId).Length, Is.EqualTo(9));
+        }
+
+        [Test]
+        public void CreateContract_ScalarLengthWithLinearRowsDomain_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                CreateNativeArrayContract(
+                    ScalarFieldId,
+                    "shape.scalar.bad.domain",
+                    AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.rows")),
+                    LengthShape.Scalar()));
+        }
+
+        private static AtlasContractTable CreateContractTable(
+            params AtlasContract[] contracts)
+        {
+            return AtlasContractTable.Create(
+                new FixedString64Bytes("shape.tests.contracts"),
                 contracts);
         }
 
-        /// <summary>
-        /// Resolves all contract-table shapes using an explicit diagnostic shape-set name.
-        /// </summary>
-        /// <param name="name">Diagnostic name for the resolved shape set.</param>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
-        public static AtlasResolvedShapeSet Resolve(
-            FixedString64Bytes name,
-            AtlasContractTable contracts)
+        private static AtlasContract CreateScalarContract(
+            StableDataId fieldId,
+            string debugName)
         {
-            if (contracts == null)
-            {
-                throw new ArgumentNullException(nameof(contracts));
-            }
-
-            var shapes = ResolveToArray(contracts);
-
-            return AtlasResolvedShapeSet.Create(
-                name,
-                contracts,
-                shapes);
+            return AtlasContractFactory.Create<int>(
+                fieldId,
+                AtlasFieldRole.Canonical,
+                StorageKind.Scalar,
+                OwnershipPolicy.AtlasOwned,
+                LifetimePolicy.Frame,
+                AtlasShapeDomain.Scalar(new FixedString64Bytes("shape.scalar.domain")),
+                LengthShape.Scalar(),
+                AtlasFieldFlags.None,
+                HashParticipation.Default,
+                new FixedString64Bytes(debugName));
         }
 
-        /// <summary>
-        /// Resolves shapes for the contract table referenced by a compiled plan.
-        /// </summary>
-        /// <param name="plan">Compiled plan whose contract table should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
-        public static AtlasResolvedShapeSet Resolve(
-            AtlasCompiledPlan plan)
+        private static AtlasContract CreateNativeArrayContract(
+            StableDataId fieldId,
+            string debugName,
+            AtlasShapeDomain shapeDomain,
+            LengthShape lengthShape)
         {
-            if (plan == null)
-            {
-                throw new ArgumentNullException(nameof(plan));
-            }
-
-            if (plan.Contracts == null)
-            {
-                throw new ArgumentException(
-                    "Compiled plan does not reference a contract table.",
-                    nameof(plan));
-            }
-
-            return Resolve(
-                plan.DebugName,
-                plan.Contracts);
+            return AtlasContractFactory.Create<int>(
+                fieldId,
+                AtlasFieldRole.Canonical,
+                StorageKind.NativeArray,
+                OwnershipPolicy.AtlasOwned,
+                LifetimePolicy.Frame,
+                shapeDomain,
+                lengthShape,
+                AtlasFieldFlags.None,
+                HashParticipation.Default,
+                new FixedString64Bytes(debugName));
         }
 
-        /// <summary>
-        /// Resolves all contract-table shapes into a managed array in canonical slot order.
-        /// </summary>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A new array containing one resolved shape per contract-table slot.</returns>
-        public static AtlasResolvedShape[] ResolveToArray(
-            AtlasContractTable contracts)
+        private static AtlasContractTable CreateUnsupportedResolverInputContractTable(
+            LengthShapeKind kind)
         {
-            if (contracts == null)
+            if (kind == LengthShapeKind.PrefixSumPayload)
             {
-                throw new ArgumentNullException(nameof(contracts));
+                return CreateContractTable(
+                    CreateNativeArrayContract(
+                        PrefixSourceFieldId,
+                        "shape.prefix.source",
+                        AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.prefix.source.rows")),
+                        LengthShape.Fixed(4)),
+                    CreateUnsupportedResolverInputContract(kind));
             }
 
-            var shapes = new AtlasResolvedShape[contracts.Count];
-            var states = new byte[contracts.Count];
-
-            for (var i = 0; i < contracts.Count; i++)
-            {
-                ResolveIndex(
-                    contracts,
-                    i,
-                    shapes,
-                    states);
-            }
-
-            return shapes;
+            return CreateContractTable(
+                CreateUnsupportedResolverInputContract(kind));
         }
 
-        /// <summary>
-        /// Returns whether the supplied shape kind can be resolved from a contract table alone.
-        /// </summary>
-        /// <param name="kind">Shape kind to inspect.</param>
-        /// <returns><c>true</c> for contract-table-only shape rules; otherwise, <c>false</c>.</returns>
-        public static bool CanResolveFromContractTableOnly(
+        private static AtlasContract CreateUnsupportedResolverInputContract(
             LengthShapeKind kind)
         {
             switch (kind)
             {
-                case LengthShapeKind.Scalar:
-                case LengthShapeKind.Fixed:
-                case LengthShapeKind.MatchFieldLength:
-                case LengthShapeKind.CapacityFromField:
-                    return true;
-
-                default:
-                    return false;
-            }
-        }
-
-        private static AtlasResolvedShape ResolveIndex(
-            AtlasContractTable contracts,
-            int index,
-            AtlasResolvedShape[] shapes,
-            byte[] states)
-        {
-            switch (states[index])
-            {
-                case Resolved:
-                    return shapes[index];
-
-                case Visiting:
-                    throw new InvalidOperationException(
-                        CreateCycleMessage(contracts, index));
-            }
-
-            states[index] = Visiting;
-
-            var contract = contracts[index];
-            contract.ValidateTableReadyOrThrow($"contracts[{index}]");
-
-            var resolved = ResolveContract(
-                contracts,
-                contract,
-                shapes,
-                states);
-
-            resolved.ValidateOrThrow($"shapes[{index}]");
-
-            shapes[index] = resolved;
-            states[index] = Resolved;
-
-            return resolved;
-        }
-
-        private static AtlasResolvedShape ResolveContract(
-            AtlasContractTable contracts,
-            AtlasContract contract,
-            AtlasResolvedShape[] shapes,
-            byte[] states)
-        {
-            contract.ValidateTableReadyOrThrow(nameof(contract));
-
-            var shape = contract.LengthShape;
-            shape.ValidateOrThrow(nameof(contract));
-
-            switch (shape.Kind)
-            {
-                case LengthShapeKind.Scalar:
-                    return AtlasResolvedShape.Create(
-                        contract,
-                        length: 1,
-                        capacity: 1);
-
-                case LengthShapeKind.Fixed:
-                    return AtlasResolvedShape.Create(
-                        contract,
-                        length: shape.FixedLength,
-                        capacity: shape.FixedLength);
-
-                case LengthShapeKind.MatchFieldLength:
-                    return ResolveMatchFieldLength(
-                        contracts,
-                        contract,
-                        shapes,
-                        states);
-
-                case LengthShapeKind.CapacityFromField:
-                    return ResolveCapacityFromField(
-                        contracts,
-                        contract,
-                        shapes,
-                        states);
-
                 case LengthShapeKind.QueryCount:
+                    return CreateNativeArrayContract(
+                        FixedFieldId,
+                        "shape.query",
+                        AtlasShapeDomain.LinearRows(new FixedString64Bytes("shape.query.rows")),
+                        LengthShape.QueryCount(new FixedString64Bytes("shape.query.count")));
+
                 case LengthShapeKind.ChunkCount:
+                    return CreateNativeArrayContract(
+                        FixedFieldId,
+                        "shape.chunk",
+                        AtlasShapeDomain.ChunkSet(new FixedString64Bytes("shape.chunk.set")),
+                        LengthShape.ChunkCount(new FixedString64Bytes("shape.chunk.count")));
+
                 case LengthShapeKind.PrefixSumPayload:
+                    return AtlasContractFactory.Create<int>(
+                        FixedFieldId,
+                        AtlasFieldRole.Payload,
+                        StorageKind.NativeArray,
+                        OwnershipPolicy.AtlasOwned,
+                        LifetimePolicy.Frame,
+                        AtlasShapeDomain.PrefixSumPayload(
+                            PrefixSourceFieldId,
+                            new FixedString64Bytes("shape.prefix.payload")),
+                        LengthShape.PrefixSumPayload(PrefixSourceFieldId),
+                        AtlasFieldFlags.None,
+                        HashParticipation.Default,
+                        new FixedString64Bytes("shape.prefix.payload"));
+
                 case LengthShapeKind.External:
-                    throw new NotSupportedException(
-                        CreateUnsupportedShapeMessage(contract));
+                    return AtlasContractFactory.Create<int>(
+                        FixedFieldId,
+                        AtlasFieldRole.External,
+                        StorageKind.External,
+                        OwnershipPolicy.ExternalOwned,
+                        LifetimePolicy.External,
+                        AtlasShapeDomain.External(new FixedString64Bytes("shape.external")),
+                        LengthShape.External(new FixedString64Bytes("shape.external.length")),
+                        AtlasFieldFlags.None,
+                        HashParticipation.Default,
+                        new FixedString64Bytes("shape.external"));
 
-                case LengthShapeKind.None:
                 default:
-                    throw new ArgumentException(
-                        $"Contract '{contract.GetDiagnosticName()}' declares unsupported length-shape kind '{shape.Kind}'.",
-                        nameof(contract));
+                    throw new ArgumentOutOfRangeException(
+                        nameof(kind),
+                        kind,
+                        "Unsupported resolver-input-dependent length-shape kind.");
             }
-        }
-
-        private static AtlasResolvedShape ResolveMatchFieldLength(
-            AtlasContractTable contracts,
-            AtlasContract contract,
-            AtlasResolvedShape[] shapes,
-            byte[] states)
-        {
-            var source = ResolveSourceShape(
-                contracts,
-                contract,
-                shapes,
-                states);
-
-            return AtlasResolvedShape.Create(
-                contract,
-                length: source.Length,
-                capacity: source.Length);
-        }
-
-        private static AtlasResolvedShape ResolveCapacityFromField(
-            AtlasContractTable contracts,
-            AtlasContract contract,
-            AtlasResolvedShape[] shapes,
-            byte[] states)
-        {
-            var source = ResolveSourceShape(
-                contracts,
-                contract,
-                shapes,
-                states);
-
-            var capacity = ResolveCapacityFromField(
-                source.Capacity,
-                contract.LengthShape,
-                contract.GetDiagnosticName(),
-                source.GetDiagnosticName());
-
-            var length = contract.StorageFormat.RequiresFixedLength
-                ? capacity
-                : 0;
-
-            return AtlasResolvedShape.Create(
-                contract,
-                length,
-                capacity);
-        }
-
-        private static AtlasResolvedShape ResolveSourceShape(
-            AtlasContractTable contracts,
-            AtlasContract target,
-            AtlasResolvedShape[] shapes,
-            byte[] states)
-        {
-            var sourceId = target.LengthShape.SourceFieldId;
-
-            if (!contracts.TryGetSlot(sourceId, out var sourceSlot))
-            {
-                throw new ArgumentException(
-                    $"Contract '{target.GetDiagnosticName()}' depends on source field id '{sourceId}', but that field is not present in contract table '{GetContractTableDiagnosticName(contracts)}'.",
-                    nameof(target));
-            }
-
-            return ResolveIndex(
-                contracts,
-                sourceSlot.Index,
-                shapes,
-                states);
-        }
-
-        private static int ResolveCapacityFromField(
-            int sourceCapacity,
-            LengthShape shape,
-            string targetDiagnosticName,
-            string sourceDiagnosticName)
-        {
-            if (sourceCapacity < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(sourceCapacity),
-                    sourceCapacity,
-                    "Source capacity must be greater than or equal to zero.");
-            }
-
-            if (shape.Kind != LengthShapeKind.CapacityFromField)
-            {
-                throw new ArgumentException(
-                    $"Length shape '{shape}' is not a capacity-from-field shape.",
-                    nameof(shape));
-            }
-
-            shape.ValidateOrThrow(nameof(shape));
-
-            var numerator = shape.CapacityMultiplierNumerator;
-            var denominator = shape.CapacityMultiplierDenominator;
-            var padding = shape.CapacityPadding;
-
-            var product = checked((long)sourceCapacity * numerator);
-            var scaled = DivideRoundUp(
-                product,
-                denominator);
-
-            var resolvedCapacity = checked(scaled + padding);
-
-            if (resolvedCapacity > int.MaxValue)
-            {
-                throw new OverflowException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Contract '{0}' derived capacity '{1}' from source field '{2}', exceeding Int32.MaxValue.",
-                        targetDiagnosticName,
-                        resolvedCapacity,
-                        sourceDiagnosticName));
-            }
-
-            return (int)resolvedCapacity;
-        }
-
-        private static long DivideRoundUp(
-            long value,
-            int divisor)
-        {
-            if (value < 0L)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(value),
-                    value,
-                    "Value must be greater than or equal to zero.");
-            }
-
-            if (divisor <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(divisor),
-                    divisor,
-                    "Divisor must be greater than zero.");
-            }
-
-            return checked((value + divisor - 1L) / divisor);
-        }
-
-        private static string CreateUnsupportedShapeMessage(
-            AtlasContract contract)
-        {
-            return string.Format(
-                CultureInfo.InvariantCulture,
-                "Contract '{0}' declares length shape '{1}', which cannot be resolved from a contract table alone. " +
-                "Provide an explicit resolver context before resolving QueryCount, ChunkCount, PrefixSumPayload, or External shapes.",
-                contract.GetDiagnosticName(),
-                contract.LengthShape);
-        }
-
-        private static string CreateCycleMessage(
-            AtlasContractTable contracts,
-            int index)
-        {
-            var contract = contracts[index];
-
-            return string.Format(
-                CultureInfo.InvariantCulture,
-                "Contract table '{0}' contains a cyclic field-relative length-shape dependency involving contract '{1}' at slot '{2}'.",
-                GetContractTableDiagnosticName(contracts),
-                contract.GetDiagnosticName(),
-                contract.Slot);
-        }
-
-        private static string GetContractTableDiagnosticName(
-            AtlasContractTable contracts)
-        {
-            if (contracts != null && !contracts.Name.IsEmpty)
-            {
-                return contracts.Name.ToString();
-            }
-
-            return "<unnamed-contract-table>";
         }
     }
 }

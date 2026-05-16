@@ -313,6 +313,11 @@ namespace Lokrain.Atlas.Workspaces
                     parameterName);
             }
 
+            AtlasWorkspaceStorageSupport.ValidateStorageFormatOrThrow(
+                shape.StorageFormat,
+                contract.GetDiagnosticName(),
+                parameterName);
+
             if (contract.Ownership != OwnershipPolicy.AtlasOwned)
             {
                 throw new NotSupportedException(
@@ -321,16 +326,6 @@ namespace Lokrain.Atlas.Workspaces
                         "Workspace layout compiler cannot allocate field '{0}' with ownership policy '{1}'. This layout path only supports Atlas-owned memory. Borrowed, imported, adopted, job-owned, and external-owned storage require explicit acquisition or binding models.",
                         contract.GetDiagnosticName(),
                         contract.Ownership));
-            }
-
-            if (!SupportsFixedContiguousByteBlock(shape.StorageFormat.Kind))
-            {
-                throw new NotSupportedException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Workspace layout compiler cannot allocate field '{0}' with storage kind '{1}'. Current workspace byte-block layout supports only Scalar and NativeArray storage.",
-                        contract.GetDiagnosticName(),
-                        shape.StorageFormat.Kind));
             }
 
             if (shape.ByteCapacity > int.MaxValue)
@@ -405,10 +400,5 @@ namespace Lokrain.Atlas.Workspaces
             return default;
         }
 
-        private static bool SupportsFixedContiguousByteBlock(StorageKind storageKind)
-        {
-            return storageKind == StorageKind.Scalar ||
-                   storageKind == StorageKind.NativeArray;
-        }
     }
 }

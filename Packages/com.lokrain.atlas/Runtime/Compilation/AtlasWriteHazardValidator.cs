@@ -21,7 +21,6 @@
 using System;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Diagnostics;
-using Lokrain.Atlas.Operations;
 
 namespace Lokrain.Atlas.Compilation
 {
@@ -44,45 +43,6 @@ namespace Lokrain.Atlas.Compilation
     /// </remarks>
     public static class AtlasWriteHazardValidator
     {
-        private static readonly AtlasDiagnosticCode InvalidBindingCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 200);
-
-        private static readonly AtlasDiagnosticCode InvalidPresentContractCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 201);
-
-        private static readonly AtlasDiagnosticCode ShapeOnlyWriteCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 202);
-
-        private static readonly AtlasDiagnosticCode WriteOwnershipRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 203);
-
-        private static readonly AtlasDiagnosticCode WriteLifetimeRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 204);
-
-        private static readonly AtlasDiagnosticCode WriteStorageRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 205);
-
-        private static readonly AtlasDiagnosticCode AppendStorageRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 206);
-
-        private static readonly AtlasDiagnosticCode ConsumeStorageRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 207);
-
-        private static readonly AtlasDiagnosticCode MissingWriteContentPolicyCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 208);
-
-        private static readonly AtlasDiagnosticCode ContradictoryWriteContentPolicyCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 209);
-
-        private static readonly AtlasDiagnosticCode ParallelWriteRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 210);
-
-        private static readonly AtlasDiagnosticCode ExclusiveWriteRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 211);
-
-        private static readonly AtlasDiagnosticCode DeterministicWriteOrderRejectedCode =
-            AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 212);
-
         /// <summary>
         /// Compiles, structurally validates, dataflow-validates, and write-hazard-validates a pipeline.
         /// </summary>
@@ -287,37 +247,18 @@ namespace Lokrain.Atlas.Compilation
             AtlasWriteHazardValidationPolicy policy,
             AtlasDiagnosticBuffer diagnostics)
         {
-            if (plan == null)
-            {
-                throw new ArgumentNullException(nameof(plan));
-            }
-
             if (diagnostics == null)
             {
                 throw new ArgumentNullException(nameof(diagnostics));
             }
 
-            for (var stageIndex = 0; stageIndex < plan.Count; stageIndex++)
-            {
-                var stage = plan[stageIndex];
+            var visitor = new AtlasWriteHazardBindingValidator(
+                policy,
+                diagnostics);
 
-                for (var operationIndex = 0; operationIndex < stage.Count; operationIndex++)
-                {
-                    var operation = stage[operationIndex];
-
-                    for (var bindingIndex = 0; bindingIndex < operation.Count; bindingIndex++)
-                    {
-                        ValidateBinding(
-                            operation,
-                            operation[bindingIndex],
-                            stageIndex,
-                            operationIndex,
-                            bindingIndex,
-                            policy,
-                            diagnostics);
-                    }
-                }
-            }
+            AtlasCompiledPlanBindingWalker.VisitBindings(
+                plan,
+                ref visitor);
 
             return diagnostics;
         }
@@ -382,273 +323,5 @@ namespace Lokrain.Atlas.Compilation
             throw new InvalidOperationException(
                 diagnostics.ToReportString());
         }
-
-        private static void ValidateBinding(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            int stageIndex,
-            int operationIndex,
-            int bindingIndex,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            var location = CreateBindingLocation(
-                binding,
-                stageIndex,
-                operationIndex,
-                bindingIndex);
-
-            if (!binding.IsValid)
-            {
-                diagnostics.AddError(
-                    InvalidBindingCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas write-hazard validation found an invalid binding at stage '{stageIndex}', operation '{operationIndex}', binding '{bindingIndex}'."));
-
-                return;
-            }
-
-            ValidateShapeOnlyDeclaration(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            if (!binding.IsPresent)
-            {
-                return;
-            }
-
-            if (!binding.Contract.IsTableReady)
-            {
-                diagnostics.AddError(
-                    InvalidPresentContractCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas write-hazard validation found present binding '{AtlasDiagnosticText.Name(binding.BindingName)}' with a Contract that is not table-ready."));
-
-                return;
-            }
-
-            ValidateParallelDeclaration(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            ValidateExclusiveDeclaration(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            if (!binding.WritesContent)
-            {
-                return;
-            }
-
-            ValidateWriteAuthorization(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            ValidateWriteModeStorage(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            ValidateWriteContentPolicy(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-
-            ValidateDeterministicOrdering(
-                operation,
-                binding,
-                location,
-                policy,
-                diagnostics);
-        }
-
-        private static void ValidateShapeOnlyDeclaration(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (policy.AllowsShapeOnlyWriteDeclaration(binding))
-            {
-                return;
-            }
-
-            diagnostics.AddError(
-                ShapeOnlyWriteCode,
-                location,
-                AtlasDiagnosticText.Message($"Atlas binding '{AtlasDiagnosticText.Name(binding.BindingName)}' in operation '{AtlasDiagnosticText.Name(operation.DebugName)}' is shape-only but declares write-related access semantics."));
-        }
-
-        private static void ValidateWriteAuthorization(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (!policy.AllowsWriteOwnership(binding.Contract))
-            {
-                diagnostics.AddError(
-                    WriteOwnershipRejectedCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but ownership policy '{binding.Contract.Ownership}' is not writable under the active write-hazard policy."));
-            }
-
-            if (!policy.AllowsWriteLifetime(binding.Contract))
-            {
-                diagnostics.AddError(
-                    WriteLifetimeRejectedCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but lifetime policy '{binding.Contract.Lifetime}' is not writable under the active write-hazard policy."));
-            }
-
-            if (!policy.AllowsWriteStorage(binding.Contract))
-            {
-                diagnostics.AddError(
-                    WriteStorageRejectedCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not writable under the active write-hazard policy."));
-            }
-        }
-
-        private static void ValidateWriteModeStorage(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (binding.Mode == AtlasOperationAccessMode.Append &&
-                !policy.AllowsAppendStorage(binding.Contract))
-            {
-                diagnostics.AddError(
-                    AppendStorageRejectedCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' appends to Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not append-compatible under the active write-hazard policy."));
-            }
-
-            if (binding.Mode == AtlasOperationAccessMode.Consume &&
-                !policy.AllowsConsumeStorage(binding.Contract))
-            {
-                diagnostics.AddError(
-                    ConsumeStorageRejectedCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' consumes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}', but storage kind '{binding.Contract.StorageFormat.Kind}' is not consume-compatible under the active write-hazard policy."));
-            }
-        }
-
-        private static void ValidateWriteContentPolicy(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (!policy.HasRequiredWriteContentPolicy(binding))
-            {
-                diagnostics.AddError(
-                    MissingWriteContentPolicyCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' without an explicit write content policy."));
-            }
-
-            if (policy.HasContradictoryWriteContentPolicy(binding))
-            {
-                diagnostics.AddError(
-                    ContradictoryWriteContentPolicyCode,
-                    location,
-                    AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares both discard-before-write and preserve-existing-content for Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}'."));
-            }
-        }
-
-        private static void ValidateParallelDeclaration(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (policy.AllowsParallelWriteDeclaration(binding))
-            {
-                return;
-            }
-
-            var reason = binding.WritesContent
-                ? $"Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' does not declare compatible parallel-write permission."
-                : "the binding does not write content.";
-
-            diagnostics.AddError(
-                ParallelWriteRejectedCode,
-                location,
-                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares parallel write access, but {reason}"));
-        }
-
-        private static void ValidateExclusiveDeclaration(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (policy.AllowsExclusiveWriteDeclaration(binding))
-            {
-                return;
-            }
-
-            diagnostics.AddError(
-                ExclusiveWriteRejectedCode,
-                location,
-                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' declares exclusive write access, but the binding does not write content."));
-        }
-
-        private static void ValidateDeterministicOrdering(
-            AtlasCompiledOperation operation,
-            AtlasCompiledBinding binding,
-            AtlasDiagnosticLocation location,
-            AtlasWriteHazardValidationPolicy policy,
-            AtlasDiagnosticBuffer diagnostics)
-        {
-            if (policy.AllowsDeterministicWriteDeclaration(binding))
-            {
-                return;
-            }
-
-            diagnostics.AddError(
-                DeterministicWriteOrderRejectedCode,
-                location,
-                AtlasDiagnosticText.Message($"Atlas operation '{AtlasDiagnosticText.Name(operation.DebugName)}' binding '{AtlasDiagnosticText.Name(binding.BindingName)}' writes Field '{AtlasDiagnosticText.Name(binding.Contract.DebugName)}' without the deterministic-order declaration required by the active write-hazard policy."));
-        }
-
-        private static AtlasDiagnosticLocation CreateBindingLocation(
-            AtlasCompiledBinding binding,
-            int stageIndex,
-            int operationIndex,
-            int bindingIndex)
-        {
-            return AtlasDiagnosticLocation.CompiledBinding(
-                binding.FieldId,
-                stageIndex,
-                operationIndex,
-                bindingIndex,
-                binding.BindingName);
-        }
-
     }
 }

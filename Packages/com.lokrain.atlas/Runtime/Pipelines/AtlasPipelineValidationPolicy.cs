@@ -56,7 +56,7 @@ namespace Lokrain.Atlas.Pipelines
         /// <summary>
         /// Open policy with no route-specific constraints.
         /// </summary>
-        public static readonly AtlasPipelineValidationPolicy Open = new AtlasPipelineValidationPolicy(
+        public static readonly AtlasPipelineValidationPolicy Open = new(
             default,
             AtlasPipelineValidationPolicyFlags.None,
             NoStages,
@@ -74,7 +74,7 @@ namespace Lokrain.Atlas.Pipelines
         /// identities inside each stage, and enforces forbidden lists when supplied. It does not
         /// require a fixed stage set because that must be supplied by a concrete route/preset.
         /// </remarks>
-        public static readonly AtlasPipelineValidationPolicy Conservative = new AtlasPipelineValidationPolicy(
+        public static readonly AtlasPipelineValidationPolicy Conservative = new(
             new FixedString64Bytes("Conservative"),
             AtlasPipelineValidationPolicyFlags.RejectRepeatedStageIdentity |
             AtlasPipelineValidationPolicyFlags.RejectRepeatedOperationIdentityWithinStage |

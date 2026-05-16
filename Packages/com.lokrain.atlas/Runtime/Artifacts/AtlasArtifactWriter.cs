@@ -127,7 +127,7 @@ namespace Lokrain.Atlas.Artifacts
                 throw new ArgumentNullException(nameof(context));
             }
 
-            var artifact = AtlasArtifact.Capture(
+            var artifact = AtlasArtifactCapture.Capture(
                 context,
                 computeContentHashes);
 
@@ -155,7 +155,7 @@ namespace Lokrain.Atlas.Artifacts
             bool overwrite = true,
             bool computeContentHashes = true)
         {
-            var artifact = AtlasArtifact.Capture(
+            var artifact = AtlasArtifactCapture.Capture(
                 plan,
                 workspace,
                 computeContentHashes);
@@ -188,7 +188,7 @@ namespace Lokrain.Atlas.Artifacts
             bool overwrite = true,
             bool computeContentHashes = true)
         {
-            var artifact = AtlasArtifact.CaptureCapacitySnapshot(
+            var artifact = AtlasArtifactCapture.CaptureCapacitySnapshot(
                 plan,
                 workspace,
                 computeContentHashes);
@@ -243,7 +243,7 @@ namespace Lokrain.Atlas.Artifacts
                 throw new ArgumentNullException(nameof(context));
             }
 
-            var artifact = AtlasArtifact.Capture(
+            var artifact = AtlasArtifactCapture.Capture(
                 context,
                 computeContentHashes);
 
@@ -271,7 +271,7 @@ namespace Lokrain.Atlas.Artifacts
             Stream stream,
             bool computeContentHashes = true)
         {
-            var artifact = AtlasArtifact.Capture(
+            var artifact = AtlasArtifactCapture.Capture(
                 plan,
                 workspace,
                 computeContentHashes);
@@ -300,7 +300,7 @@ namespace Lokrain.Atlas.Artifacts
             Stream stream,
             bool computeContentHashes = true)
         {
-            var artifact = AtlasArtifact.CaptureCapacitySnapshot(
+            var artifact = AtlasArtifactCapture.CaptureCapacitySnapshot(
                 plan,
                 workspace,
                 computeContentHashes);

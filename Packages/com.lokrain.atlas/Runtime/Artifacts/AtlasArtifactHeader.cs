@@ -347,6 +347,79 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         /// <summary>
+        /// Creates an artifact header from a compiled plan and the fields selected for capture.
+        /// </summary>
+        /// <remarks>
+        /// The compiled plan remains the source of pipeline, operation, binding, and contract-count
+        /// metadata. The supplied field table defines which workspace fields are serialized by the
+        /// artifact profile. This allows default capture to exclude stage-transient fields while
+        /// preserving the source plan contract count.
+        /// </remarks>
+        public static AtlasArtifactHeader Create(
+            AtlasCompiledPlan plan,
+            AtlasArtifactField[] fields)
+        {
+            return CreateCore(
+                plan,
+                fields,
+                contentHash: 0UL,
+                hasContentHash: false);
+        }
+
+        /// <summary>
+        /// Creates an artifact header from a compiled plan, selected artifact fields, and content hash.
+        /// </summary>
+        public static AtlasArtifactHeader Create(
+            AtlasCompiledPlan plan,
+            AtlasArtifactField[] fields,
+            ulong contentHash)
+        {
+            return CreateCore(
+                plan,
+                fields,
+                contentHash,
+                hasContentHash: true);
+        }
+
+        /// <summary>
+        /// Creates an artifact header from serialized artifact metadata.
+        /// </summary>
+        internal static AtlasArtifactHeader CreateFromSerialized(
+            AtlasPipelineId pipelineId,
+            FixedString64Bytes pipelineName,
+            int contractCount,
+            int fieldCount,
+            int stageCount,
+            int operationCount,
+            int bindingCount,
+            int presentBindingCount,
+            int missingOptionalBindingCount,
+            long totalByteLength,
+            long totalByteCapacity,
+            ulong contractHash,
+            ulong shapeHash,
+            ulong contentHash,
+            bool hasContentHash)
+        {
+            return new AtlasArtifactHeader(
+                pipelineId,
+                pipelineName,
+                contractCount,
+                fieldCount,
+                stageCount,
+                operationCount,
+                bindingCount,
+                presentBindingCount,
+                missingOptionalBindingCount,
+                totalByteLength,
+                totalByteCapacity,
+                contractHash,
+                shapeHash,
+                contentHash,
+                hasContentHash);
+        }
+
+        /// <summary>
         /// Validates that this header is concrete and internally consistent.
         /// </summary>
         public void ValidateOrThrow(string parameterName = null)
@@ -566,6 +639,43 @@ namespace Lokrain.Atlas.Artifacts
                 hasContentHash);
         }
 
+        private static AtlasArtifactHeader CreateCore(
+            AtlasCompiledPlan plan,
+            AtlasArtifactField[] fields,
+            ulong contentHash,
+            bool hasContentHash)
+        {
+            ValidatePlanAndArtifactFieldsOrThrow(
+                plan,
+                fields);
+
+            var totalByteLength = 0L;
+            var totalByteCapacity = 0L;
+
+            for (var i = 0; i < fields.Length; i++)
+            {
+                totalByteLength = checked(totalByteLength + fields[i].ByteLength);
+                totalByteCapacity = checked(totalByteCapacity + fields[i].ByteCapacity);
+            }
+
+            return new AtlasArtifactHeader(
+                plan.PipelineId,
+                plan.DebugName,
+                plan.Contracts.Count,
+                fields.Length,
+                plan.StageCount,
+                plan.OperationCount,
+                plan.BindingCount,
+                plan.PresentBindingCount,
+                plan.MissingOptionalBindingCount,
+                totalByteLength,
+                totalByteCapacity,
+                ComputeContractHash(plan.Contracts),
+                ComputeArtifactFieldShapeHash(fields),
+                contentHash,
+                hasContentHash);
+        }
+
         private static void ValidatePlanAndShapesOrThrow(
             AtlasCompiledPlan plan,
             AtlasResolvedShapeSet shapes)
@@ -653,6 +763,104 @@ namespace Lokrain.Atlas.Artifacts
             }
         }
 
+        private static void ValidatePlanAndArtifactFieldsOrThrow(
+            AtlasCompiledPlan plan,
+            AtlasArtifactField[] fields)
+        {
+            if (plan == null)
+            {
+                throw new ArgumentNullException(nameof(plan));
+            }
+
+            if (plan.Contracts == null)
+            {
+                throw new ArgumentException(
+                    "Compiled plan does not reference a Contract table.",
+                    nameof(plan));
+            }
+
+            if (fields == null)
+            {
+                throw new ArgumentNullException(nameof(fields));
+            }
+
+            var seenSlots = new bool[plan.Contracts.Count];
+
+            for (var i = 0; i < fields.Length; i++)
+            {
+                var field = fields[i];
+
+                field.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "fields[{0}]",
+                        i));
+
+                if (field.FieldIndex != i)
+                {
+                    throw new ArgumentException(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field row at index {0} has FieldIndex {1}. Field rows must be contiguous and ordered.",
+                            i,
+                            field.FieldIndex),
+                        nameof(fields));
+                }
+
+                var contractIndex = field.Slot.Index;
+
+                if (contractIndex < 0 ||
+                    contractIndex >= plan.Contracts.Count)
+                {
+                    throw new ArgumentException(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field '{0}' references slot '{1}', but the compiled plan has {2} contracts.",
+                            field.DebugName,
+                            field.Slot,
+                            plan.Contracts.Count),
+                        nameof(fields));
+                }
+
+                if (seenSlots[contractIndex])
+                {
+                    throw new ArgumentException(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field table contains duplicate slot '{0}'.",
+                            field.Slot),
+                        nameof(fields));
+                }
+
+                seenSlots[contractIndex] = true;
+
+                var contract = plan.Contracts[contractIndex];
+
+                contract.ValidateTableReadyOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "plan.Contracts[{0}]",
+                        contractIndex));
+
+                if (field.StableId != contract.StableId ||
+                    field.Slot != contract.Slot ||
+                    field.Role != contract.Role ||
+                    field.StorageFormat != contract.StorageFormat ||
+                    field.ShapeDomain != contract.ShapeDomain ||
+                    field.DeclaredShape != contract.LengthShape ||
+                    !field.DebugName.Equals(contract.DebugName))
+                {
+                    throw new ArgumentException(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field row {0} does not match compiled plan Contract '{1}'.",
+                            i,
+                            contract.GetDiagnosticName()),
+                        nameof(fields));
+                }
+            }
+        }
+
         private static void ValidateCountsOrThrow(
             int contractCount,
             int fieldCount,
@@ -680,14 +888,14 @@ namespace Lokrain.Atlas.Artifacts
                     "Field count must be non-negative.");
             }
 
-            if (contractCount != fieldCount)
+            if (fieldCount > contractCount)
             {
                 throw new ArgumentException(
                     string.Format(
                         CultureInfo.InvariantCulture,
-                        "Contract count {0} must match field count {1}.",
-                        contractCount,
-                        fieldCount));
+                        "Field count {0} must not exceed source Contract count {1}.",
+                        fieldCount,
+                        contractCount));
             }
 
             if (stageCount < 0)
@@ -827,6 +1035,43 @@ namespace Lokrain.Atlas.Artifacts
                 AppendInt(ref hash, shape.Capacity);
                 AppendLong(ref hash, shape.ByteLength);
                 AppendLong(ref hash, shape.ByteCapacity);
+            }
+
+            return hash;
+        }
+
+        private static ulong ComputeArtifactFieldShapeHash(AtlasArtifactField[] fields)
+        {
+            if (fields == null)
+            {
+                throw new ArgumentNullException(nameof(fields));
+            }
+
+            var hash = FnvOffsetBasis64;
+
+            AppendByte(ref hash, 0x53);
+            AppendInt(ref hash, fields.Length);
+
+            for (var i = 0; i < fields.Length; i++)
+            {
+                var field = fields[i];
+
+                field.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "fields[{0}]",
+                        i));
+
+                AppendStableDataId(ref hash, field.StableId);
+                AppendInt(ref hash, field.Slot.Index);
+                AppendInt(ref hash, (int)field.Role);
+                AppendStorageFormat(ref hash, field.StorageFormat);
+                AppendShapeDomain(ref hash, field.ShapeDomain);
+                AppendLengthShape(ref hash, field.DeclaredShape);
+                AppendInt(ref hash, field.Length);
+                AppendInt(ref hash, field.Capacity);
+                AppendLong(ref hash, field.ByteLength);
+                AppendLong(ref hash, field.ByteCapacity);
             }
 
             return hash;

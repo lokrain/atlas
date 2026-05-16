@@ -245,7 +245,7 @@ namespace Lokrain.Atlas.Execution
             {
                 try
                 {
-                    artifact = AtlasArtifact.Capture(
+                    artifact = AtlasArtifactCapture.Capture(
                         executionContext,
                         request.ComputeArtifactContentHashes);
                 }
@@ -272,7 +272,7 @@ namespace Lokrain.Atlas.Execution
             {
                 try
                 {
-                    AtlasArtifactWriter.WriteToFile(
+                    AtlasArtifactFileWriter.WriteToFile(
                         artifact,
                         request.ArtifactFilePath,
                         request.OverwriteArtifactFile);
@@ -302,7 +302,9 @@ namespace Lokrain.Atlas.Execution
             {
                 try
                 {
-                    debugMapImage = request.DebugMap.ExportFromArtifact(artifact);
+                    debugMapImage = AtlasDebugMapExporter.ExportFromArtifact(
+                        artifact,
+                        request.DebugMap);
                     debugMapFilePath = request.DebugMap.FilePath;
                 }
                 catch (Exception exception)

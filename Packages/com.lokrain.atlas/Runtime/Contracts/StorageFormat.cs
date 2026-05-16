@@ -298,6 +298,25 @@ namespace Lokrain.Atlas.Contracts
         }
 
         /// <summary>
+        /// Creates a concrete storage format from serialized artifact metadata.
+        /// </summary>
+        internal static StorageFormat CreateFromSerialized(
+            StorageKind kind,
+            int elementSize,
+            int elementAlignment,
+            ulong elementTypeHash)
+        {
+            var format = new StorageFormat(
+                kind,
+                elementSize,
+                elementAlignment,
+                elementTypeHash);
+
+            format.ValidateOrThrow(nameof(format));
+            return format;
+        }
+
+        /// <summary>
         /// Throws when this storage format is not valid as a concrete storage format.
         /// </summary>
         /// <param name="parameterName">Optional parameter name used by the thrown exception.</param>

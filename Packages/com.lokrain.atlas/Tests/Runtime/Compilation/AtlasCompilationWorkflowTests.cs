@@ -38,28 +38,28 @@ namespace Lokrain.Atlas.Compilation.Tests
             AtlasDiagnosticCode.Create(AtlasDiagnosticDomain.Validation, 205);
 
         private static readonly StableDataId WritableFieldId =
-            new StableDataId(0x1000_0000_0000_0001UL, 0x2000_0000_0000_0001UL, 1);
+            new(0x1000_0000_0000_0001UL, 0x2000_0000_0000_0001UL, 1);
 
         private static readonly StableDataId ReadOnlyFieldId =
-            new StableDataId(0x1000_0000_0000_0002UL, 0x2000_0000_0000_0002UL, 1);
+            new(0x1000_0000_0000_0002UL, 0x2000_0000_0000_0002UL, 1);
 
         private static readonly StableDataId BlobFieldId =
-            new StableDataId(0x1000_0000_0000_0003UL, 0x2000_0000_0000_0003UL, 1);
+            new(0x1000_0000_0000_0003UL, 0x2000_0000_0000_0003UL, 1);
 
         private static readonly AtlasOperationId WriteOperationId =
-            new AtlasOperationId(0x3000_0000_0000_0001UL, 0x4000_0000_0000_0001UL, 1);
+            new(0x3000_0000_0000_0001UL, 0x4000_0000_0000_0001UL, 1);
 
         private static readonly AtlasOperationId ReadAndBlobWriteOperationId =
-            new AtlasOperationId(0x3000_0000_0000_0002UL, 0x4000_0000_0000_0002UL, 1);
+            new(0x3000_0000_0000_0002UL, 0x4000_0000_0000_0002UL, 1);
 
         private static readonly AtlasOperationId BlobWriteOperationId =
-            new AtlasOperationId(0x3000_0000_0000_0003UL, 0x4000_0000_0000_0003UL, 1);
+            new(0x3000_0000_0000_0003UL, 0x4000_0000_0000_0003UL, 1);
 
         private static readonly AtlasStageId StageId =
-            new AtlasStageId(0x5000_0000_0000_0001UL, 0x6000_0000_0000_0001UL, 1);
+            new(0x5000_0000_0000_0001UL, 0x6000_0000_0000_0001UL, 1);
 
         private static readonly AtlasPipelineId PipelineId =
-            new AtlasPipelineId(0x7000_0000_0000_0001UL, 0x8000_0000_0000_0001UL, 1);
+            new(0x7000_0000_0000_0001UL, 0x8000_0000_0000_0001UL, 1);
 
         [Test]
         public void CompileValidated_ValidPlan_ReturnsSuccessfulResultWithPlan()

@@ -26,22 +26,22 @@ namespace Lokrain.Atlas.Execution.Tests
     public sealed class AtlasRunWorkflowTests
     {
         private static readonly StableDataId WritableFieldId =
-            new StableDataId(0x9100_0000_0000_0001UL, 0x9200_0000_0000_0001UL, 1);
+            new(0x9100_0000_0000_0001UL, 0x9200_0000_0000_0001UL, 1);
 
         private static readonly StableDataId ReadOnlyFieldId =
-            new StableDataId(0x9100_0000_0000_0002UL, 0x9200_0000_0000_0002UL, 1);
+            new(0x9100_0000_0000_0002UL, 0x9200_0000_0000_0002UL, 1);
 
         private static readonly AtlasOperationId WriteOperationId =
-            new AtlasOperationId(0x9300_0000_0000_0001UL, 0x9400_0000_0000_0001UL, 1);
+            new(0x9300_0000_0000_0001UL, 0x9400_0000_0000_0001UL, 1);
 
         private static readonly AtlasOperationId ReadOperationId =
-            new AtlasOperationId(0x9300_0000_0000_0002UL, 0x9400_0000_0000_0002UL, 1);
+            new(0x9300_0000_0000_0002UL, 0x9400_0000_0000_0002UL, 1);
 
         private static readonly AtlasStageId StageId =
-            new AtlasStageId(0x9500_0000_0000_0001UL, 0x9600_0000_0000_0001UL, 1);
+            new(0x9500_0000_0000_0001UL, 0x9600_0000_0000_0001UL, 1);
 
         private static readonly AtlasPipelineId PipelineId =
-            new AtlasPipelineId(0x9700_0000_0000_0001UL, 0x9800_0000_0000_0001UL, 1);
+            new(0x9700_0000_0000_0001UL, 0x9800_0000_0000_0001UL, 1);
 
         [Test]
         public void Run_NullRequest_ReturnsRequestValidationFailure()
@@ -82,6 +82,7 @@ namespace Lokrain.Atlas.Execution.Tests
             Assert.That(result.WroteArtifactFile, Is.False);
             Assert.That(result.HasDebugMapImage, Is.False);
         }
+
 
         [Test]
         public void Run_ValidCompletedRequestWithDefaultExecutors_ReturnsCompletedResultWithArtifact()
@@ -232,6 +233,7 @@ namespace Lokrain.Atlas.Execution.Tests
                     AtlasOperationAccessMode.Write,
                     AtlasOperationAccessFlags.DiscardBeforeWrite |
                     AtlasOperationAccessFlags.RequiresExclusiveWrite,
+                    AtlasWriteCoverage.FullCapacity,
                     new FixedString64Bytes("writable.field")));
         }
 

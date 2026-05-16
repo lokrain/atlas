@@ -50,12 +50,12 @@ namespace Lokrain.Atlas.Fields
         /// <summary>
         /// The first valid field slot index.
         /// </summary>
-        public static readonly AtlasFieldSlot First = new AtlasFieldSlot((ushort)AtlasConstants.FirstFieldSlot);
+        public static readonly AtlasFieldSlot First = new((ushort)AtlasConstants.FirstFieldSlot);
 
         /// <summary>
         /// The last valid field slot index.
         /// </summary>
-        public static readonly AtlasFieldSlot Last = new AtlasFieldSlot((ushort)AtlasConstants.LastFieldSlot);
+        public static readonly AtlasFieldSlot Last = new((ushort)AtlasConstants.LastFieldSlot);
 
         private readonly ushort _value;
 

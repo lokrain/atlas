@@ -23,28 +23,31 @@ namespace Lokrain.Atlas.Executors.Tests
     public sealed class AtlasDefaultOperationExecutorRegistryTests
     {
         private static readonly StableDataId FirstFieldId =
-            new StableDataId(0x1100_0000_0000_0001UL, 0x1200_0000_0000_0001UL, 1);
+            new(0x1100_0000_0000_0001UL, 0x1200_0000_0000_0001UL, 1);
 
         private static readonly StableDataId SecondFieldId =
-            new StableDataId(0x1100_0000_0000_0002UL, 0x1200_0000_0000_0002UL, 1);
+            new(0x1100_0000_0000_0002UL, 0x1200_0000_0000_0002UL, 1);
 
         private static readonly AtlasOperationId ClearOperationId =
-            new AtlasOperationId(0x1300_0000_0000_0001UL, 0x1400_0000_0000_0001UL, 1);
+            new(0x1300_0000_0000_0001UL, 0x1400_0000_0000_0001UL, 1);
 
         private static readonly AtlasOperationId ReadOperationId =
-            new AtlasOperationId(0x1300_0000_0000_0002UL, 0x1400_0000_0000_0002UL, 1);
+            new(0x1300_0000_0000_0002UL, 0x1400_0000_0000_0002UL, 1);
 
         private static readonly AtlasOperationId PartialWriteOperationId =
-            new AtlasOperationId(0x1300_0000_0000_0003UL, 0x1400_0000_0000_0003UL, 1);
+            new(0x1300_0000_0000_0003UL, 0x1400_0000_0000_0003UL, 1);
+
+        private static readonly AtlasOperationId WorkspacePreparationFullLogicalOperationId =
+            new(0x1300_0000_0000_0004UL, 0x1400_0000_0000_0004UL, 1);
 
         private static readonly AtlasOperationId FullCanonicalOperationId =
-            new AtlasOperationId(0x1300_0000_0000_0004UL, 0x1400_0000_0000_0004UL, 1);
+            new(0x1300_0000_0000_0005UL, 0x1400_0000_0000_0005UL, 1);
 
         private static readonly AtlasStageId StageId =
-            new AtlasStageId(0x1500_0000_0000_0001UL, 0x1600_0000_0000_0001UL, 1);
+            new(0x1500_0000_0000_0001UL, 0x1600_0000_0000_0001UL, 1);
 
         private static readonly AtlasPipelineId PipelineId =
-            new AtlasPipelineId(0x1700_0000_0000_0001UL, 0x1800_0000_0000_0001UL, 1);
+            new(0x1700_0000_0000_0001UL, 0x1800_0000_0000_0001UL, 1);
 
         [Test]
         public void Create_NullPipeline_ThrowsArgumentNullException()
@@ -124,6 +127,18 @@ namespace Lokrain.Atlas.Executors.Tests
         }
 
         [Test]
+        public void Create_PipelineWithWorkspacePreparationFullLogicalWrite_DoesNotRegisterClearExecutor()
+        {
+            var operation = CreateWorkspacePreparationFullLogicalWriteOperation();
+            var pipeline = CreatePipeline(operation);
+
+            var registry = AtlasDefaultOperationExecutorRegistry.Create(pipeline);
+
+            Assert.That(registry.IsEmpty, Is.True);
+            Assert.That(registry.Contains(operation.OperationId), Is.False);
+        }
+
+        [Test]
         public void Create_PipelineWithFullWriteNonWorkspacePreparationOperation_DoesNotRegisterExecutor()
         {
             var operation = CreateFullWriteCanonicalOperation();
@@ -188,8 +203,12 @@ namespace Lokrain.Atlas.Executors.Tests
         [Test]
         public void CanCreateExecutor_ClearOperation_ReturnsTrue()
         {
+            var operation = CreateClearOperation();
+
+            AssertClearOperationContract(operation);
+
             Assert.That(
-                AtlasDefaultOperationExecutorRegistry.CanCreateExecutor(CreateClearOperation()),
+                AtlasDefaultOperationExecutorRegistry.CanCreateExecutor(operation),
                 Is.True);
         }
 
@@ -207,6 +226,25 @@ namespace Lokrain.Atlas.Executors.Tests
             Assert.That(
                 AtlasDefaultOperationExecutorRegistry.IsClearFieldsOperation(null),
                 Is.False);
+        }
+
+        private static void AssertClearOperationContract(
+            AtlasOperationDefinition operation)
+        {
+            Assert.That(operation.Role, Is.EqualTo(AtlasOperationRole.WorkspacePreparation));
+            Assert.That(operation.Count, Is.EqualTo(2));
+
+            for (var i = 0; i < operation.Count; i++)
+            {
+                var access = operation[i];
+
+                Assert.That(access.IsValid, Is.True);
+                Assert.That(access.Mode, Is.EqualTo(AtlasOperationAccessMode.Write));
+                Assert.That(access.WriteCoverage, Is.EqualTo(AtlasWriteCoverage.FullCapacity));
+                Assert.That(access.Flags.HasAny(AtlasOperationAccessFlags.DiscardBeforeWrite), Is.True);
+                Assert.That(access.Flags.HasAny(AtlasOperationAccessFlags.RequiresExclusiveWrite), Is.True);
+                Assert.That(access.Flags.HasAny(AtlasOperationAccessFlags.PreserveExistingContent), Is.False);
+            }
         }
 
         private static AtlasPipelineDefinition CreatePipeline(
@@ -241,7 +279,7 @@ namespace Lokrain.Atlas.Executors.Tests
                     AtlasOperationAccessMode.Write,
                     AtlasOperationAccessFlags.DiscardBeforeWrite |
                     AtlasOperationAccessFlags.RequiresExclusiveWrite,
-                    AtlasWriteCoverage.FullLogicalLength,
+                    AtlasWriteCoverage.FullCapacity,
                     new FixedString64Bytes("second.field")));
         }
 
@@ -271,6 +309,21 @@ namespace Lokrain.Atlas.Executors.Tests
                     AtlasOperationAccessFlags.DiscardBeforeWrite |
                     AtlasOperationAccessFlags.RequiresExclusiveWrite,
                     AtlasWriteCoverage.PartialLogicalLength,
+                    new FixedString64Bytes("first.field")));
+        }
+
+        private static AtlasOperationDefinition CreateWorkspacePreparationFullLogicalWriteOperation()
+        {
+            return AtlasOperationDefinition.Create(
+                WorkspacePreparationFullLogicalOperationId,
+                new FixedString64Bytes("default.executors.workspace.full.logical"),
+                AtlasOperationRole.WorkspacePreparation,
+                AtlasOperationAccess.Create(
+                    FirstFieldId,
+                    AtlasOperationAccessMode.Write,
+                    AtlasOperationAccessFlags.DiscardBeforeWrite |
+                    AtlasOperationAccessFlags.RequiresExclusiveWrite,
+                    AtlasWriteCoverage.FullLogicalLength,
                     new FixedString64Bytes("first.field")));
         }
 

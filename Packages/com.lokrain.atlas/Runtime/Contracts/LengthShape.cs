@@ -524,35 +524,18 @@ namespace Lokrain.Atlas.Contracts
         /// <returns>A string describing the shape kind and relevant shape arguments.</returns>
         public override string ToString()
         {
-            switch (Kind)
+            return Kind switch
             {
-                case LengthShapeKind.Scalar:
-                    return "Scalar";
-
-                case LengthShapeKind.Fixed:
-                    return $"Fixed({FixedLength})";
-
-                case LengthShapeKind.MatchFieldLength:
-                    return $"MatchFieldLength({SourceFieldId})";
-
-                case LengthShapeKind.QueryCount:
-                    return $"QueryCount({Name})";
-
-                case LengthShapeKind.ChunkCount:
-                    return $"ChunkCount({Name})";
-
-                case LengthShapeKind.CapacityFromField:
-                    return $"CapacityFromField({SourceFieldId}, x{CapacityMultiplierNumerator}/{CapacityMultiplierDenominator}, +{CapacityPadding})";
-
-                case LengthShapeKind.PrefixSumPayload:
-                    return $"PrefixSumPayload({SourceFieldId})";
-
-                case LengthShapeKind.External:
-                    return $"External({Name})";
-
-                default:
-                    return "None";
-            }
+                LengthShapeKind.Scalar => "Scalar",
+                LengthShapeKind.Fixed => $"Fixed({FixedLength})",
+                LengthShapeKind.MatchFieldLength => $"MatchFieldLength({SourceFieldId})",
+                LengthShapeKind.QueryCount => $"QueryCount({Name})",
+                LengthShapeKind.ChunkCount => $"ChunkCount({Name})",
+                LengthShapeKind.CapacityFromField => $"CapacityFromField({SourceFieldId}, x{CapacityMultiplierNumerator}/{CapacityMultiplierDenominator}, +{CapacityPadding})",
+                LengthShapeKind.PrefixSumPayload => $"PrefixSumPayload({SourceFieldId})",
+                LengthShapeKind.External => $"External({Name})",
+                _ => "None",
+            };
         }
 
         /// <summary>
