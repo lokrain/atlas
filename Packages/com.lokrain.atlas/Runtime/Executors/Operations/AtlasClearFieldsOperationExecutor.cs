@@ -1,4 +1,4 @@
-// Packages/com.lokrain.atlas/Runtime/Executors/AtlasClearFieldsOperationExecutor.cs
+// Packages/com.lokrain.atlas/Runtime/Executors/Operations/AtlasClearFieldsOperationExecutor.cs
 //
 // Package: com.lokrain.atlas
 // Namespace: Lokrain.Atlas.Executors
@@ -15,13 +15,15 @@
 // - The executor clears only present content-memory bindings.
 // - The executor rejects content-reading bindings.
 // - The executor rejects shape-only bindings for clearing.
-// - The executor schedules byte-clear jobs over workspace-owned NativeArray<byte> buffers.
+// - The executor schedules byte-clear jobs over workspace-owned NativeSlice<byte> field ranges.
 // - The executor does not allocate workspace memory.
 // - The executor does not dispose workspace memory.
+// - The executor does not receive or expose Contracts to jobs.
 // - The executor does not write artifacts.
 // - The executor does not render debug output.
 
 using System;
+using System.Globalization;
 using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Execution;
 using Lokrain.Atlas.Operations;
@@ -45,7 +47,7 @@ namespace Lokrain.Atlas.Executors
     /// <para>
     /// The operation definition should declare only write bindings with
     /// <see cref="AtlasOperationAccessFlags.DiscardBeforeWrite"/>. Previous field contents are
-    /// semantically discarded and the executor clears the full byte capacity of each target block.
+    /// semantically discarded and the executor clears the full byte capacity of each target field.
     /// </para>
     ///
     /// <para>
@@ -151,7 +153,7 @@ namespace Lokrain.Atlas.Executors
                 dependencies = new ClearByteCapacityJob
                 {
                     Bytes = bytes
-                }.Schedule(
+                }.ScheduleParallel(
                     bytes.Length,
                     _innerloopBatchCount,
                     dependencies);
@@ -162,7 +164,10 @@ namespace Lokrain.Atlas.Executors
             if (scheduledCount == 0)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' did not schedule any clear work. A clear operation must contain at least one present content-memory write binding.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' did not schedule any clear work. A clear operation must contain at least one present content-memory write binding.",
+                        operation.DebugName));
             }
 
             return dependencies;
@@ -187,32 +192,50 @@ namespace Lokrain.Atlas.Executors
             if (operation.OperationId != OperationId)
             {
                 throw new InvalidOperationException(
-                    $"Executor '{DebugName}' handles operation id '{OperationId}', but compiled operation '{operation.DebugName}' has id '{operation.OperationId}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Executor '{0}' handles operation id '{1}', but compiled operation '{2}' has id '{3}'.",
+                        DebugName,
+                        OperationId,
+                        operation.DebugName,
+                        operation.OperationId));
             }
 
             if (operation.Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' has no bindings.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' has no bindings.",
+                        operation.DebugName));
             }
 
             if (!operation.RequiresContentMemory)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' has no present content-memory bindings.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' has no present content-memory bindings.",
+                        operation.DebugName));
             }
 
             if (operation.ReadsContent ||
                 operation.DeclaresContentRead)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' declares content reads. Clear operations must only discard-write target fields.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' declares content reads. Clear operations must only discard-write target fields.",
+                        operation.DebugName));
             }
 
             if (!operation.DeclaresContentWrite)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' declares no content writes.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' declares no content writes.",
+                        operation.DebugName));
             }
 
             context.Workspace.ThrowIfDisposed();
@@ -232,45 +255,78 @@ namespace Lokrain.Atlas.Executors
             if (binding.IsShapeOnly)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' is shape-only and cannot be cleared.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' is shape-only and cannot be cleared.",
+                        operation.DebugName,
+                        binding.BindingName));
             }
 
             if (!binding.RequiresContentMemory)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' does not require content memory and cannot be cleared.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' does not require content memory and cannot be cleared.",
+                        operation.DebugName,
+                        binding.BindingName));
             }
 
             if (binding.ReadsContent ||
                 binding.DeclaresContentRead)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' reads content. Clear bindings must not read previous field contents.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' reads content. Clear bindings must not read previous field contents.",
+                        operation.DebugName,
+                        binding.BindingName));
             }
 
             if (!binding.WritesContent ||
                 !binding.DeclaresContentWrite)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' does not write content. Clear bindings must be writable.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' does not write content. Clear bindings must be writable.",
+                        operation.DebugName,
+                        binding.BindingName));
             }
 
             if (binding.Mode != AtlasOperationAccessMode.Write)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' uses access mode '{binding.Mode}'. Clear bindings must use '{AtlasOperationAccessMode.Write}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' uses access mode '{2}'. Clear bindings must use '{3}'.",
+                        operation.DebugName,
+                        binding.BindingName,
+                        binding.Mode,
+                        AtlasOperationAccessMode.Write));
             }
 
             if (!binding.Flags.HasAll(AtlasOperationAccessFlags.DiscardBeforeWrite))
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' does not declare '{AtlasOperationAccessFlags.DiscardBeforeWrite}'. Clear operations must explicitly discard previous contents.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' does not declare '{2}'. Clear operations must explicitly discard previous contents.",
+                        operation.DebugName,
+                        binding.BindingName,
+                        AtlasOperationAccessFlags.DiscardBeforeWrite));
             }
 
             if (binding.WriteCoverage != AtlasWriteCoverage.FullCapacity)
             {
                 throw new InvalidOperationException(
-                    $"Clear operation '{operation.DebugName}' binding '{binding.BindingName}' declares write coverage '{binding.WriteCoverage}'. Clear operations must declare '{AtlasWriteCoverage.FullCapacity}' because the executor clears full byte capacity.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Clear operation '{0}' binding '{1}' declares write coverage '{2}'. Clear operations must declare '{3}' because the executor clears full byte capacity.",
+                        operation.DebugName,
+                        binding.BindingName,
+                        binding.WriteCoverage,
+                        AtlasWriteCoverage.FullCapacity));
             }
         }
 
@@ -300,8 +356,9 @@ namespace Lokrain.Atlas.Executors
         }
 
         [BurstCompile]
-        private struct ClearByteCapacityJob : IJobParallelFor
+        private struct ClearByteCapacityJob : IJobFor
         {
+            [WriteOnly]
             public NativeSlice<byte> Bytes;
 
             public void Execute(int index)

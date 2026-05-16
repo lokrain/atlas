@@ -19,9 +19,12 @@
 //   dedicated physical binding models and must not be faked as byte ranges.
 // - Entries are emitted in canonical field-slot order.
 // - Storage blocks are emitted in physical block-index order.
-// - The first implementation emits one packed byte block for all supported fixed contiguous fields.
+// - The current implementation emits one packed byte block for all supported fixed contiguous fields.
 // - Zero-length NativeArray fields receive addresses but do not advance block used length.
 // - Slot zero, StableDataId zero, block index zero, byte offset zero, and type-hash zero are valid.
+// - Capacity may exceed logical length.
+// - Workspace layout decides physical offsets and block capacity.
+// - Workspace owns allocation from the layout.
 
 using System;
 using System.Globalization;
@@ -43,9 +46,9 @@ namespace Lokrain.Atlas.Workspaces
     /// </para>
     ///
     /// <para>
-    /// This compiler intentionally does not allocate memory. <see cref="AtlasWorkspace"/> must
-    /// allocate from the resulting <see cref="AtlasWorkspaceLayout"/>. Execution-plan compilation
-    /// should bind scheduler requirements to the emitted <see cref="AtlasFieldAddress"/> values.
+    /// This compiler intentionally does not allocate memory. <c>AtlasWorkspace</c> allocates from
+    /// the resulting <see cref="AtlasWorkspaceLayout"/>. Execution-plan compilation should bind
+    /// scheduler requirements to the emitted <see cref="AtlasFieldAddress"/> values.
     /// </para>
     /// </remarks>
     public static class AtlasWorkspaceLayoutCompiler
@@ -102,7 +105,8 @@ namespace Lokrain.Atlas.Workspaces
             for (var i = 0; i < shapes.Count; i++)
             {
                 var shape = shapes[i];
-                var alignedByteOffset = AlignUpChecked(
+
+                var alignedByteOffset = AtlasStorageBlockPlan.AlignUpChecked(
                     currentByteOffset,
                     shape.StorageFormat.ElementAlignment);
 
@@ -349,7 +353,8 @@ namespace Lokrain.Atlas.Workspaces
             for (var i = 0; i < shapes.Count; i++)
             {
                 var shape = shapes[i];
-                var alignedByteOffset = AlignUpChecked(
+
+                var alignedByteOffset = AtlasStorageBlockPlan.AlignUpChecked(
                     currentByteOffset,
                     shape.StorageFormat.ElementAlignment);
 
@@ -404,15 +409,6 @@ namespace Lokrain.Atlas.Workspaces
         {
             return storageKind == StorageKind.Scalar ||
                    storageKind == StorageKind.NativeArray;
-        }
-
-        private static long AlignUpChecked(
-            long value,
-            int alignment)
-        {
-            return AtlasStorageBlockPlan.AlignUpChecked(
-                value,
-                alignment);
         }
     }
 }

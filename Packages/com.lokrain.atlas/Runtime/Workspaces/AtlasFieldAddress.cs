@@ -20,6 +20,9 @@
 // - Bound addresses are created only through factory methods and are valid after construction.
 // - Missing/unbound state is represented by an explicit binding-state byte, not by sentinel ids.
 // - Slot zero, block index zero, byte offset zero, and type-hash zero are valid values.
+// - Capacity may be greater than logical length.
+// - Scalar storage requires length 1 and capacity 1.
+// - NativeArray storage may have capacity greater than logical length.
 // - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
@@ -187,7 +190,7 @@ namespace Lokrain.Atlas.Workspaces
         public long LogicalEndByteOffsetExclusive
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => ByteOffset + ByteLength;
+            get => checked(ByteOffset + ByteLength);
         }
 
         /// <summary>
@@ -196,7 +199,7 @@ namespace Lokrain.Atlas.Workspaces
         public long CapacityEndByteOffsetExclusive
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => ByteOffset + ByteCapacity;
+            get => checked(ByteOffset + ByteCapacity);
         }
 
         /// <summary>
@@ -351,7 +354,7 @@ namespace Lokrain.Atlas.Workspaces
                 return false;
             }
 
-            blockByteOffset = ByteOffset + checked((long)elementIndex * StorageFormat.ElementSize);
+            blockByteOffset = checked(ByteOffset + ((long)elementIndex * StorageFormat.ElementSize));
             return true;
         }
 
@@ -368,7 +371,7 @@ namespace Lokrain.Atlas.Workspaces
                 return false;
             }
 
-            blockByteOffset = ByteOffset + checked((long)elementIndex * StorageFormat.ElementSize);
+            blockByteOffset = checked(ByteOffset + ((long)elementIndex * StorageFormat.ElementSize));
             return true;
         }
 
@@ -531,10 +534,16 @@ namespace Lokrain.Atlas.Workspaces
         }
 
         /// <summary>
-        /// Compares this address with another address using physical block order first.
+        /// Compares this address with another address using bound state and physical block order.
         /// </summary>
         public int CompareTo(AtlasFieldAddress other)
         {
+            var boundComparison = _bindingState.CompareTo(other._bindingState);
+            if (boundComparison != 0)
+            {
+                return boundComparison;
+            }
+
             var blockComparison = BlockIndex.CompareTo(other.BlockIndex);
             if (blockComparison != 0)
             {
@@ -547,7 +556,7 @@ namespace Lokrain.Atlas.Workspaces
                 return offsetComparison;
             }
 
-            var slotComparison = Slot.CompareTo(other.Slot);
+            var slotComparison = Slot.Index.CompareTo(other.Slot.Index);
             if (slotComparison != 0)
             {
                 return slotComparison;
@@ -736,8 +745,9 @@ namespace Lokrain.Atlas.Workspaces
                     name);
             }
 
-
-            if (!IsAligned(byteOffset, storageFormat.ElementAlignment))
+            if (!IsAligned(
+                    byteOffset,
+                    storageFormat.ElementAlignment))
             {
                 throw new ArgumentException(
                     string.Format(
@@ -748,9 +758,15 @@ namespace Lokrain.Atlas.Workspaces
                     name);
             }
 
-            _ = ComputeByteCount(storageFormat, length);
-            _ = ComputeByteCount(storageFormat, capacity);
-            _ = checked(byteOffset + ComputeByteCount(storageFormat, capacity));
+            var byteCapacity = ComputeByteCount(
+                storageFormat,
+                capacity);
+
+            _ = ComputeByteCount(
+                storageFormat,
+                length);
+
+            _ = checked(byteOffset + byteCapacity);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

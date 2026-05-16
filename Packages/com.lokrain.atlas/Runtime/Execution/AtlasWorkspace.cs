@@ -41,25 +41,6 @@ namespace Lokrain.Atlas.Execution
     /// <summary>
     /// Workspace-owned native memory allocated from a compiled Atlas workspace layout.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="AtlasWorkspace"/> is the concrete memory owner for Atlas runtime data. It
-    /// allocates physical byte storage blocks from <see cref="AtlasWorkspaceLayout"/> and exposes
-    /// field views by resolving <see cref="AtlasFieldAddress"/> values.
-    /// </para>
-    ///
-    /// <para>
-    /// The workspace does not own semantic compilation. It must not allocate directly from
-    /// <see cref="AtlasResolvedShapeSet"/> as its primary model. Shape sets are accepted only by
-    /// migration factory methods that immediately compile a workspace layout first.
-    /// </para>
-    ///
-    /// <para>
-    /// Because multiple fields may share one physical storage block, canonical field access returns
-    /// <see cref="NativeSlice{T}"/> views. Returning <see cref="NativeArray{T}"/> for an individual
-    /// field is not generally correct once fields are packed into shared byte blocks.
-    /// </para>
-    /// </remarks>
     public sealed class AtlasWorkspace :
         IDisposable,
         IReadOnlyList<AtlasWorkspaceLayoutEntry>
@@ -150,19 +131,11 @@ namespace Lokrain.Atlas.Execution
         /// <summary>
         /// Compatibility alias for <see cref="TotalFieldByteLength"/>.
         /// </summary>
-        /// <remarks>
-        /// Kept only to reduce migration noise at call sites. New code should use
-        /// <see cref="TotalFieldByteLength"/> or <see cref="TotalBlockUsedByteLength"/> explicitly.
-        /// </remarks>
         public long TotalByteLength => TotalFieldByteLength;
 
         /// <summary>
         /// Compatibility alias for <see cref="TotalFieldByteCapacity"/>.
         /// </summary>
-        /// <remarks>
-        /// Kept only to reduce migration noise at call sites. New code should use
-        /// <see cref="TotalFieldByteCapacity"/> or <see cref="TotalBlockByteCapacity"/> explicitly.
-        /// </remarks>
         public long TotalByteCapacity => TotalFieldByteCapacity;
 
         /// <summary>
@@ -220,10 +193,8 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(shapes));
             }
 
-            var layout = AtlasWorkspaceLayoutCompiler.Compile(shapes);
-
             return Create(
-                layout,
+                AtlasWorkspaceLayoutCompiler.Compile(shapes),
                 allocator,
                 options);
         }

@@ -4,10 +4,10 @@
 // Namespace: Lokrain.Atlas.Execution
 //
 // Purpose
-// - Validate whether resolved Atlas field shapes can be compiled into a workspace layout.
+// - Provide a migration facade from compiled semantic facts to layout-owned workspace memory.
 // - Compile Contract-table or compiled-plan shapes into AtlasWorkspaceLayout.
 // - Allocate workspace-owned native memory from AtlasWorkspaceLayout.
-// - Keep allocation policy separate from operation scheduling, artifacts, and debug rendering.
+// - Keep allocation policy separate from operation scheduling, artifacts, jobs, and debug rendering.
 //
 // Design notes
 // - The catalog owns meaning.
@@ -16,11 +16,14 @@
 // - Execution owns JobHandle flow.
 // - Jobs own only numeric computation.
 // - Artifacts own durable output.
-// - This type is a migration facade over AtlasWorkspaceLayoutCompiler.
-// - It does not schedule operations.
-// - It does not expose FieldId lookup to jobs.
-// - It does not write artifacts.
-// - It does not render debug output.
+// - This type is not the canonical memory product.
+// - The canonical memory product is AtlasWorkspaceLayout.
+// - This type does not schedule operations.
+// - This type does not expose FieldId lookup to jobs.
+// - This type does not write artifacts.
+// - This type does not render debug output.
+// - New code should prefer the explicit path:
+//   ContractTable / CompiledPlan -> AtlasShapeResolver -> AtlasWorkspaceLayoutCompiler -> AtlasWorkspace.
 
 using System;
 using Lokrain.Atlas.Compilation;
@@ -31,18 +34,19 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Execution
 {
     /// <summary>
-    /// Creates workspace-owned native memory from validated Atlas compilation metadata.
+    /// Migration facade for creating layout-owned workspace memory from Atlas compilation metadata.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasMemoryResolver"/> is retained as a source-compatible migration facade.
-    /// The canonical memory product is now <see cref="AtlasWorkspaceLayout"/>, produced by
-    /// <see cref="AtlasWorkspaceLayoutCompiler"/> and consumed by <see cref="AtlasWorkspace"/>.
+    /// <see cref="AtlasMemoryResolver"/> is retained to reduce call-site churn while the package
+    /// moves from direct shape-set allocation to layout-owned allocation.
     /// </para>
     ///
     /// <para>
-    /// New code should prefer the explicit path:
-    /// resolve shapes, compile workspace layout, then allocate workspace from that layout.
+    /// The canonical pipeline is:
+    /// <c>AtlasShapeResolver</c> resolves semantic shape facts,
+    /// <c>AtlasWorkspaceLayoutCompiler</c> compiles memory layout facts, and
+    /// <c>AtlasWorkspace</c> allocates concrete native memory from that layout.
     /// </para>
     /// </remarks>
     public static class AtlasMemoryResolver
@@ -67,10 +71,8 @@ namespace Lokrain.Atlas.Execution
                     nameof(plan));
             }
 
-            var shapes = AtlasShapeResolver.Resolve(plan);
-
             return CreateWorkspace(
-                shapes,
+                AtlasShapeResolver.Resolve(plan),
                 allocator,
                 options);
         }
@@ -84,35 +86,52 @@ namespace Lokrain.Atlas.Execution
             NativeArrayOptions options = NativeArrayOptions.ClearMemory)
         {
             ValidateAllocatorOrThrow(allocator);
-            ValidateAllocatableOrThrow(shapes);
-
-            var layout = AtlasWorkspaceLayoutCompiler.Compile(shapes);
 
             return AtlasWorkspace.Create(
-                layout,
+                CompileLayout(shapes),
                 allocator,
                 options);
         }
 
         /// <summary>
-        /// Resolves field shapes from a Contract table, compiles a layout, and allocates a workspace.
+        /// Resolves field shapes from a Contract table, compiles a workspace layout, and allocates a workspace.
         /// </summary>
         public static AtlasWorkspace CreateWorkspace(
             AtlasContractTable contracts,
             Allocator allocator,
             NativeArrayOptions options = NativeArrayOptions.ClearMemory)
         {
-            if (contracts == null)
-            {
-                throw new ArgumentNullException(nameof(contracts));
-            }
+            ValidateAllocatorOrThrow(allocator);
 
-            var shapes = AtlasShapeResolver.Resolve(contracts);
-
-            return CreateWorkspace(
-                shapes,
+            return AtlasWorkspace.Create(
+                CompileLayout(contracts),
                 allocator,
                 options);
+        }
+
+        /// <summary>
+        /// Creates a non-owning execution context from a compiled plan and a newly allocated workspace.
+        /// </summary>
+        /// <remarks>
+        /// The returned context does not own the workspace lifetime. The caller must dispose
+        /// <see cref="AtlasExecutionContext.Workspace"/>.
+        /// </remarks>
+        public static AtlasExecutionContext CreateExecutionContext(
+            AtlasCompiledPlan plan,
+            Allocator allocator,
+            NativeArrayOptions options = NativeArrayOptions.ClearMemory)
+        {
+            if (plan == null)
+            {
+                throw new ArgumentNullException(nameof(plan));
+            }
+
+            return AtlasExecutionContext.Create(
+                plan,
+                CreateWorkspace(
+                    plan,
+                    allocator,
+                    options));
         }
 
         /// <summary>
@@ -125,7 +144,15 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(plan));
             }
 
-            return CompileLayout(AtlasShapeResolver.Resolve(plan));
+            if (plan.Contracts == null)
+            {
+                throw new ArgumentException(
+                    "Compiled plan does not reference a Contract table.",
+                    nameof(plan));
+            }
+
+            return CompileLayout(
+                AtlasShapeResolver.Resolve(plan));
         }
 
         /// <summary>
@@ -148,7 +175,8 @@ namespace Lokrain.Atlas.Execution
                 throw new ArgumentNullException(nameof(contracts));
             }
 
-            return CompileLayout(AtlasShapeResolver.Resolve(contracts));
+            return CompileLayout(
+                AtlasShapeResolver.Resolve(contracts));
         }
 
         /// <summary>
@@ -160,11 +188,112 @@ namespace Lokrain.Atlas.Execution
         }
 
         /// <summary>
+        /// Returns whether shapes resolved from the supplied Contract table can be compiled by the current workspace layout model.
+        /// </summary>
+        public static bool CanAllocate(AtlasContractTable contracts)
+        {
+            if (contracts == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return CanAllocate(
+                    AtlasShapeResolver.Resolve(contracts));
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns whether shapes resolved from the supplied compiled plan can be compiled by the current workspace layout model.
+        /// </summary>
+        public static bool CanAllocate(AtlasCompiledPlan plan)
+        {
+            if (plan == null || plan.Contracts == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return CanAllocate(
+                    AtlasShapeResolver.Resolve(plan));
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Validates that a resolved shape set can be compiled by the current workspace layout model.
         /// </summary>
         public static void ValidateAllocatableOrThrow(AtlasResolvedShapeSet shapes)
         {
             AtlasWorkspaceLayoutCompiler.ValidateCompilableOrThrow(shapes);
+        }
+
+        /// <summary>
+        /// Validates that shapes resolved from a Contract table can be compiled by the current workspace layout model.
+        /// </summary>
+        public static void ValidateAllocatableOrThrow(AtlasContractTable contracts)
+        {
+            if (contracts == null)
+            {
+                throw new ArgumentNullException(nameof(contracts));
+            }
+
+            ValidateAllocatableOrThrow(
+                AtlasShapeResolver.Resolve(contracts));
+        }
+
+        /// <summary>
+        /// Validates that shapes resolved from a compiled plan can be compiled by the current workspace layout model.
+        /// </summary>
+        public static void ValidateAllocatableOrThrow(AtlasCompiledPlan plan)
+        {
+            if (plan == null)
+            {
+                throw new ArgumentNullException(nameof(plan));
+            }
+
+            if (plan.Contracts == null)
+            {
+                throw new ArgumentException(
+                    "Compiled plan does not reference a Contract table.",
+                    nameof(plan));
+            }
+
+            ValidateAllocatableOrThrow(
+                AtlasShapeResolver.Resolve(plan));
         }
 
         private static void ValidateAllocatorOrThrow(Allocator allocator)

@@ -16,10 +16,11 @@
 // - Jobs should receive those typed views or numeric addresses, not this managed context.
 // - Shape-only bindings should use layout/shape metadata access, not memory access.
 // - Missing optional bindings are represented explicitly and must not be treated as default slots.
-// - This context no longer exposes AtlasFieldMemoryBlock because fields are packed into workspace
+// - This context does not expose AtlasFieldMemoryBlock because fields are packed into workspace
 //   storage blocks and addressed by AtlasFieldAddress.
 
 using System;
+using System.Globalization;
 using Lokrain.Atlas.Compilation;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
@@ -37,7 +38,7 @@ namespace Lokrain.Atlas.Execution
     /// <see cref="AtlasExecutionContext"/> is the managed executor-facing boundary after
     /// compilation and workspace allocation. It validates that the supplied
     /// <see cref="AtlasCompiledPlan"/> and <see cref="AtlasWorkspace"/> agree on field identity,
-    /// storage format, shape domain, and length-shape metadata.
+    /// storage format, shape domain, and declared length-shape metadata.
     /// </para>
     ///
     /// <para>
@@ -110,12 +111,12 @@ namespace Lokrain.Atlas.Execution
         public int FieldCount => Workspace.Count;
 
         /// <summary>
-        /// Gets the total workspace logical byte length.
+        /// Gets the total workspace logical field byte length.
         /// </summary>
         public long TotalByteLength => Workspace.TotalByteLength;
 
         /// <summary>
-        /// Gets the total workspace byte capacity.
+        /// Gets the total workspace field byte capacity.
         /// </summary>
         public long TotalByteCapacity => Workspace.TotalByteCapacity;
 
@@ -218,7 +219,9 @@ namespace Lokrain.Atlas.Execution
                 return false;
             }
 
-            if (!Workspace.TryGetEntry(binding.Contract.Slot, out entry))
+            if (!Workspace.TryGetEntry(
+                    binding.Contract.Slot,
+                    out entry))
             {
                 entry = default;
                 return false;
@@ -237,6 +240,21 @@ namespace Lokrain.Atlas.Execution
         public AtlasFieldAddress GetRequiredAddress(AtlasCompiledBinding binding)
         {
             return GetRequiredEntry(binding).Address;
+        }
+
+        /// <summary>
+        /// Gets the physical field address for a compiled operation binding by binding index.
+        /// </summary>
+        public AtlasFieldAddress GetRequiredAddress(
+            AtlasCompiledOperation operation,
+            int bindingIndex)
+        {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            return GetRequiredAddress(operation[bindingIndex]);
         }
 
         /// <summary>
@@ -339,6 +357,21 @@ namespace Lokrain.Atlas.Execution
             var entry = GetRequiredEntry(binding);
 
             return Workspace.GetFieldByteLengthSlice(entry.Slot);
+        }
+
+        /// <summary>
+        /// Gets the logical byte-length slice for a compiled operation binding by binding index.
+        /// </summary>
+        public NativeSlice<byte> GetFieldByteLengthSlice(
+            AtlasCompiledOperation operation,
+            int bindingIndex)
+        {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            return GetFieldByteLengthSlice(operation[bindingIndex]);
         }
 
         /// <summary>
@@ -480,8 +513,15 @@ namespace Lokrain.Atlas.Execution
         /// </summary>
         public override string ToString()
         {
-            return
-                $"AtlasExecutionContext(Name={GetDiagnosticName()}, Stages={StageCount}, Operations={OperationCount}, Bindings={BindingCount}, Fields={FieldCount}, ByteCapacity={TotalByteCapacity})";
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "AtlasExecutionContext(Name={0}, Stages={1}, Operations={2}, Bindings={3}, Fields={4}, ByteCapacity={5})",
+                GetDiagnosticName(),
+                StageCount,
+                OperationCount,
+                BindingCount,
+                FieldCount,
+                TotalByteCapacity);
         }
 
         private static void ValidateCompatibleOrThrow(
@@ -511,7 +551,12 @@ namespace Lokrain.Atlas.Execution
             if (plan.Contracts.Count != workspace.Count)
             {
                 throw new ArgumentException(
-                    $"Compiled plan Contract table contains '{plan.Contracts.Count}' fields, but workspace layout contains '{workspace.Count}' entries.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Compiled plan Contract table contains {0} fields, but workspace layout contains {1} entries.",
+                        plan.Contracts.Count,
+                        workspace.Count),
+                    nameof(workspace));
             }
 
             for (var i = 0; i < plan.Contracts.Count; i++)
@@ -530,7 +575,10 @@ namespace Lokrain.Atlas.Execution
             if (!binding.IsPresent)
             {
                 throw new InvalidOperationException(
-                    $"Atlas compiled binding '{binding.BindingName}' is missing and cannot be resolved against workspace memory or shape metadata.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas compiled binding '{0}' is missing and cannot be resolved against workspace memory or shape metadata.",
+                        binding.BindingName));
             }
         }
 
@@ -541,7 +589,10 @@ namespace Lokrain.Atlas.Execution
             if (!binding.RequiresContentMemory)
             {
                 throw new InvalidOperationException(
-                    $"Atlas compiled binding '{binding.BindingName}' is shape-only and must not request workspace content memory.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas compiled binding '{0}' is shape-only and must not request workspace content memory.",
+                        binding.BindingName));
             }
         }
 
@@ -587,43 +638,77 @@ namespace Lokrain.Atlas.Execution
             if (entry.Slot.Index != index)
             {
                 throw new ArgumentException(
-                    $"Workspace layout entry at index '{index}' has slot '{entry.Slot}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} has slot {1}.",
+                        index,
+                        entry.Slot));
             }
 
             if (entry.StableId != contract.StableId)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry field id '{entry.StableId}' differs from Contract field id '{contract.StableId}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry field id '{2}' differs from Contract field id '{3}'.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName(),
+                        entry.StableId,
+                        contract.StableId));
             }
 
             if (entry.Slot != contract.Slot)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry slot '{entry.Slot}' differs from Contract slot '{contract.Slot}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry slot '{2}' differs from Contract slot '{3}'.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName(),
+                        entry.Slot,
+                        contract.Slot));
             }
 
             if (entry.Role != contract.Role)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry role '{entry.Role}' differs from Contract role '{contract.Role}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry role '{2}' differs from Contract role '{3}'.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName(),
+                        entry.Role,
+                        contract.Role));
             }
 
             if (entry.StorageFormat != contract.StorageFormat)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry storage format differs from Contract storage format.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry storage format differs from Contract storage format.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName()));
             }
 
             if (entry.ShapeDomain != contract.ShapeDomain)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry shape domain differs from Contract shape domain.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry shape domain differs from Contract shape domain.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName()));
             }
 
             if (entry.DeclaredShape != contract.LengthShape)
             {
                 throw new InvalidOperationException(
-                    $"Workspace layout entry '{entry.GetDiagnosticName()}' does not match Contract '{contract.GetDiagnosticName()}'. Entry declared shape differs from Contract length shape.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry '{0}' does not match Contract '{1}'. Entry declared shape differs from Contract length shape.",
+                        entry.GetDiagnosticName(),
+                        contract.GetDiagnosticName()));
             }
         }
     }

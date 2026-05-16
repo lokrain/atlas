@@ -8,7 +8,7 @@
 // - Own a managed copy of serialized field payload bytes.
 // - Preserve artifact header and field table metadata.
 // - Provide durable field-payload lookup by field index, slot, or stable id.
-// - Serialize logical content by default while preserving capacity metadata.
+// - Capture completed workspace data through AtlasWorkspaceLayout entries and workspace slices.
 //
 // Design notes
 // - This is durable output data.
@@ -24,15 +24,20 @@
 // - Header.TotalByteCapacity is allocation capacity metadata.
 // - PayloadByteLength is the actual serialized artifact payload byte count.
 // - Artifact capture writes logical field bytes by default, not capacity slack.
+// - Capacity snapshots are explicit diagnostic/durable snapshots and must not be confused with
+//   canonical logical artifact capture.
 
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using Lokrain.Atlas.Compilation;
+using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Execution;
 using Lokrain.Atlas.Fields;
+using Lokrain.Atlas.Workspaces;
+using Unity.Collections;
 
 namespace Lokrain.Atlas.Artifacts
 {
@@ -192,8 +197,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Captures a managed artifact snapshot from a completed execution context.
         /// </summary>
-        public static AtlasArtifact Capture(
-            AtlasExecutionContext context)
+        public static AtlasArtifact Capture(AtlasExecutionContext context)
         {
             if (context == null)
             {
@@ -246,7 +250,7 @@ namespace Lokrain.Atlas.Artifacts
                 plan,
                 workspace);
 
-            var payloadLength = checked((int)workspace.TotalByteLength);
+            var payloadLength = checked((int)workspace.TotalFieldByteLength);
             var payload = new byte[payloadLength];
             var fields = new AtlasArtifactField[workspace.Count];
 
@@ -329,7 +333,7 @@ namespace Lokrain.Atlas.Artifacts
                 plan,
                 workspace);
 
-            var payloadLength = checked((int)workspace.TotalByteCapacity);
+            var payloadLength = checked((int)workspace.TotalFieldByteCapacity);
             var payload = new byte[payloadLength];
             var fields = new AtlasArtifactField[workspace.Count];
 
@@ -459,8 +463,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Gets a required artifact field by field-table index.
         /// </summary>
-        public AtlasArtifactField GetRequiredField(
-            int index)
+        public AtlasArtifactField GetRequiredField(int index)
         {
             if (TryGetField(index, out var field))
             {
@@ -470,14 +473,16 @@ namespace Lokrain.Atlas.Artifacts
             throw new ArgumentOutOfRangeException(
                 nameof(index),
                 index,
-                $"Artifact field index must be between 0 and {_fields.Length - 1}.");
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Artifact field index must be between 0 and {0}.",
+                    _fields.Length - 1));
         }
 
         /// <summary>
         /// Gets a required artifact field by Contract-table slot.
         /// </summary>
-        public AtlasArtifactField GetRequiredField(
-            AtlasFieldSlot slot)
+        public AtlasArtifactField GetRequiredField(AtlasFieldSlot slot)
         {
             if (TryGetField(slot, out var field))
             {
@@ -485,15 +490,17 @@ namespace Lokrain.Atlas.Artifacts
             }
 
             throw new ArgumentException(
-                $"Atlas artifact does not contain field slot '{slot}'.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas artifact does not contain field slot '{0}'.",
+                    slot),
                 nameof(slot));
         }
 
         /// <summary>
         /// Gets a required artifact field by stable field id.
         /// </summary>
-        public AtlasArtifactField GetRequiredField(
-            StableDataId stableId)
+        public AtlasArtifactField GetRequiredField(StableDataId stableId)
         {
             if (TryGetField(stableId, out var field))
             {
@@ -501,7 +508,10 @@ namespace Lokrain.Atlas.Artifacts
             }
 
             throw new ArgumentException(
-                $"Atlas artifact does not contain stable field id '{stableId}'.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas artifact does not contain stable field id '{0}'.",
+                    stableId),
                 nameof(stableId));
         }
 
@@ -516,8 +526,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        public byte[] GetFieldPayloadCopy(
-            int fieldIndex)
+        public byte[] GetFieldPayloadCopy(int fieldIndex)
         {
             return GetFieldPayloadCopy(
                 GetRequiredField(fieldIndex));
@@ -526,8 +535,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        public byte[] GetFieldPayloadCopy(
-            AtlasFieldSlot slot)
+        public byte[] GetFieldPayloadCopy(AtlasFieldSlot slot)
         {
             return GetFieldPayloadCopy(
                 GetRequiredField(slot));
@@ -536,8 +544,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        public byte[] GetFieldPayloadCopy(
-            StableDataId stableId)
+        public byte[] GetFieldPayloadCopy(StableDataId stableId)
         {
             return GetFieldPayloadCopy(
                 GetRequiredField(stableId));
@@ -546,10 +553,10 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates a managed copy of one field's serialized payload bytes.
         /// </summary>
-        public byte[] GetFieldPayloadCopy(
-            AtlasArtifactField field)
+        public byte[] GetFieldPayloadCopy(AtlasArtifactField field)
         {
             field.ValidateOrThrow(nameof(field));
+
             ValidateFieldRangeInsidePayloadOrThrow(
                 field,
                 _payload.Length);
@@ -575,10 +582,10 @@ namespace Lokrain.Atlas.Artifacts
         /// logical artifacts satisfy this exactly; capacity snapshots also satisfy it because their
         /// payload includes the logical prefix.
         /// </remarks>
-        public byte[] GetFieldLogicalPayloadCopy(
-            AtlasArtifactField field)
+        public byte[] GetFieldLogicalPayloadCopy(AtlasArtifactField field)
         {
             field.ValidateOrThrow(nameof(field));
+
             ValidateFieldRangeInsidePayloadOrThrow(
                 field,
                 _payload.Length);
@@ -619,7 +626,11 @@ namespace Lokrain.Atlas.Artifacts
             if (destination.Length - destinationIndex < _payload.Length)
             {
                 throw new ArgumentException(
-                    $"Destination has '{destination.Length - destinationIndex}' available bytes, but artifact payload requires '{_payload.Length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Destination has {0} available bytes, but artifact payload requires {1}.",
+                        destination.Length - destinationIndex,
+                        _payload.Length),
                     nameof(destination));
             }
 
@@ -640,6 +651,7 @@ namespace Lokrain.Atlas.Artifacts
             int destinationIndex = 0)
         {
             field.ValidateOrThrow(nameof(field));
+
             ValidateFieldRangeInsidePayloadOrThrow(
                 field,
                 _payload.Length);
@@ -662,7 +674,11 @@ namespace Lokrain.Atlas.Artifacts
             if (destination.Length - destinationIndex < length)
             {
                 throw new ArgumentException(
-                    $"Destination has '{destination.Length - destinationIndex}' available bytes, but field payload requires '{length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Destination has {0} available bytes, but field payload requires {1}.",
+                        destination.Length - destinationIndex,
+                        length),
                     nameof(destination));
             }
 
@@ -751,27 +767,32 @@ namespace Lokrain.Atlas.Artifacts
             if (plan.Contracts.Count != workspace.Count)
             {
                 throw new ArgumentException(
-                    "Compiled plan and workspace layout field counts do not match.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Compiled plan Contract table contains {0} fields, but workspace layout contains {1} entries.",
+                        plan.Contracts.Count,
+                        workspace.Count),
+                    nameof(workspace));
             }
 
             var payloadBytes = captureCapacityPayload
-                ? workspace.TotalByteCapacity
-                : workspace.TotalByteLength;
+                ? workspace.TotalFieldByteCapacity
+                : workspace.TotalFieldByteLength;
 
             if (payloadBytes > int.MaxValue)
             {
                 throw new OverflowException(
-                    $"Atlas artifact payload byte length '{payloadBytes}' exceeds managed byte array length capacity.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas artifact payload byte length {0} exceeds managed byte array length capacity.",
+                        payloadBytes));
             }
 
             for (var i = 0; i < workspace.Count; i++)
             {
-                var contract = plan.Contracts[i];
-                var entry = workspace[i];
-
                 ValidateEntryMatchesContractOrThrow(
-                    entry,
-                    contract,
+                    workspace[i],
+                    plan.Contracts[i],
                     i);
             }
         }
@@ -810,23 +831,93 @@ namespace Lokrain.Atlas.Artifacts
         }
 
         private static void ValidateEntryMatchesContractOrThrow(
-            Lokrain.Atlas.Workspaces.AtlasWorkspaceLayoutEntry entry,
-            Lokrain.Atlas.Contracts.AtlasContract contract,
+            AtlasWorkspaceLayoutEntry entry,
+            AtlasContract contract,
             int index)
         {
             contract.ValidateTableReadyOrThrow(nameof(contract));
             entry.ValidateBoundOrThrow(nameof(entry));
 
-            if (entry.Slot.Index != index ||
-                entry.StableId != contract.StableId ||
-                entry.Slot != contract.Slot ||
-                entry.Role != contract.Role ||
-                entry.StorageFormat != contract.StorageFormat ||
-                entry.ShapeDomain != contract.ShapeDomain ||
-                entry.DeclaredShape != contract.LengthShape)
+            if (entry.Slot.Index != index)
             {
                 throw new ArgumentException(
-                    $"Workspace layout entry at index '{index}' does not match compiled plan Contract '{contract.GetDiagnosticName()}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} has slot {1}.",
+                        index,
+                        entry.Slot),
+                    nameof(entry));
+            }
+
+            if (entry.StableId != contract.StableId)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} has stable id {1}, but Contract '{2}' has stable id {3}.",
+                        index,
+                        entry.StableId,
+                        contract.GetDiagnosticName(),
+                        contract.StableId),
+                    nameof(entry));
+            }
+
+            if (entry.Slot != contract.Slot)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} has slot {1}, but Contract '{2}' has slot {3}.",
+                        index,
+                        entry.Slot,
+                        contract.GetDiagnosticName(),
+                        contract.Slot),
+                    nameof(entry));
+            }
+
+            if (entry.Role != contract.Role)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} has role {1}, but Contract '{2}' has role {3}.",
+                        index,
+                        entry.Role,
+                        contract.GetDiagnosticName(),
+                        contract.Role),
+                    nameof(entry));
+            }
+
+            if (entry.StorageFormat != contract.StorageFormat)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} storage format does not match Contract '{1}'.",
+                        index,
+                        contract.GetDiagnosticName()),
+                    nameof(entry));
+            }
+
+            if (entry.ShapeDomain != contract.ShapeDomain)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} shape domain does not match Contract '{1}'.",
+                        index,
+                        contract.GetDiagnosticName()),
+                    nameof(entry));
+            }
+
+            if (entry.DeclaredShape != contract.LengthShape)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Workspace layout entry at index {0} declared shape does not match Contract '{1}'.",
+                        index,
+                        contract.GetDiagnosticName()),
                     nameof(entry));
             }
         }
@@ -851,7 +942,11 @@ namespace Lokrain.Atlas.Artifacts
             if (header.FieldCount != fields.Length)
             {
                 throw new ArgumentException(
-                    $"Artifact header field count '{header.FieldCount}' does not match field table length '{fields.Length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact header field count {0} does not match field table length {1}.",
+                        header.FieldCount,
+                        fields.Length),
                     nameof(fields));
             }
 
@@ -864,19 +959,32 @@ namespace Lokrain.Atlas.Artifacts
             {
                 var field = fields[i];
 
-                field.ValidateOrThrow($"fields[{i}]");
+                field.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "fields[{0}]",
+                        i));
 
                 if (field.FieldIndex != i)
                 {
                     throw new ArgumentException(
-                        $"Artifact field row at index '{i}' has FieldIndex '{field.FieldIndex}'. Field table indices must be contiguous and ordered.",
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field row at index {0} has FieldIndex {1}. Field table indices must be contiguous and ordered.",
+                            i,
+                            field.FieldIndex),
                         nameof(fields));
                 }
 
                 if (field.ByteOffset != cursor)
                 {
                     throw new ArgumentException(
-                        $"Artifact field '{field.DebugName}' has byte offset '{field.ByteOffset}', but expected contiguous offset '{cursor}'.",
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Artifact field '{0}' has byte offset {1}, but expected contiguous offset {2}.",
+                            field.DebugName,
+                            field.ByteOffset,
+                            cursor),
                         nameof(fields));
                 }
 
@@ -893,28 +1001,44 @@ namespace Lokrain.Atlas.Artifacts
             if (cursor != payload.Length)
             {
                 throw new ArgumentException(
-                    $"Artifact field table describes '{cursor}' serialized payload bytes, but payload length is '{payload.Length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field table describes {0} serialized payload bytes, but payload length is {1}.",
+                        cursor,
+                        payload.Length),
                     nameof(fields));
             }
 
             if (totalPayloadByteLength != payload.Length)
             {
                 throw new ArgumentException(
-                    $"Artifact field table payload byte length '{totalPayloadByteLength}' does not match payload length '{payload.Length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field table payload byte length {0} does not match payload length {1}.",
+                        totalPayloadByteLength,
+                        payload.Length),
                     nameof(fields));
             }
 
             if (header.TotalByteLength != totalByteLength)
             {
                 throw new ArgumentException(
-                    $"Artifact header total byte length '{header.TotalByteLength}' does not match field table logical byte length '{totalByteLength}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact header total byte length {0} does not match field table logical byte length {1}.",
+                        header.TotalByteLength,
+                        totalByteLength),
                     nameof(header));
             }
 
             if (header.TotalByteCapacity != totalByteCapacity)
             {
                 throw new ArgumentException(
-                    $"Artifact header total byte capacity '{header.TotalByteCapacity}' does not match field table byte capacity '{totalByteCapacity}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact header total byte capacity {0} does not match field table byte capacity {1}.",
+                        header.TotalByteCapacity,
+                        totalByteCapacity),
                     nameof(header));
             }
         }
@@ -926,13 +1050,21 @@ namespace Lokrain.Atlas.Artifacts
             if (field.ByteOffset > int.MaxValue)
             {
                 throw new OverflowException(
-                    $"Artifact field '{field.DebugName}' byte offset '{field.ByteOffset}' exceeds managed array index capacity.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field '{0}' byte offset {1} exceeds managed array index capacity.",
+                        field.DebugName,
+                        field.ByteOffset));
             }
 
             if (field.PayloadByteLength > int.MaxValue)
             {
                 throw new OverflowException(
-                    $"Artifact field '{field.DebugName}' payload byte length '{field.PayloadByteLength}' exceeds managed array length capacity.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field '{0}' payload byte length {1} exceeds managed array length capacity.",
+                        field.DebugName,
+                        field.PayloadByteLength));
             }
 
             var start = checked((int)field.ByteOffset);
@@ -945,12 +1077,18 @@ namespace Lokrain.Atlas.Artifacts
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(field),
-                    $"Artifact field '{field.DebugName}' byte range [{field.ByteOffset}, {field.ByteEndOffset}) is outside payload length '{payloadLength}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field '{0}' byte range [{1}, {2}) is outside payload length {3}.",
+                        field.DebugName,
+                        field.ByteOffset,
+                        field.ByteEndOffset,
+                        payloadLength));
             }
         }
 
         private static void CopyNativeBytesToManagedPayload(
-            Unity.Collections.NativeSlice<byte> source,
+            NativeSlice<byte> source,
             byte[] destination,
             long destinationOffset,
             int length)
@@ -960,7 +1098,8 @@ namespace Lokrain.Atlas.Artifacts
                 throw new ArgumentNullException(nameof(destination));
             }
 
-            if (destinationOffset < 0L || destinationOffset > int.MaxValue)
+            if (destinationOffset < 0L ||
+                destinationOffset > int.MaxValue)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(destinationOffset),
@@ -991,8 +1130,7 @@ namespace Lokrain.Atlas.Artifacts
             }
         }
 
-        private static AtlasArtifactField[] CopyFields(
-            AtlasArtifactField[] fields)
+        private static AtlasArtifactField[] CopyFields(AtlasArtifactField[] fields)
         {
             var copy = new AtlasArtifactField[fields.Length];
 
@@ -1004,8 +1142,7 @@ namespace Lokrain.Atlas.Artifacts
             return copy;
         }
 
-        private static byte[] CopyPayload(
-            byte[] payload)
+        private static byte[] CopyPayload(byte[] payload)
         {
             var copy = new byte[payload.Length];
 
@@ -1029,12 +1166,18 @@ namespace Lokrain.Atlas.Artifacts
 
             if (offset < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(offset));
+                throw new ArgumentOutOfRangeException(
+                    nameof(offset),
+                    offset,
+                    "Hash offset must be non-negative.");
             }
 
             if (length < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(length));
+                throw new ArgumentOutOfRangeException(
+                    nameof(length),
+                    length,
+                    "Hash length must be non-negative.");
             }
 
             if (offset + length > bytes.Length)
@@ -1058,8 +1201,7 @@ namespace Lokrain.Atlas.Artifacts
             return hash;
         }
 
-        private void ThrowIfFieldIndexOutOfRange(
-            int index)
+        private void ThrowIfFieldIndexOutOfRange(int index)
         {
             if ((uint)index < (uint)_fields.Length)
             {
@@ -1069,11 +1211,13 @@ namespace Lokrain.Atlas.Artifacts
             throw new ArgumentOutOfRangeException(
                 nameof(index),
                 index,
-                $"Artifact field index must be between 0 and {_fields.Length - 1}.");
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Artifact field index must be between 0 and {0}.",
+                    _fields.Length - 1));
         }
 
-        private static string FormatHex(
-            ulong value)
+        private static string FormatHex(ulong value)
         {
             return string.Format(
                 CultureInfo.InvariantCulture,

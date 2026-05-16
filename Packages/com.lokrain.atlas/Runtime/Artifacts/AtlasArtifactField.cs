@@ -296,7 +296,7 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return Create(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset);
         }
@@ -315,7 +315,7 @@ namespace Lokrain.Atlas.Artifacts
                 fieldIndex,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteCapacity);
+                shape.ByteCapacity);
         }
 
         /// <summary>
@@ -329,7 +329,7 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return Create(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset,
                 contentHash);
@@ -350,7 +350,7 @@ namespace Lokrain.Atlas.Artifacts
                 fieldIndex,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteCapacity,
+                shape.ByteCapacity,
                 contentHash);
         }
 
@@ -364,10 +364,10 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return CreateWithPayloadByteLength(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteLength);
+                shape.ByteLength);
         }
 
         /// <summary>
@@ -384,7 +384,7 @@ namespace Lokrain.Atlas.Artifacts
                 fieldIndex,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteLength);
+                shape.ByteLength);
         }
 
         /// <summary>
@@ -398,10 +398,10 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return CreateWithPayloadByteLength(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteLength,
+                shape.ByteLength,
                 contentHash);
         }
 
@@ -420,7 +420,7 @@ namespace Lokrain.Atlas.Artifacts
                 fieldIndex,
                 shape,
                 byteOffset,
-                payloadByteLength: shape.ByteLength,
+                shape.ByteLength,
                 contentHash);
         }
 
@@ -435,7 +435,7 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return CreateWithPayloadByteLength(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset,
                 payloadByteLength);
@@ -467,7 +467,7 @@ namespace Lokrain.Atlas.Artifacts
                 shape.ByteCapacity,
                 payloadByteLength,
                 byteOffset,
-                contentHash: 0UL,
+                0UL,
                 hasContentHash: false);
         }
 
@@ -483,7 +483,7 @@ namespace Lokrain.Atlas.Artifacts
             shape.ValidateOrThrow(nameof(shape));
 
             return CreateWithPayloadByteLength(
-                fieldIndex: shape.Slot.Index,
+                shape.Slot.Index,
                 shape,
                 byteOffset,
                 payloadByteLength,
@@ -721,7 +721,7 @@ namespace Lokrain.Atlas.Artifacts
                 ByteCapacity,
                 PayloadByteLength,
                 ByteOffset,
-                contentHash: 0UL,
+                0UL,
                 hasContentHash: false);
         }
 
@@ -823,11 +823,11 @@ namespace Lokrain.Atlas.Artifacts
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ DebugName.GetHashCode();
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Length;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Capacity;
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteLength.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteCapacity.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ PayloadByteLength.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ByteOffset.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ContentHash.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(ByteLength);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(ByteCapacity);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(PayloadByteLength);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(ByteOffset);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldULong(ContentHash);
                 return hash;
             }
         }
@@ -901,7 +901,11 @@ namespace Lokrain.Atlas.Artifacts
                 !contract.DebugName.Equals(shape.DebugName))
             {
                 throw new ArgumentException(
-                    $"Atlas artifact field contract '{contract.GetDiagnosticName()}' does not match resolved shape '{shape.GetDiagnosticName()}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas artifact field Contract '{0}' does not match resolved shape '{1}'.",
+                        contract.GetDiagnosticName(),
+                        shape.GetDiagnosticName()),
                     nameof(shape));
             }
         }
@@ -1024,18 +1028,40 @@ namespace Lokrain.Atlas.Artifacts
             if (byteLength != expectedByteLength)
             {
                 throw new ArgumentException(
-                    $"Artifact field byte length '{byteLength}' does not match expected byte length '{expectedByteLength}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field byte length '{0}' does not match expected byte length '{1}'.",
+                        byteLength,
+                        expectedByteLength),
                     name);
             }
 
             if (byteCapacity != expectedByteCapacity)
             {
                 throw new ArgumentException(
-                    $"Artifact field byte capacity '{byteCapacity}' does not match expected byte capacity '{expectedByteCapacity}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Artifact field byte capacity '{0}' does not match expected byte capacity '{1}'.",
+                        byteCapacity,
+                        expectedByteCapacity),
                     name);
             }
 
             _ = checked(byteOffset + payloadByteLength);
+        }
+
+        private static int FoldLong(long value)
+        {
+            return FoldULong(
+                unchecked((ulong)value));
+        }
+
+        private static int FoldULong(ulong value)
+        {
+            unchecked
+            {
+                return (int)(value ^ (value >> 32));
+            }
         }
 
         private static string FormatHex(

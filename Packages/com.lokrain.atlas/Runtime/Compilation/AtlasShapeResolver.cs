@@ -5,9 +5,9 @@
 //
 // Purpose
 // - Resolve contract-table LengthShape metadata into concrete AtlasResolvedShape rows.
-// - Produce one resolved shape per contract-table slot.
-// - Preserve contract ShapeDomain metadata through resolved compiler metadata.
-// - Resolve only shapes that can be computed from the contract table itself.
+// - Produce one resolved shape per Contract-table slot.
+// - Preserve Contract ShapeDomain metadata through resolved compiler metadata.
+// - Resolve only shapes that can be computed from the Contract table itself.
 // - Reject resolver-input-dependent shapes until explicit resolver context exists.
 //
 // Supported by this resolver:
@@ -27,12 +27,15 @@
 // - This type does not allocate workspace memory.
 // - This type does not calculate byte offsets.
 // - This type does not schedule jobs.
-// - Field-relative shapes are resolved recursively, so source order in the contract table does not matter.
+// - This type does not create artifacts.
+// - Field-relative shapes are resolved recursively, so source order in the Contract table does not matter.
 // - Cyclic field-relative shape dependencies are rejected deterministically.
 // - CapacityFromField preserves integer-rational capacity derivation.
 // - ShapeDomain is copied from AtlasContract into AtlasResolvedShape.
 // - LengthShape decides resolved length/capacity.
 // - ShapeDomain decides what resolved length/capacity means.
+// - Capacity may exceed logical length in later layout products, but this resolver only emits
+//   capacity slack when the declared LengthShape explicitly resolves capacity slack.
 
 using System;
 using System.Globalization;
@@ -42,8 +45,21 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Compilation
 {
     /// <summary>
-    /// Resolves symbolic Atlas contract-table length shapes into concrete runtime shape metadata.
+    /// Resolves symbolic Atlas Contract-table length shapes into concrete runtime shape metadata.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AtlasShapeResolver"/> is the Contract-table-only shape resolver. It handles
+    /// length rules that are fully determined by the validated <see cref="AtlasContractTable"/>.
+    /// Query, chunk, prefix-sum, and external shapes are intentionally rejected because they require
+    /// explicit resolver context.
+    /// </para>
+    ///
+    /// <para>
+    /// This resolver produces compiler metadata only. It does not allocate memory, define storage
+    /// block layout, schedule jobs, expose native containers, or build artifacts.
+    /// </para>
+    /// </remarks>
     public static class AtlasShapeResolver
     {
         private const byte Unvisited = 0;
@@ -51,12 +67,9 @@ namespace Lokrain.Atlas.Compilation
         private const byte Resolved = 2;
 
         /// <summary>
-        /// Resolves all contract-table shapes using the contract table's diagnostic name.
+        /// Resolves all Contract-table shapes using the Contract table's diagnostic name.
         /// </summary>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
-        public static AtlasResolvedShapeSet Resolve(
-            AtlasContractTable contracts)
+        public static AtlasResolvedShapeSet Resolve(AtlasContractTable contracts)
         {
             if (contracts == null)
             {
@@ -69,11 +82,8 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Resolves all contract-table shapes using an explicit diagnostic shape-set name.
+        /// Resolves all Contract-table shapes using an explicit diagnostic shape-set name.
         /// </summary>
-        /// <param name="name">Diagnostic name for the resolved shape set.</param>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
         public static AtlasResolvedShapeSet Resolve(
             FixedString64Bytes name,
             AtlasContractTable contracts)
@@ -92,12 +102,9 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Resolves shapes for the contract table referenced by a compiled plan.
+        /// Resolves shapes for the Contract table referenced by a compiled plan.
         /// </summary>
-        /// <param name="plan">Compiled plan whose contract table should be resolved.</param>
-        /// <returns>A validated resolved shape set in canonical contract-table slot order.</returns>
-        public static AtlasResolvedShapeSet Resolve(
-            AtlasCompiledPlan plan)
+        public static AtlasResolvedShapeSet Resolve(AtlasCompiledPlan plan)
         {
             if (plan == null)
             {
@@ -107,7 +114,7 @@ namespace Lokrain.Atlas.Compilation
             if (plan.Contracts == null)
             {
                 throw new ArgumentException(
-                    "Compiled plan does not reference a contract table.",
+                    "Compiled plan does not reference a Contract table.",
                     nameof(plan));
             }
 
@@ -117,12 +124,9 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Resolves all contract-table shapes into a managed array in canonical slot order.
+        /// Resolves all Contract-table shapes into a managed array in canonical slot order.
         /// </summary>
-        /// <param name="contracts">Contract table whose field shapes should be resolved.</param>
-        /// <returns>A new array containing one resolved shape per contract-table slot.</returns>
-        public static AtlasResolvedShape[] ResolveToArray(
-            AtlasContractTable contracts)
+        public static AtlasResolvedShape[] ResolveToArray(AtlasContractTable contracts)
         {
             if (contracts == null)
             {
@@ -145,12 +149,9 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Returns whether the supplied shape kind can be resolved from a contract table alone.
+        /// Returns whether the supplied shape kind can be resolved from a Contract table alone.
         /// </summary>
-        /// <param name="kind">Shape kind to inspect.</param>
-        /// <returns><c>true</c> for contract-table-only shape rules; otherwise, <c>false</c>.</returns>
-        public static bool CanResolveFromContractTableOnly(
-            LengthShapeKind kind)
+        public static bool CanResolveFromContractTableOnly(LengthShapeKind kind)
         {
             switch (kind)
             {
@@ -166,15 +167,40 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Returns whether the supplied contract can be resolved from a contract table alone.
+        /// Returns whether the supplied Contract can be resolved from a Contract table alone.
         /// </summary>
-        /// <param name="contract">Contract to inspect.</param>
-        /// <returns><c>true</c> when this resolver can resolve the contract's shape rule.</returns>
-        public static bool CanResolveFromContractTableOnly(
-            AtlasContract contract)
+        public static bool CanResolveFromContractTableOnly(AtlasContract contract)
         {
             return contract.IsTableReady &&
                    CanResolveFromContractTableOnly(contract.LengthShape.Kind);
+        }
+
+        /// <summary>
+        /// Validates that all shapes in the supplied Contract table can be resolved by this resolver.
+        /// </summary>
+        public static void ValidateResolvableFromContractTableOnlyOrThrow(AtlasContractTable contracts)
+        {
+            if (contracts == null)
+            {
+                throw new ArgumentNullException(nameof(contracts));
+            }
+
+            for (var i = 0; i < contracts.Count; i++)
+            {
+                var contract = contracts[i];
+
+                contract.ValidateTableReadyOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "contracts[{0}]",
+                        i));
+
+                if (!CanResolveFromContractTableOnly(contract.LengthShape.Kind))
+                {
+                    throw new NotSupportedException(
+                        CreateUnsupportedShapeMessage(contract));
+                }
+            }
         }
 
         private static AtlasResolvedShape ResolveIndex(
@@ -198,7 +224,12 @@ namespace Lokrain.Atlas.Compilation
             states[index] = Visiting;
 
             var contract = contracts[index];
-            contract.ValidateTableReadyOrThrow($"contracts[{index}]");
+
+            contract.ValidateTableReadyOrThrow(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "contracts[{0}]",
+                    index));
 
             var resolved = ResolveContract(
                 contracts,
@@ -206,7 +237,22 @@ namespace Lokrain.Atlas.Compilation
                 shapes,
                 states);
 
-            resolved.ValidateOrThrow($"shapes[{index}]");
+            resolved.ValidateOrThrow(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "shapes[{0}]",
+                    index));
+
+            if (resolved.Slot.Index != index)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' has slot '{1}', but resolver index is '{2}'.",
+                        resolved.GetDiagnosticName(),
+                        resolved.Slot,
+                        index));
+            }
 
             shapes[index] = resolved;
             states[index] = Resolved;
@@ -267,7 +313,11 @@ namespace Lokrain.Atlas.Compilation
                 case LengthShapeKind.None:
                 default:
                     throw new ArgumentException(
-                        $"Contract '{contract.GetDiagnosticName()}' declares unsupported length-shape kind '{shape.Kind}'.",
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Contract '{0}' declares unsupported length-shape kind '{1}'.",
+                            contract.GetDiagnosticName(),
+                            shape.Kind),
                         nameof(contract));
             }
         }
@@ -314,7 +364,7 @@ namespace Lokrain.Atlas.Compilation
                 source.Capacity,
                 contract.LengthShape,
                 contract.GetDiagnosticName(),
-                source.StableId.ToString());
+                source.GetDiagnosticName());
 
             return AtlasResolvedShape.Create(
                 contract,
@@ -333,8 +383,27 @@ namespace Lokrain.Atlas.Compilation
             if (!contracts.TryGetSlot(sourceId, out var sourceSlot))
             {
                 throw new ArgumentException(
-                    $"Contract '{target.GetDiagnosticName()}' depends on source field id '{sourceId}', but that field is not present in contract table '{GetContractTableDiagnosticName(contracts)}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' depends on source field id '{1}', but that field is not present in Contract table '{2}'.",
+                        target.GetDiagnosticName(),
+                        sourceId,
+                        GetContractTableDiagnosticName(contracts)),
                     nameof(target));
+            }
+
+            if (sourceSlot.Index < 0 ||
+                sourceSlot.Index >= contracts.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(sourceSlot),
+                    sourceSlot,
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' resolved source slot '{1}' outside Contract table '{2}'.",
+                        target.GetDiagnosticName(),
+                        sourceSlot,
+                        GetContractTableDiagnosticName(contracts)));
             }
 
             return ResolveIndex(
@@ -361,7 +430,10 @@ namespace Lokrain.Atlas.Compilation
             if (shape.Kind != LengthShapeKind.CapacityFromField)
             {
                 throw new ArgumentException(
-                    $"Length shape '{shape}' is not a capacity-from-field shape.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Length shape '{0}' is not a capacity-from-field shape.",
+                        shape),
                     nameof(shape));
             }
 
@@ -415,8 +487,7 @@ namespace Lokrain.Atlas.Compilation
             return checked((value + divisor - 1L) / divisor);
         }
 
-        private static void ValidateScalarDomainOrThrow(
-            AtlasContract contract)
+        private static void ValidateScalarDomainOrThrow(AtlasContract contract)
         {
             if (contract.ShapeDomain.Kind == AtlasShapeDomainKind.Scalar ||
                 contract.ShapeDomain.Kind == AtlasShapeDomainKind.FixedVector)
@@ -433,8 +504,7 @@ namespace Lokrain.Atlas.Compilation
                 nameof(contract));
         }
 
-        private static void ValidateFixedDomainOrThrow(
-            AtlasContract contract)
+        private static void ValidateFixedDomainOrThrow(AtlasContract contract)
         {
             if (contract.ShapeDomain.Kind != AtlasShapeDomainKind.External &&
                 contract.ShapeDomain.Kind != AtlasShapeDomainKind.PrefixSumPayload)
@@ -490,12 +560,11 @@ namespace Lokrain.Atlas.Compilation
             }
         }
 
-        private static string CreateUnsupportedShapeMessage(
-            AtlasContract contract)
+        private static string CreateUnsupportedShapeMessage(AtlasContract contract)
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Contract '{0}' declares length shape '{1}' with shape domain '{2}', which cannot be resolved from a contract table alone. Provide an explicit resolver context before resolving QueryCount, ChunkCount, PrefixSumPayload, or External shapes.",
+                "Contract '{0}' declares length shape '{1}' with shape domain '{2}', which cannot be resolved from a Contract table alone. Provide an explicit resolver context before resolving QueryCount, ChunkCount, PrefixSumPayload, or External shapes.",
                 contract.GetDiagnosticName(),
                 contract.LengthShape,
                 contract.ShapeDomain);
@@ -509,14 +578,13 @@ namespace Lokrain.Atlas.Compilation
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Contract table '{0}' contains a cyclic field-relative length-shape dependency involving contract '{1}' at slot '{2}'.",
+                "Contract table '{0}' contains a cyclic field-relative length-shape dependency involving Contract '{1}' at slot '{2}'.",
                 GetContractTableDiagnosticName(contracts),
                 contract.GetDiagnosticName(),
                 contract.Slot);
         }
 
-        private static string GetContractTableDiagnosticName(
-            AtlasContractTable contracts)
+        private static string GetContractTableDiagnosticName(AtlasContractTable contracts)
         {
             if (contracts != null &&
                 !contracts.Name.IsEmpty)

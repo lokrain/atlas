@@ -6,7 +6,6 @@
 // Purpose
 // - Store the immutable compiled memory layout for one Atlas workspace.
 // - Preserve canonical field-slot ordering and physical storage-block ordering.
-// - Validate field-address containment, block coverage, byte ranges, and non-overlap.
 // - Give AtlasWorkspace an allocation recipe without exposing Contracts or shape-resolution sets.
 //
 // Design notes
@@ -20,6 +19,8 @@
 // - Absence is represented by bool-returning lookup APIs, not sentinel ids.
 // - Lookups are intentionally linear; layout size is compiler metadata scale and deterministic
 //   array order is more important than dictionary machinery here.
+// - StableId lookup is for compiler/setup paths; hot execution should use resolved slots,
+//   addresses, or direct native views.
 // - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;

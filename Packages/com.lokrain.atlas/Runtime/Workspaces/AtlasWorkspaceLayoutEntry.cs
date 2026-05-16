@@ -20,6 +20,10 @@
 // - The embedded AtlasFieldAddress is the physical memory binding used by execution.
 // - ShapeDomain and DeclaredShape are retained as resolved layout metadata for validation,
 //   diagnostics, address lookup, artifact policy selection, and downstream view construction.
+// - Declared shape constrains resolved logical length during shape resolution.
+// - Declared shape does not force physical capacity to equal logical length.
+// - Scalar storage requires length 1 and capacity 1.
+// - NativeArray storage may have capacity greater than logical length.
 // - GetHashCode is deterministic and does not use System.HashCode.
 
 using System;
@@ -48,8 +52,7 @@ namespace Lokrain.Atlas.Workspaces
     /// <para>
     /// This type deliberately does not carry authored Contracts, operation Contracts, stage
     /// Contracts, pipeline Contracts, schedulers, native containers, job handles, or artifact
-    /// writer state. It is safe compiler/runtime metadata used to allocate and bind workspace
-    /// memory.
+    /// writer state. It is compiler/runtime metadata used to allocate and bind workspace memory.
     /// </para>
     ///
     /// <para>
@@ -261,7 +264,7 @@ namespace Lokrain.Atlas.Workspaces
             AtlasResolvedShape shape,
             AtlasFieldAddress address)
         {
-            shape.ValidateResolvedOrThrow(nameof(shape));
+            shape.ValidateOrThrow(nameof(shape));
 
             return Create(
                 shape.StableId,
@@ -437,7 +440,7 @@ namespace Lokrain.Atlas.Workspaces
         /// </summary>
         public string GetDiagnosticName()
         {
-            if (DebugName.Length > 0)
+            if (!DebugName.IsEmpty)
             {
                 return DebugName.ToString();
             }
@@ -472,11 +475,17 @@ namespace Lokrain.Atlas.Workspaces
         }
 
         /// <summary>
-        /// Compares this entry with another entry using canonical slot order.
+        /// Compares this entry with another entry using canonical slot order first.
         /// </summary>
         public int CompareTo(AtlasWorkspaceLayoutEntry other)
         {
-            var slotComparison = Slot.CompareTo(other.Slot);
+            var boundComparison = _bindingState.CompareTo(other._bindingState);
+            if (boundComparison != 0)
+            {
+                return boundComparison;
+            }
+
+            var slotComparison = Slot.Index.CompareTo(other.Slot.Index);
             if (slotComparison != 0)
             {
                 return slotComparison;
@@ -488,7 +497,9 @@ namespace Lokrain.Atlas.Workspaces
                 return addressComparison;
             }
 
-            return StableId.CompareTo(other.StableId);
+            return CompareStableId(
+                StableId,
+                other.StableId);
         }
 
         /// <summary>
@@ -649,6 +660,25 @@ namespace Lokrain.Atlas.Workspaces
                     "Scalar workspace layout entries must have length 1 and capacity 1.",
                     name);
             }
+        }
+
+        private static int CompareStableId(
+            StableDataId left,
+            StableDataId right)
+        {
+            var highComparison = left.High.CompareTo(right.High);
+            if (highComparison != 0)
+            {
+                return highComparison;
+            }
+
+            var lowComparison = left.Low.CompareTo(right.Low);
+            if (lowComparison != 0)
+            {
+                return lowComparison;
+            }
+
+            return left.Version.CompareTo(right.Version);
         }
     }
 }

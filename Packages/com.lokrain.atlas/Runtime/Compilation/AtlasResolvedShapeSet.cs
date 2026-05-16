@@ -7,22 +7,27 @@
 // - Store one resolved shape per Contract-table field slot.
 // - Preserve Contract-table canonical order.
 // - Validate that resolved shapes exactly match the Contract table.
-// - Preserve semantic shape-domain identity across the compiler/workspace/artifact boundary.
-// - Provide linear lookup by slot, StableDataId, typed field declaration, or shape domain.
-// - Remain managed compiler metadata only; no native memory ownership, allocation layout, or jobs.
+// - Preserve semantic shape-domain identity across compiler, workspace-layout, artifact, and diagnostics boundaries.
+// - Provide deterministic linear lookup by slot, StableDataId, typed field declaration, or shape domain.
+// - Remain managed compiler metadata only; no native memory ownership, allocation layout, execution, or jobs.
 //
 // Design notes
 // - This is shape-resolution output, not workspace memory.
-// - Slot zero and StableDataId zero are valid; absence is represented by bool-returning APIs.
+// - This is not a workspace layout.
+// - This is not an execution plan.
+// - Slot zero and StableDataId zero are valid.
+// - Absence is represented by bool-returning APIs, not sentinel ids.
 // - The set keeps the Contract table reference by design, matching compiled-plan metadata style.
-// - No dictionaries are needed here. Contract-table and shape-set sizes are compiler metadata scale.
+// - No dictionaries are used here. Contract-table and shape-set sizes are compiler metadata scale.
 // - Shape rows must be in canonical Contract-table slot order.
 // - Shape-domain identity is validated against the source Contract table.
-// - Jobs should receive resolved containers/views, not query this set.
+// - Capacity is allowed to exceed logical length.
+// - Jobs should receive resolved native containers/views or numeric addresses, not query this set.
 
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using Lokrain.Atlas.Contracts;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Fields;
@@ -35,20 +40,21 @@ namespace Lokrain.Atlas.Compilation
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasResolvedShapeSet"/> is produced after plan validation and before workspace
-    /// memory layout. It contains concrete length, capacity, byte-size, and semantic shape-domain
-    /// metadata for every Contract-table field.
+    /// <see cref="AtlasResolvedShapeSet"/> is produced after semantic validation and before
+    /// workspace-layout compilation. It contains concrete logical length, capacity, byte-size,
+    /// storage-schema, and semantic shape-domain metadata for every Contract-table field.
     /// </para>
     ///
     /// <para>
     /// This type deliberately does not allocate field storage, calculate memory offsets, schedule
-    /// operations, or produce artifact data. Later passes should consume this set to build memory
-    /// layout, workspace bindings, artifacts, and debug exports.
+    /// operations, or produce artifact payload data. Later passes consume this set to build
+    /// workspace layout, workspace memory, artifacts, and diagnostic exports.
     /// </para>
     ///
     /// <para>
-    /// The set is slot-ordered. Shape at index <c>i</c> must describe the Contract assigned to slot
-    /// <c>i</c>. This keeps later memory layout deterministic and avoids identity lookups in jobs.
+    /// The set is slot-ordered. Shape at index <c>i</c> must describe the Contract assigned to
+    /// slot <c>i</c>. This keeps later memory layout deterministic and avoids identity lookups in
+    /// execution/jobs.
     /// </para>
     /// </remarks>
     public sealed class AtlasResolvedShapeSet :
@@ -57,7 +63,7 @@ namespace Lokrain.Atlas.Compilation
         private readonly AtlasResolvedShape[] _shapes;
 
         /// <summary>
-        /// Contract table used to validate and interpret the resolved shape rows.
+        /// Contract table used to validate and interpret resolved shape rows.
         /// </summary>
         public readonly AtlasContractTable Contracts;
 
@@ -71,8 +77,13 @@ namespace Lokrain.Atlas.Compilation
             AtlasContractTable contracts,
             AtlasResolvedShape[] shapes)
         {
+            if (contracts == null)
+            {
+                throw new ArgumentNullException(nameof(contracts));
+            }
+
             Name = name;
-            Contracts = contracts ?? throw new ArgumentNullException(nameof(contracts));
+            Contracts = contracts;
             _shapes = BuildCanonicalShapeArray(
                 contracts,
                 shapes);
@@ -222,8 +233,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets a resolved shape by canonical set index.
         /// </summary>
-        /// <param name="index">Zero-based shape index.</param>
-        /// <returns>The resolved shape at <paramref name="index"/>.</returns>
         public AtlasResolvedShape this[int index]
         {
             get
@@ -236,16 +245,12 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets a resolved shape by canonical Contract-table slot.
         /// </summary>
-        /// <param name="slot">Canonical field slot. Slot zero/default is valid.</param>
-        /// <returns>The resolved shape assigned to <paramref name="slot"/>.</returns>
-        public AtlasResolvedShape this[AtlasFieldSlot slot] => this[slot.Index];
+        public AtlasResolvedShape this[AtlasFieldSlot slot] =>
+            GetRequiredShape(slot);
 
         /// <summary>
         /// Creates a resolved shape set using the Contract table's diagnostic name.
         /// </summary>
-        /// <param name="contracts">Contract table that owns canonical field slot order.</param>
-        /// <param name="shapes">Resolved shapes in canonical Contract-table slot order.</param>
-        /// <returns>A validated immutable resolved shape set.</returns>
         public static AtlasResolvedShapeSet Create(
             AtlasContractTable contracts,
             params AtlasResolvedShape[] shapes)
@@ -264,10 +269,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a named resolved shape set.
         /// </summary>
-        /// <param name="name">Diagnostic shape-set name.</param>
-        /// <param name="contracts">Contract table that owns canonical field slot order.</param>
-        /// <param name="shapes">Resolved shapes in canonical Contract-table slot order.</param>
-        /// <returns>A validated immutable resolved shape set.</returns>
         public static AtlasResolvedShapeSet Create(
             FixedString64Bytes name,
             AtlasContractTable contracts,
@@ -280,10 +281,18 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
+        /// Determines whether this set contains a shape for the supplied canonical slot.
+        /// </summary>
+        public bool Contains(AtlasFieldSlot slot)
+        {
+            return TryGetShape(
+                slot,
+                out _);
+        }
+
+        /// <summary>
         /// Determines whether this set contains a shape for the supplied stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id. Zero/default is valid.</param>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool Contains(StableDataId stableId)
         {
             return TryGetShape(
@@ -294,21 +303,17 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this set contains a shape for the supplied typed field declaration.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged field element type.</typeparam>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool Contains<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
         {
-            return Contains(AtlasField.StableId<TField, TElement>());
+            return Contains(
+                AtlasField.StableId<TField, TElement>());
         }
 
         /// <summary>
         /// Determines whether this set contains at least one shape in the supplied domain.
         /// </summary>
-        /// <param name="shapeDomain">Concrete shape domain.</param>
-        /// <returns><c>true</c> when at least one matching shape exists.</returns>
         public bool ContainsDomain(AtlasShapeDomain shapeDomain)
         {
             return TryGetFirstShape(
@@ -319,8 +324,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this set contains at least one shape in the supplied domain kind.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <returns><c>true</c> when at least one matching shape exists.</returns>
         public bool ContainsDomainKind(AtlasShapeDomainKind kind)
         {
             return CountDomainKind(kind) > 0;
@@ -329,8 +332,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Counts resolved shapes in the supplied domain kind.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <returns>The number of matching shapes.</returns>
         public int CountDomainKind(AtlasShapeDomainKind kind)
         {
             if (kind == AtlasShapeDomainKind.None)
@@ -354,18 +355,15 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Attempts to get a shape by canonical Contract-table slot.
         /// </summary>
-        /// <param name="slot">Canonical field slot. Slot zero/default is valid.</param>
-        /// <param name="shape">
-        /// The resolved shape when this method returns <c>true</c>; otherwise, default payload.
-        /// </param>
-        /// <returns><c>true</c> when the slot is inside this set; otherwise, <c>false</c>.</returns>
         public bool TryGetShape(
             AtlasFieldSlot slot,
             out AtlasResolvedShape shape)
         {
             var index = slot.Index;
 
-            if (index >= 0 && index < _shapes.Length)
+            if (index >= 0 &&
+                index < _shapes.Length &&
+                _shapes[index].Slot == slot)
             {
                 shape = _shapes[index];
                 return true;
@@ -378,11 +376,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Attempts to get a shape by stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id. Zero/default is valid.</param>
-        /// <param name="shape">
-        /// The resolved shape when this method returns <c>true</c>; otherwise, default payload.
-        /// </param>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool TryGetShape(
             StableDataId stableId,
             out AtlasResolvedShape shape)
@@ -403,12 +396,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Attempts to get a shape by typed field declaration.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged field element type.</typeparam>
-        /// <param name="shape">
-        /// The resolved shape when this method returns <c>true</c>; otherwise, default payload.
-        /// </param>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool TryGetShape<TField, TElement>(
             out AtlasResolvedShape shape)
             where TField : struct, IAtlasField<TElement>
@@ -422,11 +409,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Attempts to get the first shape in the supplied concrete shape domain.
         /// </summary>
-        /// <param name="shapeDomain">Concrete shape domain.</param>
-        /// <param name="shape">
-        /// The first matching resolved shape when this method returns <c>true</c>; otherwise, default payload.
-        /// </param>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool TryGetFirstShape(
             AtlasShapeDomain shapeDomain,
             out AtlasResolvedShape shape)
@@ -453,11 +435,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Attempts to get the first shape in the supplied shape-domain kind.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <param name="shape">
-        /// The first matching resolved shape when this method returns <c>true</c>; otherwise, default payload.
-        /// </param>
-        /// <returns><c>true</c> when a matching shape exists; otherwise, <c>false</c>.</returns>
         public bool TryGetFirstShape(
             AtlasShapeDomainKind kind,
             out AtlasResolvedShape shape)
@@ -484,8 +461,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets a required shape by canonical Contract-table slot.
         /// </summary>
-        /// <param name="slot">Canonical field slot. Slot zero/default is valid.</param>
-        /// <returns>The resolved shape assigned to <paramref name="slot"/>.</returns>
         public AtlasResolvedShape GetRequiredShape(AtlasFieldSlot slot)
         {
             if (TryGetShape(slot, out var shape))
@@ -496,14 +471,16 @@ namespace Lokrain.Atlas.Compilation
             throw new ArgumentOutOfRangeException(
                 nameof(slot),
                 slot,
-                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain slot '{slot}'.");
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas resolved shape set '{0}' does not contain slot '{1}'.",
+                    GetDiagnosticName(),
+                    slot));
         }
 
         /// <summary>
         /// Gets a required shape by stable field id.
         /// </summary>
-        /// <param name="stableId">Stable field id. Zero/default is valid.</param>
-        /// <returns>The resolved shape assigned to <paramref name="stableId"/>.</returns>
         public AtlasResolvedShape GetRequiredShape(StableDataId stableId)
         {
             if (TryGetShape(stableId, out var shape))
@@ -512,16 +489,17 @@ namespace Lokrain.Atlas.Compilation
             }
 
             throw new ArgumentException(
-                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain field id '{stableId}'.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas resolved shape set '{0}' does not contain field id '{1}'.",
+                    GetDiagnosticName(),
+                    stableId),
                 nameof(stableId));
         }
 
         /// <summary>
         /// Gets a required shape by typed field declaration.
         /// </summary>
-        /// <typeparam name="TField">Field declaration type.</typeparam>
-        /// <typeparam name="TElement">Unmanaged field element type.</typeparam>
-        /// <returns>The resolved shape assigned to the typed field declaration.</returns>
         public AtlasResolvedShape GetRequiredShape<TField, TElement>()
             where TField : struct, IAtlasField<TElement>
             where TElement : unmanaged
@@ -533,8 +511,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets the first required shape in the supplied concrete shape domain.
         /// </summary>
-        /// <param name="shapeDomain">Concrete shape domain.</param>
-        /// <returns>The first matching resolved shape.</returns>
         public AtlasResolvedShape GetRequiredFirstShape(AtlasShapeDomain shapeDomain)
         {
             if (TryGetFirstShape(shapeDomain, out var shape))
@@ -543,15 +519,17 @@ namespace Lokrain.Atlas.Compilation
             }
 
             throw new ArgumentException(
-                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain shape domain '{shapeDomain}'.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas resolved shape set '{0}' does not contain shape domain '{1}'.",
+                    GetDiagnosticName(),
+                    shapeDomain),
                 nameof(shapeDomain));
         }
 
         /// <summary>
         /// Gets the first required shape in the supplied shape-domain kind.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <returns>The first matching resolved shape.</returns>
         public AtlasResolvedShape GetRequiredFirstShape(AtlasShapeDomainKind kind)
         {
             if (TryGetFirstShape(kind, out var shape))
@@ -560,14 +538,17 @@ namespace Lokrain.Atlas.Compilation
             }
 
             throw new ArgumentException(
-                $"Atlas resolved shape set '{GetDiagnosticName()}' does not contain shape-domain kind '{kind}'.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Atlas resolved shape set '{0}' does not contain shape-domain kind '{1}'.",
+                    GetDiagnosticName(),
+                    kind),
                 nameof(kind));
         }
 
         /// <summary>
         /// Copies all shapes into a caller-provided destination array.
         /// </summary>
-        /// <param name="destination">Destination array.</param>
         public void CopyTo(AtlasResolvedShape[] destination)
         {
             if (destination == null)
@@ -578,7 +559,11 @@ namespace Lokrain.Atlas.Compilation
             if (destination.Length < _shapes.Length)
             {
                 throw new ArgumentException(
-                    $"Destination array length '{destination.Length}' is smaller than resolved shape count '{_shapes.Length}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Destination array length {0} is smaller than resolved shape count {1}.",
+                        destination.Length,
+                        _shapes.Length),
                     nameof(destination));
             }
 
@@ -591,10 +576,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Copies a shape range into a caller-provided destination array.
         /// </summary>
-        /// <param name="sourceIndex">First source index.</param>
-        /// <param name="destination">Destination array.</param>
-        /// <param name="destinationIndex">First destination index.</param>
-        /// <param name="length">Number of shapes to copy.</param>
         public void CopyTo(
             int sourceIndex,
             AtlasResolvedShape[] destination,
@@ -630,14 +611,14 @@ namespace Lokrain.Atlas.Compilation
                     "Length must be non-negative.");
             }
 
-            if (sourceIndex + length > _shapes.Length)
+            if (sourceIndex > _shapes.Length - length)
             {
                 throw new ArgumentException(
                     "Source range exceeds resolved shape set bounds.",
                     nameof(length));
             }
 
-            if (destinationIndex + length > destination.Length)
+            if (destinationIndex > destination.Length - length)
             {
                 throw new ArgumentException(
                     "Destination range exceeds destination array bounds.",
@@ -655,9 +636,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Copies all shapes matching the supplied shape-domain kind into a caller-provided destination array.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <param name="destination">Destination array.</param>
-        /// <returns>The number of copied shapes.</returns>
         public int CopyDomainKindTo(
             AtlasShapeDomainKind kind,
             AtlasResolvedShape[] destination)
@@ -677,7 +655,11 @@ namespace Lokrain.Atlas.Compilation
             if (destination.Length < count)
             {
                 throw new ArgumentException(
-                    $"Destination array length '{destination.Length}' is smaller than matching domain shape count '{count}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Destination array length {0} is smaller than matching domain shape count {1}.",
+                        destination.Length,
+                        count),
                     nameof(destination));
             }
 
@@ -698,7 +680,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a managed copy of this set's shapes.
         /// </summary>
-        /// <returns>A new array in canonical shape order.</returns>
         public AtlasResolvedShape[] ToArray()
         {
             var copy = new AtlasResolvedShape[_shapes.Length];
@@ -714,8 +695,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a managed copy of all shapes matching the supplied shape-domain kind.
         /// </summary>
-        /// <param name="kind">Concrete shape-domain kind.</param>
-        /// <returns>A new array containing matching shapes in canonical shape order.</returns>
         public AtlasResolvedShape[] ToArray(AtlasShapeDomainKind kind)
         {
             var count = CountDomainKind(kind);
@@ -736,7 +715,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns the diagnostic name of this resolved shape set.
         /// </summary>
-        /// <returns>The declared name when present; otherwise, an invariant fallback string.</returns>
         public string GetDiagnosticName()
         {
             if (!Name.IsEmpty)
@@ -755,7 +733,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Validates the current shape set against its Contract table.
         /// </summary>
-        /// <param name="parameterName">Optional caller parameter name.</param>
         public void ValidateOrThrow(string parameterName = null)
         {
             var name = parameterName ?? nameof(AtlasResolvedShapeSet);
@@ -776,7 +753,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets an enumerator over shapes in canonical Contract-table slot order.
         /// </summary>
-        /// <returns>An enumerator over resolved shapes.</returns>
         public IEnumerator<AtlasResolvedShape> GetEnumerator()
         {
             for (var i = 0; i < _shapes.Length; i++)
@@ -788,7 +764,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Gets an enumerator over shapes in canonical Contract-table slot order.
         /// </summary>
-        /// <returns>An enumerator over resolved shapes.</returns>
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
@@ -797,11 +772,18 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a diagnostic representation of this shape set.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
-            return
-                $"AtlasResolvedShapeSet(Name={GetDiagnosticName()}, Count={Count}, ByteLength={TotalByteLength}, ByteCapacity={TotalByteCapacity}, DenseGrid={HasDenseGridDomain}, VariablePayload={HasVariablePayloadDomain}, External={HasExternalDomain})";
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "AtlasResolvedShapeSet(Name={0}, Count={1}, ByteLength={2}, ByteCapacity={3}, DenseGrid={4}, VariablePayload={5}, External={6})",
+                GetDiagnosticName(),
+                Count,
+                TotalByteLength,
+                TotalByteCapacity,
+                HasDenseGridDomain,
+                HasVariablePayloadDomain,
+                HasExternalDomain);
         }
 
         private static AtlasResolvedShape[] BuildCanonicalShapeArray(
@@ -851,7 +833,11 @@ namespace Lokrain.Atlas.Compilation
             if (shapes.Length != contracts.Count)
             {
                 throw new ArgumentException(
-                    $"Resolved shape count '{shapes.Length}' must match Contract-table count '{contracts.Count}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape count {0} must match Contract-table count {1}.",
+                        shapes.Length,
+                        contracts.Count),
                     parameterName);
             }
 
@@ -860,8 +846,18 @@ namespace Lokrain.Atlas.Compilation
                 var contract = contracts[i];
                 var shape = shapes[i];
 
-                contract.ValidateTableReadyOrThrow($"contracts[{i}]");
-                shape.ValidateOrThrow($"{parameterName}[{i}]");
+                contract.ValidateTableReadyOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "contracts[{0}]",
+                        i));
+
+                shape.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0}[{1}]",
+                        parameterName,
+                        i));
 
                 ValidateShapeMatchesContract(
                     shape,
@@ -880,63 +876,116 @@ namespace Lokrain.Atlas.Compilation
             if (shape.Slot.Index != index)
             {
                 throw new ArgumentException(
-                    $"Resolved shape '{shape.GetDiagnosticName()}' declares slot '{shape.Slot}', but its shape-set index is '{index}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' declares slot '{1}', but its shape-set index is '{2}'.",
+                        shape.GetDiagnosticName(),
+                        shape.Slot,
+                        index),
                     parameterName);
             }
 
             if (contract.Slot.Index != index)
             {
                 throw new ArgumentException(
-                    $"Contract '{contract.GetDiagnosticName()}' declares slot '{contract.Slot}', but its table index is '{index}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract '{0}' declares slot '{1}', but its table index is '{2}'.",
+                        contract.GetDiagnosticName(),
+                        contract.Slot,
+                        index),
                     parameterName);
             }
 
             if (shape.StableId != contract.StableId)
             {
                 throw new ArgumentException(
-                    $"Resolved shape at slot '{index}' has field id '{shape.StableId}', but Contract table expects '{contract.StableId}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape at slot '{0}' has field id '{1}', but Contract table expects '{2}'.",
+                        index,
+                        shape.StableId,
+                        contract.StableId),
+                    parameterName);
+            }
+
+            if (shape.Slot != contract.Slot)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape at slot '{0}' has slot '{1}', but Contract table expects slot '{2}'.",
+                        index,
+                        shape.Slot,
+                        contract.Slot),
                     parameterName);
             }
 
             if (shape.Role != contract.Role)
             {
                 throw new ArgumentException(
-                    $"Resolved shape '{shape.GetDiagnosticName()}' has role '{shape.Role}', but Contract expects '{contract.Role}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' has role '{1}', but Contract expects '{2}'.",
+                        shape.GetDiagnosticName(),
+                        shape.Role,
+                        contract.Role),
                     parameterName);
             }
 
             if (shape.StorageFormat != contract.StorageFormat)
             {
                 throw new ArgumentException(
-                    $"Resolved shape '{shape.GetDiagnosticName()}' has storage format '{shape.StorageFormat}', but Contract expects '{contract.StorageFormat}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' has storage format '{1}', but Contract expects '{2}'.",
+                        shape.GetDiagnosticName(),
+                        shape.StorageFormat,
+                        contract.StorageFormat),
                     parameterName);
             }
 
             if (shape.ShapeDomain != contract.ShapeDomain)
             {
                 throw new ArgumentException(
-                    $"Resolved shape '{shape.GetDiagnosticName()}' has shape domain '{shape.ShapeDomain}', but Contract expects '{contract.ShapeDomain}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' has shape domain '{1}', but Contract expects '{2}'.",
+                        shape.GetDiagnosticName(),
+                        shape.ShapeDomain,
+                        contract.ShapeDomain),
                     parameterName);
             }
 
             if (shape.DeclaredShape != contract.LengthShape)
             {
                 throw new ArgumentException(
-                    $"Resolved shape '{shape.GetDiagnosticName()}' has declared shape '{shape.DeclaredShape}', but Contract expects '{contract.LengthShape}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape '{0}' has declared shape '{1}', but Contract expects '{2}'.",
+                        shape.GetDiagnosticName(),
+                        shape.DeclaredShape,
+                        contract.LengthShape),
                     parameterName);
             }
 
             if (!shape.DebugName.Equals(contract.DebugName))
             {
                 throw new ArgumentException(
-                    $"Resolved shape at slot '{index}' has debug name '{shape.DebugName}', but Contract expects '{contract.DebugName}'.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Resolved shape at slot '{0}' has debug name '{1}', but Contract expects '{2}'.",
+                        index,
+                        shape.DebugName,
+                        contract.DebugName),
                     parameterName);
             }
         }
 
         private void ThrowIfIndexOutOfRange(int index)
         {
-            if (index >= 0 && index < _shapes.Length)
+            if (index >= 0 &&
+                index < _shapes.Length)
             {
                 return;
             }
@@ -944,7 +993,10 @@ namespace Lokrain.Atlas.Compilation
             throw new ArgumentOutOfRangeException(
                 nameof(index),
                 index,
-                $"Resolved shape index must be between 0 and {_shapes.Length - 1}.");
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Resolved shape index must be between 0 and {0}.",
+                    _shapes.Length - 1));
         }
     }
 }

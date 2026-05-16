@@ -7,7 +7,7 @@
 // - Represent one concrete resolved runtime shape for one Atlas Contract-table field.
 // - Preserve explicit resolved/unresolved state without using invalid StableDataId or slot sentinels.
 // - Carry semantic shape-domain identity through the compiler/workspace/artifact boundary.
-// - Carry length, capacity, element layout, and byte-size metadata before workspace allocation.
+// - Carry length, capacity, element layout, and byte-size metadata before workspace-layout compilation.
 // - Remain allocation-free, immutable, deterministic, and safe as compiler metadata.
 //
 // Design notes
@@ -17,8 +17,14 @@
 // - Missing/unresolved state is represented by _resolutionState.
 // - ShapeDomain describes what resolved length/capacity means.
 // - DeclaredShape describes how length/capacity was resolved.
+// - Resolved logical length and resolved physical capacity are related but not identical concepts.
+// - Capacity must be greater than or equal to length.
+// - Scalar storage must resolve to length 1 and capacity 1.
+// - NativeArray storage may resolve to capacity greater than length.
 // - This type does not allocate memory.
 // - This type does not own memory.
+// - This type is not a workspace layout.
+// - This type is not a field address.
 // - Jobs should not resolve shapes; jobs should consume already allocated native containers/views.
 
 using System;
@@ -33,14 +39,14 @@ using Unity.Collections;
 namespace Lokrain.Atlas.Compilation
 {
     /// <summary>
-    /// Concrete resolved length, capacity, domain, and byte-size metadata for one Atlas field contract.
+    /// Concrete resolved length, capacity, domain, and byte-size metadata for one Atlas field Contract.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="AtlasResolvedShape"/> is produced after plan validation and before workspace
-    /// memory allocation. It converts symbolic <see cref="LengthShape"/> metadata into concrete
-    /// runtime sizing information while preserving the source contract identity, shape-domain
-    /// identity, and storage layout.
+    /// <see cref="AtlasResolvedShape"/> is produced after plan/Contract validation and before
+    /// workspace-layout compilation. It converts symbolic <see cref="LengthShape"/> metadata into
+    /// concrete runtime sizing information while preserving the source Contract identity,
+    /// shape-domain identity, and storage schema.
     /// </para>
     ///
     /// <para>
@@ -57,46 +63,43 @@ namespace Lokrain.Atlas.Compilation
     public readonly struct AtlasResolvedShape :
         IEquatable<AtlasResolvedShape>
     {
-        private const int HashSeed = 17;
-        private const int HashMultiplier = 397;
-
         private const byte UnresolvedState = 0;
         private const byte ResolvedState = 1;
 
         private readonly byte _resolutionState;
 
         /// <summary>
-        /// Durable field identity copied from the source contract.
+        /// Durable field identity copied from the source Contract.
         /// </summary>
         public readonly StableDataId StableId;
 
         /// <summary>
-        /// Contract-table slot copied from the source contract.
+        /// Contract-table slot copied from the source Contract.
         /// </summary>
         public readonly AtlasFieldSlot Slot;
 
         /// <summary>
-        /// Semantic role copied from the source contract.
+        /// Semantic role copied from the source Contract.
         /// </summary>
         public readonly AtlasFieldRole Role;
 
         /// <summary>
-        /// Physical storage format copied from the source contract.
+        /// Physical storage format copied from the source Contract.
         /// </summary>
         public readonly StorageFormat StorageFormat;
 
         /// <summary>
-        /// Semantic shape domain copied from the source contract.
+        /// Semantic shape domain copied from the source Contract.
         /// </summary>
         public readonly AtlasShapeDomain ShapeDomain;
 
         /// <summary>
-        /// Original declared symbolic length shape copied from the source contract.
+        /// Original declared symbolic length shape copied from the source Contract.
         /// </summary>
         public readonly LengthShape DeclaredShape;
 
         /// <summary>
-        /// Stable diagnostic name copied from the source contract.
+        /// Stable diagnostic name copied from the source Contract.
         /// </summary>
         public readonly FixedString64Bytes DebugName;
 
@@ -109,8 +112,9 @@ namespace Lokrain.Atlas.Compilation
         /// Resolved element capacity.
         /// </summary>
         /// <remarks>
-        /// For fixed-size storage this equals <see cref="Length"/>. For growable storage this may
-        /// be greater than <see cref="Length"/>.
+        /// Capacity must be greater than or equal to <see cref="Length"/>. Scalar storage requires
+        /// capacity and length to both be one. Contiguous array storage may reserve slack capacity
+        /// when the shape resolver or later layout policy requires it.
         /// </remarks>
         public readonly int Capacity;
 
@@ -224,11 +228,8 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Creates a resolved shape whose capacity equals its length.
+        /// Creates a resolved shape whose capacity equals its logical length.
         /// </summary>
-        /// <param name="contract">Resolved table-ready source contract.</param>
-        /// <param name="length">Resolved logical length.</param>
-        /// <returns>A resolved shape for the supplied contract.</returns>
         public static AtlasResolvedShape Create(
             AtlasContract contract,
             int length)
@@ -240,12 +241,8 @@ namespace Lokrain.Atlas.Compilation
         }
 
         /// <summary>
-        /// Creates a resolved shape from a table-ready contract and explicit length/capacity.
+        /// Creates a resolved shape from a table-ready Contract and explicit length/capacity.
         /// </summary>
-        /// <param name="contract">Resolved table-ready source contract.</param>
-        /// <param name="length">Resolved logical length.</param>
-        /// <param name="capacity">Resolved element capacity.</param>
-        /// <returns>A resolved shape for the supplied contract.</returns>
         public static AtlasResolvedShape Create(
             AtlasContract contract,
             int length,
@@ -268,16 +265,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Creates a resolved shape from explicit field, domain, and storage metadata.
         /// </summary>
-        /// <param name="stableId">Durable field identity. Zero/default is valid.</param>
-        /// <param name="slot">Contract-table slot. Slot zero/default is valid.</param>
-        /// <param name="role">Semantic field role.</param>
-        /// <param name="storageFormat">Physical storage format.</param>
-        /// <param name="shapeDomain">Semantic domain used to interpret the resolved shape.</param>
-        /// <param name="declaredShape">Original symbolic length shape.</param>
-        /// <param name="debugName">Stable diagnostic field name.</param>
-        /// <param name="length">Resolved logical length.</param>
-        /// <param name="capacity">Resolved element capacity.</param>
-        /// <returns>A resolved shape value.</returns>
         public static AtlasResolvedShape Create(
             StableDataId stableId,
             AtlasFieldSlot slot,
@@ -325,8 +312,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a copy with a different resolved length and matching capacity.
         /// </summary>
-        /// <param name="length">New resolved logical length and capacity.</param>
-        /// <returns>A resolved shape with updated length and capacity.</returns>
         public AtlasResolvedShape WithLength(int length)
         {
             ValidateResolvedOrThrow();
@@ -346,9 +331,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a copy with different resolved length and capacity.
         /// </summary>
-        /// <param name="length">New resolved logical length.</param>
-        /// <param name="capacity">New resolved element capacity.</param>
-        /// <returns>A resolved shape with updated length and capacity.</returns>
         public AtlasResolvedShape WithLengthAndCapacity(
             int length,
             int capacity)
@@ -370,8 +352,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a copy with a different shape domain.
         /// </summary>
-        /// <param name="shapeDomain">Replacement shape domain.</param>
-        /// <returns>A resolved shape with the supplied shape domain.</returns>
         public AtlasResolvedShape WithShapeDomain(AtlasShapeDomain shapeDomain)
         {
             ValidateResolvedOrThrow();
@@ -391,7 +371,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Validates that this value contains resolved and internally consistent shape metadata.
         /// </summary>
-        /// <param name="parameterName">Optional caller parameter name.</param>
         public void ValidateOrThrow(string parameterName = null)
         {
             var name = parameterName ?? nameof(AtlasResolvedShape);
@@ -451,7 +430,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Throws when this value is unresolved.
         /// </summary>
-        /// <param name="parameterName">Optional caller parameter name.</param>
         public void ValidateResolvedOrThrow(string parameterName = null)
         {
             if (IsResolved)
@@ -467,7 +445,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a stable diagnostic field name.
         /// </summary>
-        /// <returns>The debug name when present; otherwise the stable identity.</returns>
         public string GetDiagnosticName()
         {
             if (!DebugName.IsEmpty)
@@ -484,8 +461,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this shape is equal to another shape.
         /// </summary>
-        /// <param name="other">The other shape.</param>
-        /// <returns><c>true</c> when all fields match; otherwise, <c>false</c>.</returns>
         public bool Equals(AtlasResolvedShape other)
         {
             return _resolutionState == other._resolutionState &&
@@ -505,8 +480,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Determines whether this shape is equal to an object instance.
         /// </summary>
-        /// <param name="obj">Object to compare.</param>
-        /// <returns><c>true</c> when the object is an equal resolved shape.</returns>
         public override bool Equals(object obj)
         {
             return obj is AtlasResolvedShape other &&
@@ -516,24 +489,23 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a deterministic managed hash code.
         /// </summary>
-        /// <returns>A deterministic hash code.</returns>
         public override int GetHashCode()
         {
             unchecked
             {
-                var hash = HashSeed;
-                hash = (hash * HashMultiplier) ^ _resolutionState;
-                hash = (hash * HashMultiplier) ^ StableId.GetHashCode();
-                hash = (hash * HashMultiplier) ^ Slot.GetHashCode();
-                hash = (hash * HashMultiplier) ^ (int)Role;
-                hash = (hash * HashMultiplier) ^ StorageFormat.GetHashCode();
-                hash = (hash * HashMultiplier) ^ ShapeDomain.GetHashCode();
-                hash = (hash * HashMultiplier) ^ DeclaredShape.GetHashCode();
-                hash = (hash * HashMultiplier) ^ DebugName.GetHashCode();
-                hash = (hash * HashMultiplier) ^ Length;
-                hash = (hash * HashMultiplier) ^ Capacity;
-                hash = (hash * HashMultiplier) ^ ByteLength.GetHashCode();
-                hash = (hash * HashMultiplier) ^ ByteCapacity.GetHashCode();
+                var hash = AtlasConstants.DeterministicHashSeed;
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ _resolutionState;
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ StableId.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Slot.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ (int)Role;
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ StorageFormat.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ShapeDomain.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ DeclaredShape.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ DebugName.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Length;
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Capacity;
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(ByteLength);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(ByteCapacity);
                 return hash;
             }
         }
@@ -541,7 +513,6 @@ namespace Lokrain.Atlas.Compilation
         /// <summary>
         /// Returns a stable diagnostic string.
         /// </summary>
-        /// <returns>A diagnostic representation of the resolved shape.</returns>
         public override string ToString()
         {
             if (IsUnresolved)
@@ -647,7 +618,6 @@ namespace Lokrain.Atlas.Compilation
                     "Scalar storage must resolve to length 1 and capacity 1.",
                     name);
             }
-
 
             ValidateDomainShapeCompatibilityOrThrow(
                 shapeDomain,
@@ -760,6 +730,15 @@ namespace Lokrain.Atlas.Compilation
             int elementCount)
         {
             return checked((long)storageFormat.ElementSize * elementCount);
+        }
+
+        private static int FoldLong(long value)
+        {
+            unchecked
+            {
+                var bits = (ulong)value;
+                return (int)(bits ^ (bits >> 32));
+            }
         }
     }
 }

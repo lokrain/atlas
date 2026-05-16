@@ -18,6 +18,10 @@
 // - ContentHash zero is valid; content-hash presence is represented explicitly.
 // - default(AtlasArtifactHeader) is not a concrete artifact header.
 // - Missing/unwritten header state is represented by IsConcrete, not by magic value checks alone.
+// - ContractHash includes field identity, storage schema, ownership, lifetime, shape domain,
+//   declared length shape, flags, and hash-participation policy.
+// - ShapeHash includes resolved field identity, storage schema, shape domain, declared length shape,
+//   resolved logical length, resolved capacity, byte length, and byte capacity.
 
 using System;
 using System.Globalization;
@@ -50,9 +54,8 @@ namespace Lokrain.Atlas.Artifacts
     /// </para>
     ///
     /// <para>
-    /// The content hash is optional because early vertical slices may write artifacts before final
-    /// byte-level field hashing is implemented. Because zero is a valid hash value, content hash
-    /// presence is represented by <see cref="HasContentHash"/>.
+    /// The content hash is optional. Because zero is a valid hash value, content-hash presence is
+    /// represented by <see cref="HasContentHash"/>.
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
@@ -125,7 +128,7 @@ namespace Lokrain.Atlas.Artifacts
         public readonly FixedString64Bytes PipelineName;
 
         /// <summary>
-        /// Number of field contracts in the source contract table.
+        /// Number of field contracts in the source Contract table.
         /// </summary>
         public readonly int ContractCount;
 
@@ -284,10 +287,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates an artifact header from a validated execution context.
         /// </summary>
-        /// <param name="context">Execution context whose plan and workspace define the artifact shape.</param>
-        /// <returns>A concrete artifact header without a content hash.</returns>
-        public static AtlasArtifactHeader Create(
-            AtlasExecutionContext context)
+        public static AtlasArtifactHeader Create(AtlasExecutionContext context)
         {
             if (context == null)
             {
@@ -302,9 +302,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates an artifact header from a validated execution context and content hash.
         /// </summary>
-        /// <param name="context">Execution context whose plan and workspace define the artifact shape.</param>
-        /// <param name="contentHash">Deterministic content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact header with a content hash.</returns>
         public static AtlasArtifactHeader Create(
             AtlasExecutionContext context,
             ulong contentHash)
@@ -323,9 +320,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates an artifact header from a compiled plan and resolved shape set.
         /// </summary>
-        /// <param name="plan">Compiled plan that produced the artifact.</param>
-        /// <param name="shapes">Resolved shape set represented by the artifact.</param>
-        /// <returns>A concrete artifact header without a content hash.</returns>
         public static AtlasArtifactHeader Create(
             AtlasCompiledPlan plan,
             AtlasResolvedShapeSet shapes)
@@ -340,10 +334,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Creates an artifact header from a compiled plan, resolved shape set, and content hash.
         /// </summary>
-        /// <param name="plan">Compiled plan that produced the artifact.</param>
-        /// <param name="shapes">Resolved shape set represented by the artifact.</param>
-        /// <param name="contentHash">Deterministic content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact header with a content hash.</returns>
         public static AtlasArtifactHeader Create(
             AtlasCompiledPlan plan,
             AtlasResolvedShapeSet shapes,
@@ -359,29 +349,38 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Validates that this header is concrete and internally consistent.
         /// </summary>
-        /// <param name="parameterName">Parameter name used by thrown exceptions.</param>
-        public void ValidateOrThrow(
-            string parameterName = null)
+        public void ValidateOrThrow(string parameterName = null)
         {
+            var name = parameterName ?? nameof(AtlasArtifactHeader);
+
             if (!IsConcrete)
             {
                 throw new ArgumentException(
                     "Atlas artifact header is not concrete.",
-                    parameterName ?? nameof(AtlasArtifactHeader));
+                    name);
             }
 
             if (Magic != MagicValue)
             {
                 throw new ArgumentException(
-                    $"Atlas artifact header has magic value '{FormatHex(Magic)}', but expected '{FormatHex(MagicValue)}'.",
-                    parameterName ?? nameof(AtlasArtifactHeader));
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas artifact header has magic value '{0}', but expected '{1}'.",
+                        FormatHex(Magic),
+                        FormatHex(MagicValue)),
+                    name);
             }
 
             if (!IsCurrentFormat)
             {
                 throw new ArgumentException(
-                    $"Atlas artifact header has unsupported format version '{FormatMajorVersion}.{FormatMinorVersion}' and header version '{HeaderVersion}'.",
-                    parameterName ?? nameof(AtlasArtifactHeader));
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Atlas artifact header has unsupported format version '{0}.{1}' and header version '{2}'.",
+                        FormatMajorVersion,
+                        FormatMinorVersion,
+                        HeaderVersion),
+                    name);
             }
 
             ValidateCountsOrThrow(
@@ -399,10 +398,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a copy of this header with a content hash.
         /// </summary>
-        /// <param name="contentHash">Deterministic content hash. Zero is valid.</param>
-        /// <returns>A concrete artifact header with the supplied content hash.</returns>
-        public AtlasArtifactHeader WithContentHash(
-            ulong contentHash)
+        public AtlasArtifactHeader WithContentHash(ulong contentHash)
         {
             ValidateOrThrow(nameof(AtlasArtifactHeader));
 
@@ -427,10 +423,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Determines whether this header equals another header.
         /// </summary>
-        /// <param name="other">Header to compare with this header.</param>
-        /// <returns><c>true</c> when both headers contain identical metadata.</returns>
-        public bool Equals(
-            AtlasArtifactHeader other)
+        public bool Equals(AtlasArtifactHeader other)
         {
             return _state == other._state &&
                    _contentHashState == other._contentHashState &&
@@ -457,10 +450,7 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Determines whether this header equals another object.
         /// </summary>
-        /// <param name="obj">Object to compare with this header.</param>
-        /// <returns><c>true</c> when <paramref name="obj"/> is an equal header.</returns>
-        public override bool Equals(
-            object obj)
+        public override bool Equals(object obj)
         {
             return obj is AtlasArtifactHeader other &&
                    Equals(other);
@@ -469,7 +459,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a deterministic hash code for this header.
         /// </summary>
-        /// <returns>A deterministic managed hash code.</returns>
         public override int GetHashCode()
         {
             unchecked
@@ -477,7 +466,7 @@ namespace Lokrain.Atlas.Artifacts
                 var hash = AtlasConstants.DeterministicHashSeed;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ _state;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ _contentHashState;
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ Magic.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldULong(Magic);
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FormatMajorVersion;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FormatMinorVersion;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ HeaderVersion;
@@ -490,11 +479,11 @@ namespace Lokrain.Atlas.Artifacts
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ BindingCount;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ PresentBindingCount;
                 hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ MissingOptionalBindingCount;
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ TotalByteLength.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ TotalByteCapacity.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ContractHash.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ShapeHash.GetHashCode();
-                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ ContentHash.GetHashCode();
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(TotalByteLength);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldLong(TotalByteCapacity);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldULong(ContractHash);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldULong(ShapeHash);
+                hash = (hash * AtlasConstants.DeterministicHashMultiplier) ^ FoldULong(ContentHash);
                 return hash;
             }
         }
@@ -502,7 +491,6 @@ namespace Lokrain.Atlas.Artifacts
         /// <summary>
         /// Returns a diagnostic string for this header.
         /// </summary>
-        /// <returns>A diagnostic string.</returns>
         public override string ToString()
         {
             if (!IsConcrete)
@@ -514,8 +502,20 @@ namespace Lokrain.Atlas.Artifacts
                 ? FormatHex(ContentHash)
                 : "<absent>";
 
-            return
-                $"AtlasArtifactHeader(Pipeline={PipelineName}, Format={FormatMajorVersion}.{FormatMinorVersion}, Header={HeaderVersion}, Fields={FieldCount}, Operations={OperationCount}, Bytes={TotalByteLength}/{TotalByteCapacity}, ContractHash={FormatHex(ContractHash)}, ShapeHash={FormatHex(ShapeHash)}, ContentHash={contentHashText})";
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "AtlasArtifactHeader(Pipeline={0}, Format={1}.{2}, Header={3}, Fields={4}, Operations={5}, Bytes={6}/{7}, ContractHash={8}, ShapeHash={9}, ContentHash={10})",
+                PipelineName,
+                FormatMajorVersion,
+                FormatMinorVersion,
+                HeaderVersion,
+                FieldCount,
+                OperationCount,
+                TotalByteLength,
+                TotalByteCapacity,
+                FormatHex(ContractHash),
+                FormatHex(ShapeHash),
+                contentHashText);
         }
 
         /// <summary>
@@ -578,7 +578,7 @@ namespace Lokrain.Atlas.Artifacts
             if (plan.Contracts == null)
             {
                 throw new ArgumentException(
-                    "Compiled plan does not reference a contract table.",
+                    "Compiled plan does not reference a Contract table.",
                     nameof(plan));
             }
 
@@ -592,21 +592,29 @@ namespace Lokrain.Atlas.Artifacts
             if (shapes.Contracts == null)
             {
                 throw new ArgumentException(
-                    "Resolved shape set does not reference a contract table.",
+                    "Resolved shape set does not reference a Contract table.",
                     nameof(shapes));
             }
 
             if (plan.Contracts.Count != shapes.Contracts.Count)
             {
                 throw new ArgumentException(
-                    $"Compiled plan contract table contains '{plan.Contracts.Count}' fields, but shape contract table contains '{shapes.Contracts.Count}' fields.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Compiled plan Contract table contains {0} fields, but shape Contract table contains {1} fields.",
+                        plan.Contracts.Count,
+                        shapes.Contracts.Count),
                     nameof(shapes));
             }
 
             if (plan.Contracts.Count != shapes.Count)
             {
                 throw new ArgumentException(
-                    $"Compiled plan contract table contains '{plan.Contracts.Count}' fields, but shape set contains '{shapes.Count}' shapes.",
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Compiled plan Contract table contains {0} fields, but shape set contains {1} shapes.",
+                        plan.Contracts.Count,
+                        shapes.Count),
                     nameof(shapes));
             }
 
@@ -615,17 +623,31 @@ namespace Lokrain.Atlas.Artifacts
                 var contract = plan.Contracts[i];
                 var shape = shapes[i];
 
-                contract.ValidateTableReadyOrThrow($"plan.Contracts[{i}]");
-                shape.ValidateOrThrow($"shapes[{i}]");
+                contract.ValidateTableReadyOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "plan.Contracts[{0}]",
+                        i));
+
+                shape.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "shapes[{0}]",
+                        i));
 
                 if (shape.StableId != contract.StableId ||
                     shape.Slot != contract.Slot ||
                     shape.Role != contract.Role ||
                     shape.StorageFormat != contract.StorageFormat ||
+                    shape.ShapeDomain != contract.ShapeDomain ||
                     shape.DeclaredShape != contract.LengthShape)
                 {
                     throw new ArgumentException(
-                        $"Shape at index '{i}' does not match compiled plan contract '{contract.GetDiagnosticName()}'.",
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Shape at index {0} does not match compiled plan Contract '{1}'.",
+                            i,
+                            contract.GetDiagnosticName()),
                         nameof(shapes));
                 }
             }
@@ -644,64 +666,109 @@ namespace Lokrain.Atlas.Artifacts
         {
             if (contractCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(contractCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(contractCount),
+                    contractCount,
+                    "Contract count must be non-negative.");
             }
 
             if (fieldCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(fieldCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(fieldCount),
+                    fieldCount,
+                    "Field count must be non-negative.");
+            }
+
+            if (contractCount != fieldCount)
+            {
+                throw new ArgumentException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Contract count {0} must match field count {1}.",
+                        contractCount,
+                        fieldCount));
             }
 
             if (stageCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(stageCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(stageCount),
+                    stageCount,
+                    "Stage count must be non-negative.");
             }
 
             if (operationCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(operationCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(operationCount),
+                    operationCount,
+                    "Operation count must be non-negative.");
             }
 
             if (bindingCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(bindingCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(bindingCount),
+                    bindingCount,
+                    "Binding count must be non-negative.");
             }
 
             if (presentBindingCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(presentBindingCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(presentBindingCount),
+                    presentBindingCount,
+                    "Present binding count must be non-negative.");
             }
 
             if (missingOptionalBindingCount < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(missingOptionalBindingCount));
+                throw new ArgumentOutOfRangeException(
+                    nameof(missingOptionalBindingCount),
+                    missingOptionalBindingCount,
+                    "Missing optional binding count must be non-negative.");
             }
 
             if (presentBindingCount + missingOptionalBindingCount > bindingCount)
             {
                 throw new ArgumentException(
-                    $"Present binding count '{presentBindingCount}' plus missing optional binding count '{missingOptionalBindingCount}' exceeds binding count '{bindingCount}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Present binding count {0} plus missing optional binding count {1} exceeds binding count {2}.",
+                        presentBindingCount,
+                        missingOptionalBindingCount,
+                        bindingCount));
             }
 
             if (totalByteLength < 0L)
             {
-                throw new ArgumentOutOfRangeException(nameof(totalByteLength));
+                throw new ArgumentOutOfRangeException(
+                    nameof(totalByteLength),
+                    totalByteLength,
+                    "Total byte length must be non-negative.");
             }
 
             if (totalByteCapacity < 0L)
             {
-                throw new ArgumentOutOfRangeException(nameof(totalByteCapacity));
+                throw new ArgumentOutOfRangeException(
+                    nameof(totalByteCapacity),
+                    totalByteCapacity,
+                    "Total byte capacity must be non-negative.");
             }
 
             if (totalByteLength > totalByteCapacity)
             {
                 throw new ArgumentException(
-                    $"Total byte length '{totalByteLength}' exceeds total byte capacity '{totalByteCapacity}'.");
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Total byte length {0} exceeds total byte capacity {1}.",
+                        totalByteLength,
+                        totalByteCapacity));
             }
         }
 
-        private static ulong ComputeContractHash(
-            AtlasContractTable contracts)
+        private static ulong ComputeContractHash(AtlasContractTable contracts)
         {
             var hash = FnvOffsetBasis64;
 
@@ -711,17 +778,20 @@ namespace Lokrain.Atlas.Artifacts
             for (var i = 0; i < contracts.Count; i++)
             {
                 var contract = contracts[i];
-                contract.ValidateTableReadyOrThrow($"contracts[{i}]");
+
+                contract.ValidateTableReadyOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "contracts[{0}]",
+                        i));
 
                 AppendStableDataId(ref hash, contract.StableId);
                 AppendInt(ref hash, contract.Slot.Index);
                 AppendInt(ref hash, (int)contract.Role);
-                AppendInt(ref hash, (int)contract.StorageFormat.Kind);
-                AppendInt(ref hash, contract.StorageFormat.ElementSize);
-                AppendInt(ref hash, contract.StorageFormat.ElementAlignment);
-                AppendULong(ref hash, contract.StorageFormat.ElementTypeHash);
+                AppendStorageFormat(ref hash, contract.StorageFormat);
                 AppendInt(ref hash, (int)contract.Ownership);
                 AppendInt(ref hash, (int)contract.Lifetime);
+                AppendShapeDomain(ref hash, contract.ShapeDomain);
                 AppendLengthShape(ref hash, contract.LengthShape);
                 AppendUInt(ref hash, (uint)contract.Flags);
                 AppendInt(ref hash, (int)contract.HashParticipation);
@@ -730,8 +800,7 @@ namespace Lokrain.Atlas.Artifacts
             return hash;
         }
 
-        private static ulong ComputeShapeHash(
-            AtlasResolvedShapeSet shapes)
+        private static ulong ComputeShapeHash(AtlasResolvedShapeSet shapes)
         {
             var hash = FnvOffsetBasis64;
 
@@ -741,15 +810,18 @@ namespace Lokrain.Atlas.Artifacts
             for (var i = 0; i < shapes.Count; i++)
             {
                 var shape = shapes[i];
-                shape.ValidateOrThrow($"shapes[{i}]");
+
+                shape.ValidateOrThrow(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "shapes[{0}]",
+                        i));
 
                 AppendStableDataId(ref hash, shape.StableId);
                 AppendInt(ref hash, shape.Slot.Index);
                 AppendInt(ref hash, (int)shape.Role);
-                AppendInt(ref hash, (int)shape.StorageFormat.Kind);
-                AppendInt(ref hash, shape.StorageFormat.ElementSize);
-                AppendInt(ref hash, shape.StorageFormat.ElementAlignment);
-                AppendULong(ref hash, shape.StorageFormat.ElementTypeHash);
+                AppendStorageFormat(ref hash, shape.StorageFormat);
+                AppendShapeDomain(ref hash, shape.ShapeDomain);
                 AppendLengthShape(ref hash, shape.DeclaredShape);
                 AppendInt(ref hash, shape.Length);
                 AppendInt(ref hash, shape.Capacity);
@@ -758,6 +830,30 @@ namespace Lokrain.Atlas.Artifacts
             }
 
             return hash;
+        }
+
+        private static void AppendStorageFormat(
+            ref ulong hash,
+            StorageFormat storageFormat)
+        {
+            storageFormat.ValidateOrThrow(nameof(storageFormat));
+
+            AppendInt(ref hash, (int)storageFormat.Kind);
+            AppendInt(ref hash, storageFormat.ElementSize);
+            AppendInt(ref hash, storageFormat.ElementAlignment);
+            AppendULong(ref hash, storageFormat.ElementTypeHash);
+        }
+
+        private static void AppendShapeDomain(
+            ref ulong hash,
+            AtlasShapeDomain domain)
+        {
+            domain.ValidateOrThrow(nameof(domain));
+
+            AppendInt(ref hash, (int)domain.Kind);
+            AppendFixedString64(ref hash, domain.Name);
+            AppendByte(ref hash, domain.HasSourceField ? (byte)1 : (byte)0);
+            AppendStableDataId(ref hash, domain.SourceFieldId);
         }
 
         private static void AppendLengthShape(
@@ -779,6 +875,8 @@ namespace Lokrain.Atlas.Artifacts
             ref ulong hash,
             StableDataId stableId)
         {
+            stableId.ValidateOrThrow(nameof(stableId));
+
             AppendULong(ref hash, stableId.High);
             AppendULong(ref hash, stableId.Low);
             AppendUShort(ref hash, stableId.Version);
@@ -800,14 +898,18 @@ namespace Lokrain.Atlas.Artifacts
             ref ulong hash,
             long value)
         {
-            AppendULong(ref hash, unchecked((ulong)value));
+            AppendULong(
+                ref hash,
+                unchecked((ulong)value));
         }
 
         private static void AppendInt(
             ref ulong hash,
             int value)
         {
-            AppendUInt(ref hash, unchecked((uint)value));
+            AppendUInt(
+                ref hash,
+                unchecked((uint)value));
         }
 
         private static void AppendUShort(
@@ -853,8 +955,21 @@ namespace Lokrain.Atlas.Artifacts
             }
         }
 
-        private static string FormatHex(
-            ulong value)
+        private static int FoldLong(long value)
+        {
+            return FoldULong(
+                unchecked((ulong)value));
+        }
+
+        private static int FoldULong(ulong value)
+        {
+            unchecked
+            {
+                return (int)(value ^ (value >> 32));
+            }
+        }
+
+        private static string FormatHex(ulong value)
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
