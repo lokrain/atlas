@@ -3,6 +3,8 @@
 using System;
 using System.Collections.Generic;
 using Lokrain.Atlas.Operations;
+using Lokrain.Atlas.Recipes;
+using Lokrain.Atlas.Resources;
 using Lokrain.Atlas.Schemas;
 using Lokrain.Atlas.Stages;
 
@@ -18,12 +20,17 @@ namespace Lokrain.Atlas.Catalog
     /// graph validation is performed by <see cref="GenerationCatalog"/> when <see cref="Build"/> is called.
     /// </para>
     /// <para>
+    /// Resource definitions are catalog-owned semantic resources. They are added before contracts can be
+    /// accepted by the catalog, because stage and operation contracts reference resources by accepted
+    /// definition object, not by raw symbol.
+    /// </para>
+    /// <para>
     /// Route step definitions are owned by <see cref="StageRouteDefinition"/> instances and are not added
     /// independently to the builder.
     /// </para>
     /// <para>
     /// The builder is not a catalog, registry, service locator, Unity asset, execution container, ECS world
-    /// object, runtime binding table, job scheduler, or native data owner.
+    /// object, runtime binding table, job scheduler, field-definition registry, or native data owner.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationCatalogBuilder"/> instance is always valid.
@@ -31,26 +38,23 @@ namespace Lokrain.Atlas.Catalog
     /// </remarks>
     public sealed class GenerationCatalogBuilder
     {
-        private readonly List<GenerationSchemaDefinition> _generationSchemaDefinitions =
-            new();
+        private readonly List<GenerationSchemaDefinition> _generationSchemaDefinitions = new();
 
-        private readonly List<StageDefinition> _stageDefinitions =
-            new();
+        private readonly List<ResourceDefinition> _resourceDefinitions = new();
 
-        private readonly List<StageRouteDefinition> _stageRouteDefinitions =
-            new();
+        private readonly List<GenerationRecipeDefinition> _generationRecipeDefinitions = new();
 
-        private readonly List<StageContract> _stageContracts =
-            new();
+        private readonly List<StageDefinition> _stageDefinitions = new();
 
-        private readonly List<OperationDefinition> _operationDefinitions =
-            new();
+        private readonly List<StageRouteDefinition> _stageRouteDefinitions = new();
 
-        private readonly List<OperationImplementationDefinition> _operationImplementationDefinitions =
-            new();
+        private readonly List<StageContract> _stageContracts = new();
 
-        private readonly List<OperationContract> _operationContracts =
-            new();
+        private readonly List<OperationDefinition> _operationDefinitions = new();
+
+        private readonly List<OperationImplementationDefinition> _operationImplementationDefinitions = new();
+
+        private readonly List<OperationContract> _operationContracts = new();
 
         /// <summary>
         /// Adds a generation schema definition to the builder.
@@ -90,6 +94,89 @@ namespace Lokrain.Atlas.Catalog
                 generationSchemaDefinitions,
                 nameof(generationSchemaDefinitions),
                 "Generation schema definitions");
+
+            return this;
+        }
+
+        /// <summary>
+        /// Adds a resource definition to the builder.
+        /// </summary>
+        /// <param name="resourceDefinition">The resource definition to add.</param>
+        /// <returns>This builder.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="resourceDefinition"/> is null.
+        /// </exception>
+        public GenerationCatalogBuilder AddResourceDefinition(ResourceDefinition resourceDefinition)
+        {
+            AddRequired(
+                _resourceDefinitions,
+                resourceDefinition,
+                nameof(resourceDefinition));
+
+            return this;
+        }
+
+        /// <summary>
+        /// Adds resource definitions to the builder.
+        /// </summary>
+        /// <param name="resourceDefinitions">The resource definitions to add.</param>
+        /// <returns>This builder.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="resourceDefinitions"/> is null.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="resourceDefinitions"/> contains null entries.
+        /// </exception>
+        public GenerationCatalogBuilder AddResourceDefinitions(
+            IEnumerable<ResourceDefinition> resourceDefinitions)
+        {
+            AddRange(
+                _resourceDefinitions,
+                resourceDefinitions,
+                nameof(resourceDefinitions),
+                "Resource definitions");
+
+            return this;
+        }
+
+        /// <summary>
+        /// Adds a generation recipe definition to the builder.
+        /// </summary>
+        /// <param name="generationRecipeDefinition">The generation recipe definition to add.</param>
+        /// <returns>This builder.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="generationRecipeDefinition"/> is null.
+        /// </exception>
+        public GenerationCatalogBuilder AddGenerationRecipeDefinition(
+            GenerationRecipeDefinition generationRecipeDefinition)
+        {
+            AddRequired(
+                _generationRecipeDefinitions,
+                generationRecipeDefinition,
+                nameof(generationRecipeDefinition));
+
+            return this;
+        }
+
+        /// <summary>
+        /// Adds generation recipe definitions to the builder.
+        /// </summary>
+        /// <param name="generationRecipeDefinitions">The generation recipe definitions to add.</param>
+        /// <returns>This builder.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="generationRecipeDefinitions"/> is null.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="generationRecipeDefinitions"/> contains null entries.
+        /// </exception>
+        public GenerationCatalogBuilder AddGenerationRecipeDefinitions(
+            IEnumerable<GenerationRecipeDefinition> generationRecipeDefinitions)
+        {
+            AddRange(
+                _generationRecipeDefinitions,
+                generationRecipeDefinitions,
+                nameof(generationRecipeDefinitions),
+                "Generation recipe definitions");
 
             return this;
         }
@@ -347,8 +434,10 @@ namespace Lokrain.Atlas.Catalog
         /// </exception>
         public GenerationCatalog Build()
         {
-            return new GenerationCatalog(
+            return new(
                 _generationSchemaDefinitions,
+                _resourceDefinitions,
+                _generationRecipeDefinitions,
                 _stageDefinitions,
                 _stageRouteDefinitions,
                 _stageContracts,
@@ -360,7 +449,7 @@ namespace Lokrain.Atlas.Catalog
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(GenerationCatalogBuilder)}({_generationSchemaDefinitions.Count} schema definitions, {_stageDefinitions.Count} stage definitions, {_stageRouteDefinitions.Count} stage route definitions, {_stageContracts.Count} stage contracts, {_operationDefinitions.Count} operation definitions, {_operationImplementationDefinitions.Count} operation implementation definitions, {_operationContracts.Count} operation contracts)";
+            return $"{nameof(GenerationCatalogBuilder)}({_generationSchemaDefinitions.Count} schema definitions, {_resourceDefinitions.Count} resource definitions, {_generationRecipeDefinitions.Count} recipe definitions, {_stageDefinitions.Count} stage definitions, {_stageRouteDefinitions.Count} stage route definitions, {_stageContracts.Count} stage contracts, {_operationDefinitions.Count} operation definitions, {_operationImplementationDefinitions.Count} operation implementation definitions, {_operationContracts.Count} operation contracts)";
         }
 
         private static void AddRequired<TDefinition>(

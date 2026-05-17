@@ -372,7 +372,7 @@ For the primary-continent route, the intended operation chain is:
 ```text
 EvaluateContinentSuitability
 FormContinentCandidate
-PreserveMainContinent
+ExtractMainContinent
 CompleteContinentArea
 ComposeBaseElevation
 ```

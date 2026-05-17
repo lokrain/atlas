@@ -4,128 +4,130 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Lokrain.Atlas.Core;
-using Lokrain.Atlas.Core.Map;
+using Lokrain.Atlas.Recipes;
+using Lokrain.Atlas.Resources;
+using Lokrain.Atlas.Stages;
 
 namespace Lokrain.Atlas.Planning
 {
     /// <summary>
-    /// Represents an unresolved generation request.
+    /// Represents an accepted generation request.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation request contains accepted request inputs and symbol-based selections. It does not contain
-    /// catalog definitions, resolved plan nodes, execution bindings, job data, native containers, ECS systems,
-    /// Unity objects, or runtime execution state.
+    /// A generation request combines a resolved generation recipe, generation-wide run settings, and the final
+    /// resolved route-step implementation choices for this run. It is an accepted domain object, not a raw symbol
+    /// descriptor and not an unresolved user selection.
     /// </para>
     /// <para>
-    /// Stage route selections are preserved in request insertion order for deterministic diagnostics. The
-    /// generation plan compiler resolves the selected symbols through a generation catalog and determines the
-    /// valid managed plan structure.
+    /// The recipe defines the selected schema and stage routes. The request stores the final implementation
+    /// choices after applying any descriptor-level implementation overrides to the recipe defaults.
     /// </para>
     /// <para>
-    /// Operation implementation selections are keyed by stage-route-step-definition symbol. The compiler validates
-    /// that each selected route step exists, belongs to a selected route, resolves to an operation definition, and
-    /// uses an implementation belonging to that operation definition.
+    /// Route and operation compatibility is validated through accepted semantic resource definitions, not raw
+    /// resource symbols.
     /// </para>
     /// <para>
-    /// A non-null <see cref="GenerationRequest"/> instance is always syntactically valid. Catalog-dependent
-    /// semantic validity is established by the generation plan compiler.
+    /// A generation request does not contain executable bindings, runtime state, job data, native containers,
+    /// ECS systems, Burst function pointers, or Unity runtime objects.
+    /// </para>
+    /// <para>
+    /// A non-null <see cref="GenerationRequest"/> instance is always valid.
     /// </para>
     /// </remarks>
     public sealed class GenerationRequest : IEquatable<GenerationRequest>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="GenerationRequest"/> class.
+        /// Initializes a new instance of the <see cref="GenerationRequest"/> class using the recipe's default
+        /// implementation choices.
         /// </summary>
-        /// <param name="generationSchemaDefinitionSymbol">The selected generation-schema-definition symbol.</param>
-        /// <param name="grid">The accepted generation grid.</param>
-        /// <param name="seed">The accepted generation seed.</param>
-        /// <param name="stageRouteSelections">The selected stage routes.</param>
-        /// <param name="operationImplementationSelections">The selected route-step operation implementations.</param>
+        /// <param name="generationRecipeDefinition">The accepted resolved generation recipe.</param>
+        /// <param name="runSettings">The generation-wide run settings.</param>
         /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="generationSchemaDefinitionSymbol"/>, <paramref name="grid"/>,
-        /// <paramref name="stageRouteSelections"/>, or <paramref name="operationImplementationSelections"/> is null.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="stageRouteSelections"/> is empty, when either selection collection contains
-        /// null entries, or when duplicate stage, route, or route-step implementation selections are present.
+        /// Thrown when <paramref name="generationRecipeDefinition"/> or <paramref name="runSettings"/> is null.
         /// </exception>
         public GenerationRequest(
-            Symbol generationSchemaDefinitionSymbol,
-            Grid grid,
-            Seed seed,
-            IEnumerable<StageRouteSelection> stageRouteSelections,
-            IEnumerable<OperationImplementationSelection> operationImplementationSelections)
+            GenerationRecipeDefinition generationRecipeDefinition,
+            GenerationRunSettings runSettings)
+            : this(
+                generationRecipeDefinition,
+                runSettings,
+                generationRecipeDefinition is null
+                    ? throw new ArgumentNullException(nameof(generationRecipeDefinition))
+                    : generationRecipeDefinition.StageRouteStepImplementationChoices)
         {
-            if (generationSchemaDefinitionSymbol is null)
-            {
-                throw new ArgumentNullException(nameof(generationSchemaDefinitionSymbol));
-            }
-
-            if (grid is null)
-            {
-                throw new ArgumentNullException(nameof(grid));
-            }
-
-            if (stageRouteSelections is null)
-            {
-                throw new ArgumentNullException(nameof(stageRouteSelections));
-            }
-
-            if (operationImplementationSelections is null)
-            {
-                throw new ArgumentNullException(nameof(operationImplementationSelections));
-            }
-
-            StageRouteSelection[] copiedStageRouteSelections =
-                CopyStageRouteSelections(stageRouteSelections);
-
-            OperationImplementationSelection[] copiedOperationImplementationSelections =
-                CopyOperationImplementationSelections(operationImplementationSelections);
-
-            GenerationSchemaDefinitionSymbol = generationSchemaDefinitionSymbol;
-            Grid = grid;
-            Seed = seed;
-            StageRouteSelections = new ReadOnlyCollection<StageRouteSelection>(
-                copiedStageRouteSelections);
-            OperationImplementationSelections = new ReadOnlyCollection<OperationImplementationSelection>(
-                copiedOperationImplementationSelections);
         }
 
         /// <summary>
-        /// Gets the selected generation-schema-definition symbol.
+        /// Initializes a new instance of the <see cref="GenerationRequest"/> class.
         /// </summary>
-        public Symbol GenerationSchemaDefinitionSymbol { get; }
+        /// <param name="generationRecipeDefinition">The accepted resolved generation recipe.</param>
+        /// <param name="runSettings">The generation-wide run settings.</param>
+        /// <param name="stageRouteStepImplementationChoices">The final resolved route-step implementation choices.</param>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when any required argument is null.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when implementation choices do not exactly satisfy the recipe's selected route steps.
+        /// </exception>
+        public GenerationRequest(
+            GenerationRecipeDefinition generationRecipeDefinition,
+            GenerationRunSettings runSettings,
+            IEnumerable<StageRouteStepImplementationChoice> stageRouteStepImplementationChoices)
+        {
+            if (generationRecipeDefinition is null)
+            {
+                throw new ArgumentNullException(nameof(generationRecipeDefinition));
+            }
+
+            if (runSettings is null)
+            {
+                throw new ArgumentNullException(nameof(runSettings));
+            }
+
+            if (stageRouteStepImplementationChoices is null)
+            {
+                throw new ArgumentNullException(nameof(stageRouteStepImplementationChoices));
+            }
+
+            StageRouteStepImplementationChoice[] copiedStageRouteStepImplementationChoices =
+                CopyStageRouteStepImplementationChoices(
+                    generationRecipeDefinition,
+                    stageRouteStepImplementationChoices);
+
+            ValidateRouteContractCompatibility(
+                generationRecipeDefinition.StageRouteChoices,
+                copiedStageRouteStepImplementationChoices);
+
+            GenerationRecipeDefinition = generationRecipeDefinition;
+            RunSettings = runSettings;
+            StageRouteStepImplementationChoices =
+                new ReadOnlyCollection<StageRouteStepImplementationChoice>(
+                    copiedStageRouteStepImplementationChoices);
+        }
 
         /// <summary>
-        /// Gets the accepted generation grid.
+        /// Gets the accepted resolved generation recipe.
         /// </summary>
-        public Grid Grid { get; }
+        public GenerationRecipeDefinition GenerationRecipeDefinition { get; }
 
         /// <summary>
-        /// Gets the accepted generation seed.
+        /// Gets the generation-wide run settings.
         /// </summary>
-        public Seed Seed { get; }
+        public GenerationRunSettings RunSettings { get; }
 
         /// <summary>
-        /// Gets the selected stage routes.
+        /// Gets the final resolved route-step implementation choices for this request.
         /// </summary>
-        public IReadOnlyList<StageRouteSelection> StageRouteSelections { get; }
-
-        /// <summary>
-        /// Gets the selected route-step operation implementations.
-        /// </summary>
-        public IReadOnlyList<OperationImplementationSelection> OperationImplementationSelections { get; }
+        public IReadOnlyList<StageRouteStepImplementationChoice> StageRouteStepImplementationChoices { get; }
 
         /// <inheritdoc/>
         public bool Equals(GenerationRequest? other)
         {
             return other is not null
-                && GenerationSchemaDefinitionSymbol == other.GenerationSchemaDefinitionSymbol
-                && Grid == other.Grid
-                && Seed == other.Seed
-                && SequenceEquals(StageRouteSelections, other.StageRouteSelections)
-                && SequenceEquals(OperationImplementationSelections, other.OperationImplementationSelections);
+                && GenerationRecipeDefinition == other.GenerationRecipeDefinition
+                && RunSettings == other.RunSettings
+                && SequenceEquals(StageRouteStepImplementationChoices, other.StageRouteStepImplementationChoices);
         }
 
         /// <inheritdoc/>
@@ -139,18 +141,12 @@ namespace Lokrain.Atlas.Planning
         {
             var hashCode = new HashCode();
 
-            hashCode.Add(GenerationSchemaDefinitionSymbol);
-            hashCode.Add(Grid);
-            hashCode.Add(Seed);
+            hashCode.Add(GenerationRecipeDefinition);
+            hashCode.Add(RunSettings);
 
-            for (int index = 0; index < StageRouteSelections.Count; index++)
+            for (int index = 0; index < StageRouteStepImplementationChoices.Count; index++)
             {
-                hashCode.Add(StageRouteSelections[index]);
-            }
-
-            for (int index = 0; index < OperationImplementationSelections.Count; index++)
-            {
-                hashCode.Add(OperationImplementationSelections[index]);
+                hashCode.Add(StageRouteStepImplementationChoices[index]);
             }
 
             return hashCode.ToHashCode();
@@ -159,7 +155,7 @@ namespace Lokrain.Atlas.Planning
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(GenerationRequest)}({nameof(GenerationSchemaDefinitionSymbol)}: {GenerationSchemaDefinitionSymbol}, {nameof(Grid)}: {Grid}, {nameof(Seed)}: {Seed}, {nameof(StageRouteSelections)}: {StageRouteSelections.Count}, {nameof(OperationImplementationSelections)}: {OperationImplementationSelections.Count})";
+            return $"{nameof(GenerationRequest)}({nameof(GenerationRecipeDefinition)}: {GenerationRecipeDefinition.Symbol}, {nameof(RunSettings)}: {RunSettings}, {nameof(StageRouteStepImplementationChoices)}: {StageRouteStepImplementationChoices.Count})";
         }
 
         /// <summary>
@@ -178,75 +174,177 @@ namespace Lokrain.Atlas.Planning
             return !Equals(left, right);
         }
 
-        private static StageRouteSelection[] CopyStageRouteSelections(
-            IEnumerable<StageRouteSelection> stageRouteSelections)
+        private static StageRouteStepImplementationChoice[] CopyStageRouteStepImplementationChoices(
+            GenerationRecipeDefinition generationRecipeDefinition,
+            IEnumerable<StageRouteStepImplementationChoice> stageRouteStepImplementationChoices)
         {
-            var copiedSelections = new List<StageRouteSelection>();
-            var selectedStageDefinitionSymbols = new HashSet<Symbol>();
-            var selectedStageRouteDefinitionSymbols = new HashSet<Symbol>();
+            Dictionary<Symbol, StageRouteStepDefinition> recipeRouteStepsBySymbol =
+                CreateRecipeRouteStepIndex(generationRecipeDefinition.StageRouteChoices);
 
-            foreach (StageRouteSelection? selection in stageRouteSelections)
+            var copiedChoices = new List<StageRouteStepImplementationChoice>();
+            var selectedRouteStepSymbols = new HashSet<Symbol>();
+
+            foreach (StageRouteStepImplementationChoice? choice in stageRouteStepImplementationChoices)
             {
-                if (selection is null)
+                if (choice is null)
                 {
                     throw new ArgumentException(
-                        "Stage route selections cannot contain null entries.",
-                        nameof(stageRouteSelections));
+                        "Stage route step implementation choices cannot contain null entries.",
+                        nameof(stageRouteStepImplementationChoices));
                 }
 
-                if (!selectedStageDefinitionSymbols.Add(selection.StageDefinitionSymbol))
+                if (!ReferenceEquals(
+                    choice.OperationDefinition.GenerationSchema,
+                    generationRecipeDefinition.GenerationSchemaDefinition))
                 {
                     throw new ArgumentException(
-                        $"Stage route selections cannot contain duplicate stage-definition symbol '{selection.StageDefinitionSymbol}'.",
-                        nameof(stageRouteSelections));
+                        $"Stage route step implementation choice for route step '{choice.StageRouteStepDefinition.Symbol}' belongs to operation generation schema '{choice.OperationDefinition.GenerationSchema.Symbol}', but the generation recipe belongs to generation schema '{generationRecipeDefinition.GenerationSchemaDefinition.Symbol}'.",
+                        nameof(stageRouteStepImplementationChoices));
                 }
 
-                if (!selectedStageRouteDefinitionSymbols.Add(selection.StageRouteDefinitionSymbol))
+                if (!recipeRouteStepsBySymbol.TryGetValue(
+                        choice.StageRouteStepDefinition.Symbol,
+                        out StageRouteStepDefinition recipeRouteStepDefinition)
+                    || !ReferenceEquals(recipeRouteStepDefinition, choice.StageRouteStepDefinition))
                 {
                     throw new ArgumentException(
-                        $"Stage route selections cannot contain duplicate stage-route-definition symbol '{selection.StageRouteDefinitionSymbol}'.",
-                        nameof(stageRouteSelections));
+                        $"Stage route step implementation choice references route step '{choice.StageRouteStepDefinition.Symbol}', but that route step is not part of generation recipe '{generationRecipeDefinition.Symbol}'.",
+                        nameof(stageRouteStepImplementationChoices));
                 }
 
-                copiedSelections.Add(selection);
+                if (!selectedRouteStepSymbols.Add(choice.StageRouteStepDefinition.Symbol))
+                {
+                    throw new ArgumentException(
+                        $"Stage route step implementation choices cannot contain duplicate route-step symbol '{choice.StageRouteStepDefinition.Symbol}'.",
+                        nameof(stageRouteStepImplementationChoices));
+                }
+
+                copiedChoices.Add(choice);
             }
 
-            if (copiedSelections.Count == 0)
+            foreach (Symbol routeStepSymbol in recipeRouteStepsBySymbol.Keys)
             {
-                throw new ArgumentException(
-                    "Generation request must contain at least one stage route selection.",
-                    nameof(stageRouteSelections));
+                if (!selectedRouteStepSymbols.Contains(routeStepSymbol))
+                {
+                    throw new ArgumentException(
+                        $"Generation request must contain an implementation choice for route step '{routeStepSymbol}'.",
+                        nameof(stageRouteStepImplementationChoices));
+                }
             }
 
-            return copiedSelections.ToArray();
+            return copiedChoices.ToArray();
         }
 
-        private static OperationImplementationSelection[] CopyOperationImplementationSelections(
-            IEnumerable<OperationImplementationSelection> operationImplementationSelections)
+        private static Dictionary<Symbol, StageRouteStepDefinition> CreateRecipeRouteStepIndex(
+            IReadOnlyList<StageRouteChoice> stageRouteChoices)
         {
-            var copiedSelections = new List<OperationImplementationSelection>();
-            var selectedStageRouteStepDefinitionSymbols = new HashSet<Symbol>();
+            var routeStepsBySymbol = new Dictionary<Symbol, StageRouteStepDefinition>();
 
-            foreach (OperationImplementationSelection? selection in operationImplementationSelections)
+            for (int stageIndex = 0; stageIndex < stageRouteChoices.Count; stageIndex++)
             {
-                if (selection is null)
-                {
-                    throw new ArgumentException(
-                        "Operation implementation selections cannot contain null entries.",
-                        nameof(operationImplementationSelections));
-                }
+                StageRouteChoice stageRouteChoice = stageRouteChoices[stageIndex];
 
-                if (!selectedStageRouteStepDefinitionSymbols.Add(selection.StageRouteStepDefinitionSymbol))
+                for (int stepIndex = 0;
+                    stepIndex < stageRouteChoice.StageRouteDefinition.StageRouteStepDefinitions.Count;
+                    stepIndex++)
                 {
-                    throw new ArgumentException(
-                        $"Operation implementation selections cannot contain duplicate stage-route-step-definition symbol '{selection.StageRouteStepDefinitionSymbol}'.",
-                        nameof(operationImplementationSelections));
-                }
+                    StageRouteStepDefinition routeStepDefinition =
+                        stageRouteChoice.StageRouteDefinition.StageRouteStepDefinitions[stepIndex];
 
-                copiedSelections.Add(selection);
+                    routeStepsBySymbol.Add(
+                        routeStepDefinition.Symbol,
+                        routeStepDefinition);
+                }
             }
 
-            return copiedSelections.ToArray();
+            return routeStepsBySymbol;
+        }
+
+        private static void ValidateRouteContractCompatibility(
+            IReadOnlyList<StageRouteChoice> stageRouteChoices,
+            IReadOnlyList<StageRouteStepImplementationChoice> stageRouteStepImplementationChoices)
+        {
+            Dictionary<Symbol, StageRouteStepImplementationChoice> implementationChoicesByRouteStepSymbol =
+                CreateImplementationChoiceIndex(stageRouteStepImplementationChoices);
+
+            for (int stageIndex = 0; stageIndex < stageRouteChoices.Count; stageIndex++)
+            {
+                StageRouteChoice stageRouteChoice = stageRouteChoices[stageIndex];
+
+                var availableResources = new HashSet<ResourceDefinition>();
+
+                for (int inputIndex = 0;
+                    inputIndex < stageRouteChoice.StageContract.RequiredInputs.Count;
+                    inputIndex++)
+                {
+                    availableResources.Add(stageRouteChoice.StageContract.RequiredInputs[inputIndex]);
+                }
+
+                for (int stepIndex = 0;
+                    stepIndex < stageRouteChoice.StageRouteDefinition.StageRouteStepDefinitions.Count;
+                    stepIndex++)
+                {
+                    StageRouteStepDefinition routeStepDefinition =
+                        stageRouteChoice.StageRouteDefinition.StageRouteStepDefinitions[stepIndex];
+
+                    StageRouteStepImplementationChoice implementationChoice =
+                        implementationChoicesByRouteStepSymbol[routeStepDefinition.Symbol];
+
+                    for (int inputIndex = 0;
+                        inputIndex < implementationChoice.OperationContract.RequiredInputs.Count;
+                        inputIndex++)
+                    {
+                        ResourceDefinition requiredInput =
+                            implementationChoice.OperationContract.RequiredInputs[inputIndex];
+
+                        if (!availableResources.Contains(requiredInput))
+                        {
+                            throw new ArgumentException(
+                                $"Stage route '{stageRouteChoice.StageRouteDefinition.Symbol}' contains route step '{routeStepDefinition.Symbol}' requiring input resource '{requiredInput.Symbol}', but that resource is not available from the stage contract inputs or previous route steps.",
+                                nameof(stageRouteStepImplementationChoices));
+                        }
+                    }
+
+                    for (int outputIndex = 0;
+                        outputIndex < implementationChoice.OperationContract.ProducedOutputs.Count;
+                        outputIndex++)
+                    {
+                        availableResources.Add(implementationChoice.OperationContract.ProducedOutputs[outputIndex]);
+                    }
+                }
+
+                for (int outputIndex = 0;
+                    outputIndex < stageRouteChoice.StageContract.ProducedOutputs.Count;
+                    outputIndex++)
+                {
+                    ResourceDefinition producedOutput =
+                        stageRouteChoice.StageContract.ProducedOutputs[outputIndex];
+
+                    if (!availableResources.Contains(producedOutput))
+                    {
+                        throw new ArgumentException(
+                            $"Stage route '{stageRouteChoice.StageRouteDefinition.Symbol}' does not produce required stage output resource '{producedOutput.Symbol}' for stage definition '{stageRouteChoice.StageDefinition.Symbol}'.",
+                            nameof(stageRouteStepImplementationChoices));
+                    }
+                }
+            }
+        }
+
+        private static Dictionary<Symbol, StageRouteStepImplementationChoice> CreateImplementationChoiceIndex(
+            IReadOnlyList<StageRouteStepImplementationChoice> stageRouteStepImplementationChoices)
+        {
+            var choicesByRouteStepSymbol = new Dictionary<Symbol, StageRouteStepImplementationChoice>();
+
+            for (int index = 0; index < stageRouteStepImplementationChoices.Count; index++)
+            {
+                StageRouteStepImplementationChoice choice = stageRouteStepImplementationChoices[index];
+
+                choicesByRouteStepSymbol.Add(
+                    choice.StageRouteStepDefinition.Symbol,
+                    choice);
+            }
+
+            return choicesByRouteStepSymbol;
         }
 
         private static bool SequenceEquals<TValue>(

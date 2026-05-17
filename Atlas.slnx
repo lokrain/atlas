@@ -1,5 +1,5 @@
 ﻿<Solution>
   <Project Path="Lokrain.Atlas.csproj" />
-  <Project Path="Lokrain.Atlas.Editor.Tests.csproj" />
+  <Project Path="Lokrain.Atlas.Tests.csproj" />
   <Project Path="Lokrain.Atlas.Editor.csproj" />
 </Solution>

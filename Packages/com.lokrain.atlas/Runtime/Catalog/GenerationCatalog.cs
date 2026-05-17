@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Operations;
+using Lokrain.Atlas.Recipes;
+using Lokrain.Atlas.Resources;
 using Lokrain.Atlas.Schemas;
 using Lokrain.Atlas.Stages;
 
@@ -15,17 +17,20 @@ namespace Lokrain.Atlas.Catalog
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation catalog owns validated schema, stage, route, route-step, operation, implementation, and
-    /// contract definitions used by managed planning. It is not a mutable registry, builder, Unity asset,
-    /// execution container, ECS world object, runtime binding table, job scheduler, or native data owner.
+    /// A generation catalog owns validated schema, resource, recipe, stage, route, route-step, operation,
+    /// implementation, and contract definitions used by managed planning and request resolution. It is not a
+    /// mutable registry, builder, Unity asset, execution container, ECS world object, runtime binding table,
+    /// job scheduler, field-definition registry, or native data owner.
     /// </para>
     /// <para>
     /// Definitions are indexed by stable machine-facing symbols. Display names are user-facing metadata only
     /// and must not be used for lookup, deterministic generation, catalog resolution, or artifact compatibility.
     /// </para>
     /// <para>
-    /// Referenced owner definitions must be present in the same catalog instance. Routes must be compatible with
-    /// their stage contracts through their ordered operation contracts before the catalog is accepted.
+    /// Referenced owner definitions must be present in the same catalog instance. Resource definitions must be
+    /// present in the same catalog instance before they may appear in stage or operation contracts. Routes must
+    /// be compatible with their stage contracts through their ordered operation contracts before the catalog is
+    /// accepted. Recipes must reference definitions owned by the same catalog.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationCatalog"/> instance is always valid.
@@ -34,6 +39,8 @@ namespace Lokrain.Atlas.Catalog
     public sealed class GenerationCatalog
     {
         private readonly Dictionary<Symbol, GenerationSchemaDefinition> _generationSchemaDefinitionsBySymbol;
+        private readonly Dictionary<Symbol, ResourceDefinition> _resourceDefinitionsBySymbol;
+        private readonly Dictionary<Symbol, GenerationRecipeDefinition> _generationRecipeDefinitionsBySymbol;
         private readonly Dictionary<Symbol, StageDefinition> _stageDefinitionsBySymbol;
         private readonly Dictionary<Symbol, StageRouteDefinition> _stageRouteDefinitionsBySymbol;
         private readonly Dictionary<Symbol, StageRouteStepDefinition> _stageRouteStepDefinitionsBySymbol;
@@ -44,6 +51,8 @@ namespace Lokrain.Atlas.Catalog
 
         internal GenerationCatalog(
             IEnumerable<GenerationSchemaDefinition> generationSchemaDefinitions,
+            IEnumerable<ResourceDefinition> resourceDefinitions,
+            IEnumerable<GenerationRecipeDefinition> generationRecipeDefinitions,
             IEnumerable<StageDefinition> stageDefinitions,
             IEnumerable<StageRouteDefinition> stageRouteDefinitions,
             IEnumerable<StageContract> stageContracts,
@@ -63,6 +72,12 @@ namespace Lokrain.Atlas.Catalog
                     "Generation catalog must contain at least one generation schema definition.",
                     nameof(generationSchemaDefinitions));
             }
+
+            ResourceDefinition[] copiedResourceDefinitions = CopyUniqueBySymbol(
+                resourceDefinitions,
+                definition => definition.Symbol,
+                nameof(resourceDefinitions),
+                "Resource definitions");
 
             StageDefinition[] copiedStageDefinitions = CopyUniqueBySymbol(
                 stageDefinitions,
@@ -104,8 +119,18 @@ namespace Lokrain.Atlas.Catalog
                 nameof(operationContracts),
                 "Operation contracts");
 
+            GenerationRecipeDefinition[] copiedGenerationRecipeDefinitions = CopyUniqueBySymbol(
+                generationRecipeDefinitions,
+                definition => definition.Symbol,
+                nameof(generationRecipeDefinitions),
+                "Generation recipe definitions");
+
             _generationSchemaDefinitionsBySymbol = CreateIndex(
                 copiedGenerationSchemaDefinitions,
+                definition => definition.Symbol);
+
+            _resourceDefinitionsBySymbol = CreateIndex(
+                copiedResourceDefinitions,
                 definition => definition.Symbol);
 
             _stageDefinitionsBySymbol = CreateIndex(
@@ -136,6 +161,10 @@ namespace Lokrain.Atlas.Catalog
                 copiedOperationContracts,
                 contract => contract.OperationDefinition.Symbol);
 
+            _generationRecipeDefinitionsBySymbol = CreateIndex(
+                copiedGenerationRecipeDefinitions,
+                definition => definition.Symbol);
+
             Dictionary<Symbol, int> stageRouteCountsByStageDefinitionSymbol = CreateCountIndex(
                 copiedStageRouteDefinitions,
                 definition => definition.StageDefinition.Symbol);
@@ -144,14 +173,21 @@ namespace Lokrain.Atlas.Catalog
                 copiedOperationImplementationDefinitions,
                 definition => definition.OperationDefinition.Symbol);
 
+            ValidateResourceDefinitions(
+                copiedResourceDefinitions,
+                _generationSchemaDefinitionsBySymbol,
+                nameof(resourceDefinitions));
+
             ValidateStageContracts(
                 copiedStageContracts,
                 _stageDefinitionsBySymbol,
+                _resourceDefinitionsBySymbol,
                 nameof(stageContracts));
 
             ValidateOperationContracts(
                 copiedOperationContracts,
                 _operationDefinitionsBySymbol,
+                _resourceDefinitionsBySymbol,
                 nameof(operationContracts));
 
             ValidateStageDefinitions(
@@ -181,8 +217,26 @@ namespace Lokrain.Atlas.Catalog
                 _operationContractsByOperationDefinitionSymbol,
                 nameof(stageRouteDefinitions));
 
+            ValidateGenerationRecipeDefinitions(
+                copiedGenerationRecipeDefinitions,
+                _generationSchemaDefinitionsBySymbol,
+                _stageDefinitionsBySymbol,
+                _stageRouteDefinitionsBySymbol,
+                _stageRouteStepDefinitionsBySymbol,
+                _stageContractsByStageDefinitionSymbol,
+                _operationDefinitionsBySymbol,
+                _operationContractsByOperationDefinitionSymbol,
+                _operationImplementationDefinitionsBySymbol,
+                nameof(generationRecipeDefinitions));
+
             GenerationSchemaDefinitions = new ReadOnlyCollection<GenerationSchemaDefinition>(
                 copiedGenerationSchemaDefinitions);
+
+            ResourceDefinitions = new ReadOnlyCollection<ResourceDefinition>(
+                copiedResourceDefinitions);
+
+            GenerationRecipeDefinitions = new ReadOnlyCollection<GenerationRecipeDefinition>(
+                copiedGenerationRecipeDefinitions);
 
             StageDefinitions = new ReadOnlyCollection<StageDefinition>(
                 copiedStageDefinitions);
@@ -210,6 +264,16 @@ namespace Lokrain.Atlas.Catalog
         /// Gets the generation schema definitions owned by the catalog.
         /// </summary>
         public IReadOnlyList<GenerationSchemaDefinition> GenerationSchemaDefinitions { get; }
+
+        /// <summary>
+        /// Gets the resource definitions owned by the catalog.
+        /// </summary>
+        public IReadOnlyList<ResourceDefinition> ResourceDefinitions { get; }
+
+        /// <summary>
+        /// Gets the generation recipe definitions owned by the catalog.
+        /// </summary>
+        public IReadOnlyList<GenerationRecipeDefinition> GenerationRecipeDefinitions { get; }
 
         /// <summary>
         /// Gets the stage definitions owned by the catalog.
@@ -281,6 +345,80 @@ namespace Lokrain.Atlas.Catalog
                 generationSchemaDefinitionSymbol,
                 nameof(generationSchemaDefinitionSymbol),
                 out generationSchemaDefinition);
+        }
+
+        /// <summary>
+        /// Determines whether the catalog contains a resource definition with the specified symbol.
+        /// </summary>
+        public bool ContainsResourceDefinition(Symbol resourceDefinitionSymbol)
+        {
+            return ContainsKey(
+                _resourceDefinitionsBySymbol,
+                resourceDefinitionSymbol,
+                nameof(resourceDefinitionSymbol));
+        }
+
+        /// <summary>
+        /// Gets the resource definition with the specified symbol.
+        /// </summary>
+        public ResourceDefinition GetResourceDefinition(Symbol resourceDefinitionSymbol)
+        {
+            return GetRequired(
+                _resourceDefinitionsBySymbol,
+                resourceDefinitionSymbol,
+                nameof(resourceDefinitionSymbol),
+                "Resource definition");
+        }
+
+        /// <summary>
+        /// Attempts to get the resource definition with the specified symbol.
+        /// </summary>
+        public bool TryGetResourceDefinition(
+            Symbol resourceDefinitionSymbol,
+            out ResourceDefinition? resourceDefinition)
+        {
+            return TryGet(
+                _resourceDefinitionsBySymbol,
+                resourceDefinitionSymbol,
+                nameof(resourceDefinitionSymbol),
+                out resourceDefinition);
+        }
+
+        /// <summary>
+        /// Determines whether the catalog contains a generation recipe definition with the specified symbol.
+        /// </summary>
+        public bool ContainsGenerationRecipeDefinition(Symbol generationRecipeDefinitionSymbol)
+        {
+            return ContainsKey(
+                _generationRecipeDefinitionsBySymbol,
+                generationRecipeDefinitionSymbol,
+                nameof(generationRecipeDefinitionSymbol));
+        }
+
+        /// <summary>
+        /// Gets the generation recipe definition with the specified symbol.
+        /// </summary>
+        public GenerationRecipeDefinition GetGenerationRecipeDefinition(Symbol generationRecipeDefinitionSymbol)
+        {
+            return GetRequired(
+                _generationRecipeDefinitionsBySymbol,
+                generationRecipeDefinitionSymbol,
+                nameof(generationRecipeDefinitionSymbol),
+                "Generation recipe definition");
+        }
+
+        /// <summary>
+        /// Attempts to get the generation recipe definition with the specified symbol.
+        /// </summary>
+        public bool TryGetGenerationRecipeDefinition(
+            Symbol generationRecipeDefinitionSymbol,
+            out GenerationRecipeDefinition? generationRecipeDefinition)
+        {
+            return TryGet(
+                _generationRecipeDefinitionsBySymbol,
+                generationRecipeDefinitionSymbol,
+                nameof(generationRecipeDefinitionSymbol),
+                out generationRecipeDefinition);
         }
 
         /// <summary>
@@ -542,7 +680,7 @@ namespace Lokrain.Atlas.Catalog
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(GenerationCatalog)}({nameof(GenerationSchemaDefinitions)}: {GenerationSchemaDefinitions.Count}, {nameof(StageDefinitions)}: {StageDefinitions.Count}, {nameof(StageRouteDefinitions)}: {StageRouteDefinitions.Count}, {nameof(StageRouteStepDefinitions)}: {StageRouteStepDefinitions.Count}, {nameof(OperationDefinitions)}: {OperationDefinitions.Count}, {nameof(OperationImplementationDefinitions)}: {OperationImplementationDefinitions.Count})";
+            return $"{nameof(GenerationCatalog)}({nameof(GenerationSchemaDefinitions)}: {GenerationSchemaDefinitions.Count}, {nameof(ResourceDefinitions)}: {ResourceDefinitions.Count}, {nameof(GenerationRecipeDefinitions)}: {GenerationRecipeDefinitions.Count}, {nameof(StageDefinitions)}: {StageDefinitions.Count}, {nameof(StageRouteDefinitions)}: {StageRouteDefinitions.Count}, {nameof(StageRouteStepDefinitions)}: {StageRouteStepDefinitions.Count}, {nameof(OperationDefinitions)}: {OperationDefinitions.Count}, {nameof(OperationImplementationDefinitions)}: {OperationImplementationDefinitions.Count})";
         }
 
         private static TDefinition[] CopyUniqueBySymbol<TDefinition>(
@@ -593,8 +731,11 @@ namespace Lokrain.Atlas.Catalog
 
             foreach (StageRouteDefinition stageRouteDefinition in stageRouteDefinitions)
             {
-                foreach (StageRouteStepDefinition stageRouteStepDefinition in stageRouteDefinition.StageRouteStepDefinitions)
+                for (int index = 0; index < stageRouteDefinition.StageRouteStepDefinitions.Count; index++)
                 {
+                    StageRouteStepDefinition stageRouteStepDefinition =
+                        stageRouteDefinition.StageRouteStepDefinitions[index];
+
                     if (!uniqueRouteStepSymbols.Add(stageRouteStepDefinition.Symbol))
                     {
                         throw new ArgumentException(
@@ -736,6 +877,21 @@ namespace Lokrain.Atlas.Catalog
             return definitionsBySymbol.TryGetValue(symbol, out definition);
         }
 
+        private static void ValidateResourceDefinitions(
+            IEnumerable<ResourceDefinition> resourceDefinitions,
+            Dictionary<Symbol, GenerationSchemaDefinition> generationSchemaDefinitionsBySymbol,
+            string parameterName)
+        {
+            foreach (ResourceDefinition resourceDefinition in resourceDefinitions)
+            {
+                ValidateGenerationSchemaReference(
+                    resourceDefinition.GenerationSchema,
+                    generationSchemaDefinitionsBySymbol,
+                    parameterName,
+                    $"Resource definition '{resourceDefinition.Symbol}'");
+            }
+        }
+
         private static void ValidateStageDefinitions(
             IEnumerable<StageDefinition> stageDefinitions,
             Dictionary<Symbol, GenerationSchemaDefinition> generationSchemaDefinitionsBySymbol,
@@ -814,8 +970,11 @@ namespace Lokrain.Atlas.Catalog
                     parameterName,
                     $"Stage route definition '{stageRouteDefinition.Symbol}'");
 
-                foreach (StageRouteStepDefinition stageRouteStepDefinition in stageRouteDefinition.StageRouteStepDefinitions)
+                for (int index = 0; index < stageRouteDefinition.StageRouteStepDefinitions.Count; index++)
                 {
+                    StageRouteStepDefinition stageRouteStepDefinition =
+                        stageRouteDefinition.StageRouteStepDefinitions[index];
+
                     if (!operationDefinitionsBySymbol.TryGetValue(
                         stageRouteStepDefinition.OperationDefinitionSymbol,
                         out OperationDefinition operationDefinition))
@@ -847,6 +1006,7 @@ namespace Lokrain.Atlas.Catalog
         private static void ValidateStageContracts(
             IEnumerable<StageContract> stageContracts,
             Dictionary<Symbol, StageDefinition> stageDefinitionsBySymbol,
+            Dictionary<Symbol, ResourceDefinition> resourceDefinitionsBySymbol,
             string parameterName)
         {
             foreach (StageContract stageContract in stageContracts)
@@ -856,6 +1016,18 @@ namespace Lokrain.Atlas.Catalog
                     stageDefinitionsBySymbol,
                     parameterName,
                     $"Stage contract for stage definition '{stageContract.StageDefinition.Symbol}'");
+
+                ValidateResourceReferences(
+                    stageContract.RequiredInputs,
+                    resourceDefinitionsBySymbol,
+                    parameterName,
+                    $"Stage contract for stage definition '{stageContract.StageDefinition.Symbol}' required inputs");
+
+                ValidateResourceReferences(
+                    stageContract.ProducedOutputs,
+                    resourceDefinitionsBySymbol,
+                    parameterName,
+                    $"Stage contract for stage definition '{stageContract.StageDefinition.Symbol}' produced outputs");
             }
         }
 
@@ -877,6 +1049,7 @@ namespace Lokrain.Atlas.Catalog
         private static void ValidateOperationContracts(
             IEnumerable<OperationContract> operationContracts,
             Dictionary<Symbol, OperationDefinition> operationDefinitionsBySymbol,
+            Dictionary<Symbol, ResourceDefinition> resourceDefinitionsBySymbol,
             string parameterName)
         {
             foreach (OperationContract operationContract in operationContracts)
@@ -886,6 +1059,93 @@ namespace Lokrain.Atlas.Catalog
                     operationDefinitionsBySymbol,
                     parameterName,
                     $"Operation contract for operation definition '{operationContract.OperationDefinition.Symbol}'");
+
+                ValidateResourceReferences(
+                    operationContract.RequiredInputs,
+                    resourceDefinitionsBySymbol,
+                    parameterName,
+                    $"Operation contract for operation definition '{operationContract.OperationDefinition.Symbol}' required inputs");
+
+                ValidateResourceReferences(
+                    operationContract.ProducedOutputs,
+                    resourceDefinitionsBySymbol,
+                    parameterName,
+                    $"Operation contract for operation definition '{operationContract.OperationDefinition.Symbol}' produced outputs");
+            }
+        }
+
+        private static void ValidateGenerationRecipeDefinitions(
+            IEnumerable<GenerationRecipeDefinition> generationRecipeDefinitions,
+            Dictionary<Symbol, GenerationSchemaDefinition> generationSchemaDefinitionsBySymbol,
+            Dictionary<Symbol, StageDefinition> stageDefinitionsBySymbol,
+            Dictionary<Symbol, StageRouteDefinition> stageRouteDefinitionsBySymbol,
+            Dictionary<Symbol, StageRouteStepDefinition> stageRouteStepDefinitionsBySymbol,
+            Dictionary<Symbol, StageContract> stageContractsByStageDefinitionSymbol,
+            Dictionary<Symbol, OperationDefinition> operationDefinitionsBySymbol,
+            Dictionary<Symbol, OperationContract> operationContractsByOperationDefinitionSymbol,
+            Dictionary<Symbol, OperationImplementationDefinition> operationImplementationDefinitionsBySymbol,
+            string parameterName)
+        {
+            foreach (GenerationRecipeDefinition generationRecipeDefinition in generationRecipeDefinitions)
+            {
+                ValidateGenerationSchemaReference(
+                    generationRecipeDefinition.GenerationSchemaDefinition,
+                    generationSchemaDefinitionsBySymbol,
+                    parameterName,
+                    $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                for (int index = 0; index < generationRecipeDefinition.StageRouteChoices.Count; index++)
+                {
+                    StageRouteChoice stageRouteChoice = generationRecipeDefinition.StageRouteChoices[index];
+
+                    ValidateStageDefinitionReference(
+                        stageRouteChoice.StageDefinition,
+                        stageDefinitionsBySymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                    ValidateStageRouteDefinitionReference(
+                        stageRouteChoice.StageRouteDefinition,
+                        stageRouteDefinitionsBySymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                    ValidateStageContractReference(
+                        stageRouteChoice.StageContract,
+                        stageContractsByStageDefinitionSymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+                }
+
+                for (int index = 0; index < generationRecipeDefinition.StageRouteStepImplementationChoices.Count; index++)
+                {
+                    StageRouteStepImplementationChoice implementationChoice =
+                        generationRecipeDefinition.StageRouteStepImplementationChoices[index];
+
+                    ValidateStageRouteStepDefinitionReference(
+                        implementationChoice.StageRouteStepDefinition,
+                        stageRouteStepDefinitionsBySymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                    ValidateOperationDefinitionReference(
+                        implementationChoice.OperationDefinition,
+                        operationDefinitionsBySymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                    ValidateOperationContractReference(
+                        implementationChoice.OperationContract,
+                        operationContractsByOperationDefinitionSymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+
+                    ValidateOperationImplementationDefinitionReference(
+                        implementationChoice.OperationImplementationDefinition,
+                        operationImplementationDefinitionsBySymbol,
+                        parameterName,
+                        $"Generation recipe definition '{generationRecipeDefinition.Symbol}'");
+                }
             }
         }
 
@@ -898,45 +1158,68 @@ namespace Lokrain.Atlas.Catalog
         {
             StageContract stageContract = stageContractsByStageDefinitionSymbol[stageRouteDefinition.StageDefinition.Symbol];
 
-            var availableSymbols = new HashSet<Symbol>();
+            var availableResources = new HashSet<ResourceDefinition>();
 
-            foreach (Symbol requiredInputSymbol in stageContract.RequiredInputSymbols)
+            for (int index = 0; index < stageContract.RequiredInputs.Count; index++)
             {
-                availableSymbols.Add(requiredInputSymbol);
+                availableResources.Add(stageContract.RequiredInputs[index]);
             }
 
-            foreach (StageRouteStepDefinition stageRouteStepDefinition in stageRouteDefinition.StageRouteStepDefinitions)
+            for (int index = 0; index < stageRouteDefinition.StageRouteStepDefinitions.Count; index++)
             {
+                StageRouteStepDefinition stageRouteStepDefinition =
+                    stageRouteDefinition.StageRouteStepDefinitions[index];
+
                 OperationDefinition operationDefinition = operationDefinitionsBySymbol[
                     stageRouteStepDefinition.OperationDefinitionSymbol];
 
                 OperationContract operationContract = operationContractsByOperationDefinitionSymbol[
                     operationDefinition.Symbol];
 
-                foreach (Symbol requiredInputSymbol in operationContract.RequiredInputSymbols)
+                for (int inputIndex = 0; inputIndex < operationContract.RequiredInputs.Count; inputIndex++)
                 {
-                    if (!availableSymbols.Contains(requiredInputSymbol))
+                    ResourceDefinition requiredInput = operationContract.RequiredInputs[inputIndex];
+
+                    if (!availableResources.Contains(requiredInput))
                     {
                         throw new ArgumentException(
-                            $"Stage route definition '{stageRouteDefinition.Symbol}' contains route step '{stageRouteStepDefinition.Symbol}' for operation definition '{operationDefinition.Symbol}', but required input symbol '{requiredInputSymbol}' is not available from the stage contract inputs or previous route steps.",
+                            $"Stage route definition '{stageRouteDefinition.Symbol}' contains route step '{stageRouteStepDefinition.Symbol}' for operation definition '{operationDefinition.Symbol}', but required input resource '{requiredInput.Symbol}' is not available from the stage contract inputs or previous route steps.",
                             parameterName);
                     }
                 }
 
-                foreach (Symbol producedOutputSymbol in operationContract.ProducedOutputSymbols)
+                for (int outputIndex = 0; outputIndex < operationContract.ProducedOutputs.Count; outputIndex++)
                 {
-                    availableSymbols.Add(producedOutputSymbol);
+                    availableResources.Add(operationContract.ProducedOutputs[outputIndex]);
                 }
             }
 
-            foreach (Symbol producedOutputSymbol in stageContract.ProducedOutputSymbols)
+            for (int outputIndex = 0; outputIndex < stageContract.ProducedOutputs.Count; outputIndex++)
             {
-                if (!availableSymbols.Contains(producedOutputSymbol))
+                ResourceDefinition producedOutput = stageContract.ProducedOutputs[outputIndex];
+
+                if (!availableResources.Contains(producedOutput))
                 {
                     throw new ArgumentException(
-                        $"Stage route definition '{stageRouteDefinition.Symbol}' does not produce required stage output symbol '{producedOutputSymbol}' for stage definition '{stageRouteDefinition.StageDefinition.Symbol}'.",
+                        $"Stage route definition '{stageRouteDefinition.Symbol}' does not produce required stage output resource '{producedOutput.Symbol}' for stage definition '{stageRouteDefinition.StageDefinition.Symbol}'.",
                         parameterName);
                 }
+            }
+        }
+
+        private static void ValidateResourceReferences(
+            IReadOnlyList<ResourceDefinition> resourceDefinitions,
+            Dictionary<Symbol, ResourceDefinition> resourceDefinitionsBySymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            for (int index = 0; index < resourceDefinitions.Count; index++)
+            {
+                ValidateResourceDefinitionReference(
+                    resourceDefinitions[index],
+                    resourceDefinitionsBySymbol,
+                    parameterName,
+                    ownerDescription);
             }
         }
 
@@ -953,6 +1236,23 @@ namespace Lokrain.Atlas.Catalog
             {
                 throw new ArgumentException(
                     $"{ownerDescription} references a generation schema definition that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateResourceDefinitionReference(
+            ResourceDefinition resourceDefinition,
+            Dictionary<Symbol, ResourceDefinition> resourceDefinitionsBySymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!resourceDefinitionsBySymbol.TryGetValue(
+                    resourceDefinition.Symbol,
+                    out ResourceDefinition catalogResourceDefinition)
+                || !ReferenceEquals(catalogResourceDefinition, resourceDefinition))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references resource definition '{resourceDefinition.Symbol}' that is not present in this catalog.",
                     parameterName);
             }
         }
@@ -974,6 +1274,57 @@ namespace Lokrain.Atlas.Catalog
             }
         }
 
+        private static void ValidateStageRouteDefinitionReference(
+            StageRouteDefinition stageRouteDefinition,
+            Dictionary<Symbol, StageRouteDefinition> stageRouteDefinitionsBySymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!stageRouteDefinitionsBySymbol.TryGetValue(
+                    stageRouteDefinition.Symbol,
+                    out StageRouteDefinition catalogStageRouteDefinition)
+                || !ReferenceEquals(catalogStageRouteDefinition, stageRouteDefinition))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references a stage route definition that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateStageRouteStepDefinitionReference(
+            StageRouteStepDefinition stageRouteStepDefinition,
+            Dictionary<Symbol, StageRouteStepDefinition> stageRouteStepDefinitionsBySymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!stageRouteStepDefinitionsBySymbol.TryGetValue(
+                    stageRouteStepDefinition.Symbol,
+                    out StageRouteStepDefinition catalogStageRouteStepDefinition)
+                || !ReferenceEquals(catalogStageRouteStepDefinition, stageRouteStepDefinition))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references a stage route step definition that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateStageContractReference(
+            StageContract stageContract,
+            Dictionary<Symbol, StageContract> stageContractsByStageDefinitionSymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!stageContractsByStageDefinitionSymbol.TryGetValue(
+                    stageContract.StageDefinition.Symbol,
+                    out StageContract catalogStageContract)
+                || !ReferenceEquals(catalogStageContract, stageContract))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references a stage contract that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
         private static void ValidateOperationDefinitionReference(
             OperationDefinition operationDefinition,
             Dictionary<Symbol, OperationDefinition> operationDefinitionsBySymbol,
@@ -987,6 +1338,40 @@ namespace Lokrain.Atlas.Catalog
             {
                 throw new ArgumentException(
                     $"{ownerDescription} references an operation definition that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateOperationContractReference(
+            OperationContract operationContract,
+            Dictionary<Symbol, OperationContract> operationContractsByOperationDefinitionSymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!operationContractsByOperationDefinitionSymbol.TryGetValue(
+                    operationContract.OperationDefinition.Symbol,
+                    out OperationContract catalogOperationContract)
+                || !ReferenceEquals(catalogOperationContract, operationContract))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references an operation contract that is not present in this catalog.",
+                    parameterName);
+            }
+        }
+
+        private static void ValidateOperationImplementationDefinitionReference(
+            OperationImplementationDefinition operationImplementationDefinition,
+            Dictionary<Symbol, OperationImplementationDefinition> operationImplementationDefinitionsBySymbol,
+            string parameterName,
+            string ownerDescription)
+        {
+            if (!operationImplementationDefinitionsBySymbol.TryGetValue(
+                    operationImplementationDefinition.Symbol,
+                    out OperationImplementationDefinition catalogOperationImplementationDefinition)
+                || !ReferenceEquals(catalogOperationImplementationDefinition, operationImplementationDefinition))
+            {
+                throw new ArgumentException(
+                    $"{ownerDescription} references an operation implementation definition that is not present in this catalog.",
                     parameterName);
             }
         }

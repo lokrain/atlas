@@ -3,12 +3,12 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using Lokrain.Atlas.Core;
+using Lokrain.Atlas.Resources;
 
 namespace Lokrain.Atlas.Operations
 {
     /// <summary>
-    /// Defines the symbolic input and output contract for a catalog-owned generation operation.
+    /// Defines the semantic input and output resource contract for a catalog-owned generation operation.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -17,13 +17,12 @@ namespace Lokrain.Atlas.Operations
     /// binding, execution behavior, runtime state, job data, or native containers.
     /// </para>
     /// <para>
-    /// Required input symbols and produced output symbols are stable machine-facing contract values. They are
-    /// intentionally represented as symbols at this layer so later field, artifact, catalog, and runnable-plan
-    /// layers can resolve them without coupling operation metadata to execution storage.
+    /// Required inputs and produced outputs are semantic resource definitions. They answer what values are
+    /// required or produced by the operation, not how those values are stored or executed.
     /// </para>
     /// <para>
-    /// Required input symbols and produced output symbols may overlap. An overlap represents read-modify-write
-    /// behavior for a symbolic contract value.
+    /// Required inputs and produced outputs may overlap. An overlap represents read-modify-write behavior for
+    /// a semantic resource.
     /// </para>
     /// <para>
     /// Equality is based on <see cref="OperationDefinition"/> because an operation has one contract identity.
@@ -41,56 +40,58 @@ namespace Lokrain.Atlas.Operations
         /// Initializes a new instance of the <see cref="OperationContract"/> class.
         /// </summary>
         /// <param name="operationDefinition">The operation definition described by this contract.</param>
-        /// <param name="requiredInputSymbols">The symbolic inputs required before the operation can execute.</param>
-        /// <param name="producedOutputSymbols">The symbolic outputs produced by the operation.</param>
+        /// <param name="requiredInputs">The semantic resources required before the operation can execute.</param>
+        /// <param name="producedOutputs">The semantic resources produced by the operation.</param>
         /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="operationDefinition"/>, <paramref name="requiredInputSymbols"/>,
-        /// or <paramref name="producedOutputSymbols"/> is null.
+        /// Thrown when <paramref name="operationDefinition"/>, <paramref name="requiredInputs"/>,
+        /// or <paramref name="producedOutputs"/> is null.
         /// </exception>
         /// <exception cref="ArgumentException">
-        /// Thrown when either symbol collection contains null entries or duplicate symbols, or when both
-        /// collections are empty.
+        /// Thrown when either resource collection contains null entries or duplicate resources, when a resource
+        /// belongs to a different generation schema than the operation, or when both collections are empty.
         /// </exception>
         public OperationContract(
             OperationDefinition operationDefinition,
-            IEnumerable<Symbol> requiredInputSymbols,
-            IEnumerable<Symbol> producedOutputSymbols)
+            IEnumerable<ResourceDefinition> requiredInputs,
+            IEnumerable<ResourceDefinition> producedOutputs)
         {
             if (operationDefinition is null)
             {
                 throw new ArgumentNullException(nameof(operationDefinition));
             }
 
-            if (requiredInputSymbols is null)
+            if (requiredInputs is null)
             {
-                throw new ArgumentNullException(nameof(requiredInputSymbols));
+                throw new ArgumentNullException(nameof(requiredInputs));
             }
 
-            if (producedOutputSymbols is null)
+            if (producedOutputs is null)
             {
-                throw new ArgumentNullException(nameof(producedOutputSymbols));
+                throw new ArgumentNullException(nameof(producedOutputs));
             }
 
-            Symbol[] copiedRequiredInputSymbols = CopySymbols(
-                requiredInputSymbols,
-                nameof(requiredInputSymbols),
-                "Operation contract required input symbols");
+            ResourceDefinition[] copiedRequiredInputs = CopyResourceDefinitions(
+                requiredInputs,
+                operationDefinition,
+                nameof(requiredInputs),
+                "Operation contract required inputs");
 
-            Symbol[] copiedProducedOutputSymbols = CopySymbols(
-                producedOutputSymbols,
-                nameof(producedOutputSymbols),
-                "Operation contract produced output symbols");
+            ResourceDefinition[] copiedProducedOutputs = CopyResourceDefinitions(
+                producedOutputs,
+                operationDefinition,
+                nameof(producedOutputs),
+                "Operation contract produced outputs");
 
-            if (copiedRequiredInputSymbols.Length == 0 && copiedProducedOutputSymbols.Length == 0)
+            if (copiedRequiredInputs.Length == 0 && copiedProducedOutputs.Length == 0)
             {
                 throw new ArgumentException(
-                    "Operation contract must contain at least one required input symbol or produced output symbol.",
-                    nameof(producedOutputSymbols));
+                    "Operation contract must contain at least one required input resource or produced output resource.",
+                    nameof(producedOutputs));
             }
 
             OperationDefinition = operationDefinition;
-            RequiredInputSymbols = new ReadOnlyCollection<Symbol>(copiedRequiredInputSymbols);
-            ProducedOutputSymbols = new ReadOnlyCollection<Symbol>(copiedProducedOutputSymbols);
+            RequiredInputs = new ReadOnlyCollection<ResourceDefinition>(copiedRequiredInputs);
+            ProducedOutputs = new ReadOnlyCollection<ResourceDefinition>(copiedProducedOutputs);
         }
 
         /// <summary>
@@ -99,14 +100,14 @@ namespace Lokrain.Atlas.Operations
         public OperationDefinition OperationDefinition { get; }
 
         /// <summary>
-        /// Gets the symbolic inputs required before the operation can execute.
+        /// Gets the semantic resources required before the operation can execute.
         /// </summary>
-        public IReadOnlyList<Symbol> RequiredInputSymbols { get; }
+        public IReadOnlyList<ResourceDefinition> RequiredInputs { get; }
 
         /// <summary>
-        /// Gets the symbolic outputs produced by the operation.
+        /// Gets the semantic resources produced by the operation.
         /// </summary>
-        public IReadOnlyList<Symbol> ProducedOutputSymbols { get; }
+        public IReadOnlyList<ResourceDefinition> ProducedOutputs { get; }
 
         /// <inheritdoc/>
         public bool Equals(OperationContract? other)
@@ -129,7 +130,7 @@ namespace Lokrain.Atlas.Operations
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(OperationContract)}({nameof(OperationDefinition)}: {OperationDefinition.Symbol}, {nameof(RequiredInputSymbols)}: {RequiredInputSymbols.Count}, {nameof(ProducedOutputSymbols)}: {ProducedOutputSymbols.Count})";
+            return $"{nameof(OperationContract)}({nameof(OperationDefinition)}: {OperationDefinition.Symbol}, {nameof(RequiredInputs)}: {RequiredInputs.Count}, {nameof(ProducedOutputs)}: {ProducedOutputs.Count})";
         }
 
         /// <summary>
@@ -148,34 +149,42 @@ namespace Lokrain.Atlas.Operations
             return !Equals(left, right);
         }
 
-        private static Symbol[] CopySymbols(
-            IEnumerable<Symbol> symbols,
+        private static ResourceDefinition[] CopyResourceDefinitions(
+            IEnumerable<ResourceDefinition> resourceDefinitions,
+            OperationDefinition operationDefinition,
             string parameterName,
             string description)
         {
-            var copiedSymbols = new List<Symbol>();
-            var uniqueSymbols = new HashSet<Symbol>();
+            var copiedResourceDefinitions = new List<ResourceDefinition>();
+            var uniqueResourceDefinitions = new HashSet<ResourceDefinition>();
 
-            foreach (Symbol? symbol in symbols)
+            foreach (ResourceDefinition? resourceDefinition in resourceDefinitions)
             {
-                if (symbol is null)
+                if (resourceDefinition is null)
                 {
                     throw new ArgumentException(
                         $"{description} cannot contain null entries.",
                         parameterName);
                 }
 
-                if (!uniqueSymbols.Add(symbol))
+                if (resourceDefinition.GenerationSchema != operationDefinition.GenerationSchema)
                 {
                     throw new ArgumentException(
-                        $"{description} cannot contain duplicate symbol '{symbol}'.",
+                        $"{description} cannot contain resource '{resourceDefinition.Symbol}' from generation schema '{resourceDefinition.GenerationSchema.Symbol}' because operation '{operationDefinition.Symbol}' belongs to generation schema '{operationDefinition.GenerationSchema.Symbol}'.",
                         parameterName);
                 }
 
-                copiedSymbols.Add(symbol);
+                if (!uniqueResourceDefinitions.Add(resourceDefinition))
+                {
+                    throw new ArgumentException(
+                        $"{description} cannot contain duplicate resource '{resourceDefinition.Symbol}'.",
+                        parameterName);
+                }
+
+                copiedResourceDefinitions.Add(resourceDefinition);
             }
 
-            return copiedSymbols.ToArray();
+            return copiedResourceDefinitions.ToArray();
         }
     }
 }

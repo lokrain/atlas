@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Core.Map;
+using Lokrain.Atlas.Recipes;
+using Lokrain.Atlas.Resources;
 using Lokrain.Atlas.Schemas;
 
 namespace Lokrain.Atlas.Planning
@@ -14,15 +16,16 @@ namespace Lokrain.Atlas.Planning
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation plan contains accepted Core inputs and resolved managed plan nodes created by the generation
-    /// plan compiler. It does not contain executable bindings, runtime state, job data, native containers,
-    /// ECS systems, Burst function pointers, or Unity runtime objects.
+    /// A generation plan contains an accepted generation recipe, generation-wide run settings, and resolved
+    /// managed plan nodes created by the generation plan compiler. It does not contain executable bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// Stage plan node order is compiler-created managed execution order. The order must satisfy stage contract
     /// dependencies: every required stage input must be available from a previous stage output.
     /// </para>
     /// <para>
+    /// Stage dependency validation uses accepted semantic resource definitions, not raw resource symbols.
     /// Runnable-plan compilation later converts this managed plan into execution-ready metadata and resolved
     /// runtime bindings. Jobs later receive only raw unmanaged data and native containers.
     /// </para>
@@ -33,19 +36,18 @@ namespace Lokrain.Atlas.Planning
     public sealed class GenerationPlan : IEquatable<GenerationPlan>
     {
         internal GenerationPlan(
-            GenerationSchemaDefinition generationSchemaDefinition,
-            Grid grid,
-            Seed seed,
+            GenerationRecipeDefinition generationRecipeDefinition,
+            GenerationRunSettings runSettings,
             IEnumerable<StagePlanNode> stagePlanNodes)
         {
-            if (generationSchemaDefinition is null)
+            if (generationRecipeDefinition is null)
             {
-                throw new ArgumentNullException(nameof(generationSchemaDefinition));
+                throw new ArgumentNullException(nameof(generationRecipeDefinition));
             }
 
-            if (grid is null)
+            if (runSettings is null)
             {
-                throw new ArgumentNullException(nameof(grid));
+                throw new ArgumentNullException(nameof(runSettings));
             }
 
             if (stagePlanNodes is null)
@@ -54,31 +56,41 @@ namespace Lokrain.Atlas.Planning
             }
 
             StagePlanNode[] copiedStagePlanNodes = CopyStagePlanNodes(
-                generationSchemaDefinition,
+                generationRecipeDefinition,
                 stagePlanNodes);
 
             ValidateStagePlanNodeOrder(copiedStagePlanNodes);
 
-            GenerationSchemaDefinition = generationSchemaDefinition;
-            Grid = grid;
-            Seed = seed;
+            GenerationRecipeDefinition = generationRecipeDefinition;
+            RunSettings = runSettings;
             StagePlanNodes = new ReadOnlyCollection<StagePlanNode>(copiedStagePlanNodes);
         }
 
         /// <summary>
+        /// Gets the accepted resolved generation recipe.
+        /// </summary>
+        public GenerationRecipeDefinition GenerationRecipeDefinition { get; }
+
+        /// <summary>
+        /// Gets the generation-wide run settings.
+        /// </summary>
+        public GenerationRunSettings RunSettings { get; }
+
+        /// <summary>
         /// Gets the resolved generation schema definition.
         /// </summary>
-        public GenerationSchemaDefinition GenerationSchemaDefinition { get; }
+        public GenerationSchemaDefinition GenerationSchemaDefinition =>
+            GenerationRecipeDefinition.GenerationSchemaDefinition;
 
         /// <summary>
         /// Gets the accepted generation grid.
         /// </summary>
-        public Grid Grid { get; }
+        public Grid Grid => RunSettings.Grid;
 
         /// <summary>
         /// Gets the accepted generation seed.
         /// </summary>
-        public Seed Seed { get; }
+        public Seed Seed => RunSettings.Seed;
 
         /// <summary>
         /// Gets the resolved managed stage plan nodes in compiler-created managed execution order.
@@ -89,9 +101,8 @@ namespace Lokrain.Atlas.Planning
         public bool Equals(GenerationPlan? other)
         {
             return other is not null
-                && GenerationSchemaDefinition == other.GenerationSchemaDefinition
-                && Grid == other.Grid
-                && Seed == other.Seed
+                && GenerationRecipeDefinition == other.GenerationRecipeDefinition
+                && RunSettings == other.RunSettings
                 && SequenceEquals(StagePlanNodes, other.StagePlanNodes);
         }
 
@@ -106,9 +117,8 @@ namespace Lokrain.Atlas.Planning
         {
             var hashCode = new HashCode();
 
-            hashCode.Add(GenerationSchemaDefinition);
-            hashCode.Add(Grid);
-            hashCode.Add(Seed);
+            hashCode.Add(GenerationRecipeDefinition);
+            hashCode.Add(RunSettings);
 
             for (int index = 0; index < StagePlanNodes.Count; index++)
             {
@@ -121,7 +131,7 @@ namespace Lokrain.Atlas.Planning
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(GenerationPlan)}({nameof(GenerationSchemaDefinition)}: {GenerationSchemaDefinition.Symbol}, {nameof(Grid)}: {Grid}, {nameof(Seed)}: {Seed}, {nameof(StagePlanNodes)}: {StagePlanNodes.Count})";
+            return $"{nameof(GenerationPlan)}({nameof(GenerationRecipeDefinition)}: {GenerationRecipeDefinition.Symbol}, {nameof(RunSettings)}: {RunSettings}, {nameof(StagePlanNodes)}: {StagePlanNodes.Count})";
         }
 
         /// <summary>
@@ -141,9 +151,12 @@ namespace Lokrain.Atlas.Planning
         }
 
         private static StagePlanNode[] CopyStagePlanNodes(
-            GenerationSchemaDefinition generationSchemaDefinition,
+            GenerationRecipeDefinition generationRecipeDefinition,
             IEnumerable<StagePlanNode> stagePlanNodes)
         {
+            Dictionary<Symbol, StageRouteChoice> recipeStageRouteChoicesByRouteSymbol =
+                CreateRecipeStageRouteChoiceIndex(generationRecipeDefinition.StageRouteChoices);
+
             var copiedStagePlanNodes = new List<StagePlanNode>();
             var stageDefinitionSymbols = new HashSet<Symbol>();
             var stageRouteDefinitionSymbols = new HashSet<Symbol>();
@@ -159,10 +172,36 @@ namespace Lokrain.Atlas.Planning
 
                 if (!ReferenceEquals(
                     stagePlanNode.StageDefinition.GenerationSchema,
-                    generationSchemaDefinition))
+                    generationRecipeDefinition.GenerationSchemaDefinition))
                 {
                     throw new ArgumentException(
-                        $"Stage plan node for stage definition '{stagePlanNode.StageDefinition.Symbol}' belongs to generation schema '{stagePlanNode.StageDefinition.GenerationSchema.Symbol}', but the generation plan belongs to generation schema '{generationSchemaDefinition.Symbol}'.",
+                        $"Stage plan node for stage definition '{stagePlanNode.StageDefinition.Symbol}' belongs to generation schema '{stagePlanNode.StageDefinition.GenerationSchema.Symbol}', but the generation recipe belongs to generation schema '{generationRecipeDefinition.GenerationSchemaDefinition.Symbol}'.",
+                        nameof(stagePlanNodes));
+                }
+
+                if (!recipeStageRouteChoicesByRouteSymbol.TryGetValue(
+                        stagePlanNode.StageRouteDefinition.Symbol,
+                        out StageRouteChoice recipeStageRouteChoice)
+                    || !ReferenceEquals(
+                        recipeStageRouteChoice.StageRouteDefinition,
+                        stagePlanNode.StageRouteDefinition))
+                {
+                    throw new ArgumentException(
+                        $"Stage plan node references stage route definition '{stagePlanNode.StageRouteDefinition.Symbol}', but that route is not selected by generation recipe '{generationRecipeDefinition.Symbol}'.",
+                        nameof(stagePlanNodes));
+                }
+
+                if (!ReferenceEquals(recipeStageRouteChoice.StageDefinition, stagePlanNode.StageDefinition))
+                {
+                    throw new ArgumentException(
+                        $"Stage plan node references stage definition '{stagePlanNode.StageDefinition.Symbol}', but recipe route choice '{recipeStageRouteChoice.StageRouteDefinition.Symbol}' belongs to stage definition '{recipeStageRouteChoice.StageDefinition.Symbol}'.",
+                        nameof(stagePlanNodes));
+                }
+
+                if (!ReferenceEquals(recipeStageRouteChoice.StageContract, stagePlanNode.StageContract))
+                {
+                    throw new ArgumentException(
+                        $"Stage plan node for stage definition '{stagePlanNode.StageDefinition.Symbol}' does not use the stage contract selected by generation recipe '{generationRecipeDefinition.Symbol}'.",
                         nameof(stagePlanNodes));
                 }
 
@@ -183,38 +222,61 @@ namespace Lokrain.Atlas.Planning
                 copiedStagePlanNodes.Add(stagePlanNode);
             }
 
-            if (copiedStagePlanNodes.Count == 0)
+            if (copiedStagePlanNodes.Count != generationRecipeDefinition.StageRouteChoices.Count)
             {
                 throw new ArgumentException(
-                    "Generation plan must contain at least one stage plan node.",
+                    $"Generation plan for recipe '{generationRecipeDefinition.Symbol}' requires {generationRecipeDefinition.StageRouteChoices.Count} stage plan nodes, but {copiedStagePlanNodes.Count} were provided.",
                     nameof(stagePlanNodes));
             }
 
             return copiedStagePlanNodes.ToArray();
         }
 
+        private static Dictionary<Symbol, StageRouteChoice> CreateRecipeStageRouteChoiceIndex(
+            IReadOnlyList<StageRouteChoice> stageRouteChoices)
+        {
+            var stageRouteChoicesByRouteSymbol = new Dictionary<Symbol, StageRouteChoice>();
+
+            for (int index = 0; index < stageRouteChoices.Count; index++)
+            {
+                StageRouteChoice choice = stageRouteChoices[index];
+
+                stageRouteChoicesByRouteSymbol.Add(
+                    choice.StageRouteDefinition.Symbol,
+                    choice);
+            }
+
+            return stageRouteChoicesByRouteSymbol;
+        }
+
         private static void ValidateStagePlanNodeOrder(
             IReadOnlyList<StagePlanNode> stagePlanNodes)
         {
-            var availableSymbols = new HashSet<Symbol>();
+            var availableResources = new HashSet<ResourceDefinition>();
 
             for (int index = 0; index < stagePlanNodes.Count; index++)
             {
                 StagePlanNode stagePlanNode = stagePlanNodes[index];
 
-                foreach (Symbol requiredInputSymbol in stagePlanNode.StageContract.RequiredInputSymbols)
+                for (int inputIndex = 0;
+                    inputIndex < stagePlanNode.StageContract.RequiredInputs.Count;
+                    inputIndex++)
                 {
-                    if (!availableSymbols.Contains(requiredInputSymbol))
+                    ResourceDefinition requiredInput = stagePlanNode.StageContract.RequiredInputs[inputIndex];
+
+                    if (!availableResources.Contains(requiredInput))
                     {
                         throw new ArgumentException(
-                            $"Stage plan node at index {index} for stage definition '{stagePlanNode.StageDefinition.Symbol}' requires input symbol '{requiredInputSymbol}', but that symbol is not available from previous stage outputs.",
+                            $"Stage plan node at index {index} for stage definition '{stagePlanNode.StageDefinition.Symbol}' requires input resource '{requiredInput.Symbol}', but that resource is not available from previous stage outputs.",
                             nameof(stagePlanNodes));
                     }
                 }
 
-                foreach (Symbol producedOutputSymbol in stagePlanNode.StageContract.ProducedOutputSymbols)
+                for (int outputIndex = 0;
+                    outputIndex < stagePlanNode.StageContract.ProducedOutputs.Count;
+                    outputIndex++)
                 {
-                    availableSymbols.Add(producedOutputSymbol);
+                    availableResources.Add(stagePlanNode.StageContract.ProducedOutputs[outputIndex]);
                 }
             }
         }

@@ -1,145 +1,211 @@
 # Unity Package Layout
 
-Package: `com.lokrain.atlas`
-
 ## Purpose
 
-This document defines the Unity package folder and assembly strategy for Atlas.
-
-Atlas follows Unity package conventions while keeping runtime deterministic generation separate from editor authoring and execution-specific Burst/job code.
+This document defines the package folder and assembly layout for the current managed Atlas architecture.
 
 ## Package Root
 
 ```text
-Packages/com.lokrain.atlas/
-  package.json
+com.lokrain.atlas/
   Runtime/
   Editor/
   Tests/
-  Documentation~/
+  Documentation/
   Samples~/
 ```
 
 ## Runtime Layout
+
+Current Runtime layout:
 
 ```text
 Runtime/
   Lokrain.Atlas.asmdef
 
   Core/
+    Symbol.cs
+    DisplayName.cs
+    Map/
+      Cell.cs
+      CellIndex.cs
+      Grid.cs
+      Seed.cs
+
   Schemas/
+    GenerationSchemaDefinition.cs
+    BuiltInGenerationSchemas.cs
+
   Stages/
+    StageKind.cs
+    StageDefinition.cs
+    StageRouteStepDefinition.cs
+    StageRouteDefinition.cs
+    StageContract.cs
+
   Operations/
+    OperationKind.cs
+    OperationDefinition.cs
+    OperationImplementationDefinition.cs
+    OperationContract.cs
+
   Catalog/
+    GenerationCatalog.cs
+    GenerationCatalogBuilder.cs
+
+  Recipes/
+    StageRouteChoice.cs
+    StageRouteStepImplementationChoice.cs
+    GenerationRecipeDefinition.cs
+
   Planning/
+    GenerationRunSettings.cs
+    OperationImplementationOverrideDescriptor.cs
+    GenerationRequestDescriptor.cs
+    GenerationRequestResolutionError.cs
+    GenerationRequestResolutionResult.cs
+    GenerationRequestResolver.cs
+    GenerationRequest.cs
+    OperationPlanNode.cs
+    StagePlanNode.cs
+    GenerationPlan.cs
+    GenerationPlanCompiler.cs
+
   Generation/
-  Execution/
-  Fields/
-  Artifacts/
+    Landmass/
+      LandmassStageKinds.cs
+      LandmassOperationKinds.cs
+      LandmassStageDefinitions.cs
+      LandmassResourceSymbols.cs
+      LandmassStageContracts.cs
+      LandmassGenerationCatalog.cs
+      LandmassGenerationRecipes.cs
+      LandmassGenerationRequests.cs
+      Operations/
+        LandmassOperationDefinitions.cs
+        LandmassOperationContracts.cs
+        LandmassOperationImplementations.cs
+      Routes/
+        LandmassStageRouteSteps.cs
+        LandmassStageRoutes.cs
 ```
 
-Initial package work should include only folders that have real source files.
+## Runtime Assembly
 
-Do not create empty architecture folders just to show intent.
+Current Runtime assembly:
+
+```text
+Lokrain.Atlas
+```
+
+Recommended asmdef boundary:
+
+```json
+{
+  "name": "Lokrain.Atlas",
+  "rootNamespace": "Lokrain.Atlas",
+  "references": [],
+  "noEngineReferences": true
+}
+```
+
+The current assembly must not reference:
+
+```text
+UnityEngine
+UnityEditor
+Unity.Burst
+Unity.Collections
+Unity.Jobs
+Unity.Entities
+Unity.Mathematics
+```
+
+## Future Execution Layout
+
+Execution should be introduced later in a separate assembly.
+
+Example future layout:
+
+```text
+Runtime/Execution/
+  Lokrain.Atlas.Execution.asmdef
+  RunnablePlanCompiler.cs
+  RunnablePlan.cs
+  WorkspaceLayout.cs
+  Workspace.cs
+  Operation executors
+  Job schedulers
+  Burst jobs
+```
+
+That assembly may reference:
+
+```text
+Lokrain.Atlas
+Unity.Burst
+Unity.Collections
+Unity.Jobs
+Unity.Mathematics
+Unity.Entities, if required
+```
 
 ## Editor Layout
 
+Editor code belongs under:
+
 ```text
 Editor/
-  Lokrain.Atlas.Editor.asmdef later
 ```
 
-Editor code is introduced only when authoring assets, inspectors, windows, or importers exist.
+Editor code may contain:
 
-Runtime must not reference Editor.
+```text
+inspectors
+windows
+importers
+ScriptableObject authoring adapters
+JSON import/export tooling
+```
+
+Editor code must produce descriptors or catalog definitions. It must not become canonical runtime truth.
 
 ## Tests Layout
 
-```text
-Tests/
-  Runtime/
-    Lokrain.Atlas.Tests.asmdef
-  Editor/
-    Lokrain.Atlas.Editor.Tests.asmdef later
-```
-
-Pure managed runtime tests belong in `Tests/Runtime`.
-
-Editor tooling tests belong in `Tests/Editor` after editor tooling exists.
-
-## Documentation Layout
+Suggested tests:
 
 ```text
-Documentation~/
-  README.md
-  Architecture/
-  ADR/
-  Design/
-  Plans/
-  Templates/
+Tests/Runtime/
+  Core primitive tests
+  Catalog validation tests
+  Recipe validation tests
+  Request descriptor tests
+  Request resolver tests
+  Plan compiler tests
+
+Tests/Editor/
+  Editor adapter tests
+  importer/exporter tests
 ```
 
-`Documentation~` is the package documentation folder.
+Smoke dumps may live in Editor tests while the architecture is stabilizing.
 
-## Assembly Strategy
+## Naming Rule
 
-Start with:
+Public type names must stand without folder context.
+
+Prefer:
 
 ```text
-Runtime/Lokrain.Atlas.asmdef
-Tests/Runtime/Lokrain.Atlas.Tests.asmdef
+LandmassGenerationRecipes
+LandmassOperationDefinitions
 ```
 
-Split later only when dependency pressure exists.
-
-Expected future split:
+Avoid:
 
 ```text
-Lokrain.Atlas.Core
-Lokrain.Atlas.Planning
-Lokrain.Atlas.Generation
-Lokrain.Atlas.Execution
-Lokrain.Atlas.Editor
+Recipes
+OperationDefinitions
 ```
 
-## Dependency Direction
-
-```text
-Core
-  no package layer dependencies
-
-Schemas / Stages / Operations
-  depend on Core
-
-Catalog
-  depends on Core, Schemas, Stages, Operations
-
-Planning
-  depends on Core, Catalog, Schemas, Stages, Operations
-
-Generation/Landmass
-  depends on Core, Stages, Operations
-
-Execution
-  depends on planning output and Unity job/native packages
-
-Editor
-  depends on runtime assemblies
-```
-
-## Forbidden Runtime Dependencies
-
-The following are forbidden in Core, Schemas, Stages, Operations, Catalog, and Planning:
-
-```text
-UnityEditor
-UnityEngine
-Unity.Collections
-Unity.Jobs
-Unity.Burst
-Unity.Entities
-```
-
-Execution may depend on Unity.Collections, Unity.Jobs, Unity.Burst, and Unity.Mathematics.
-
-Editor may depend on UnityEditor.
+inside public module namespaces.

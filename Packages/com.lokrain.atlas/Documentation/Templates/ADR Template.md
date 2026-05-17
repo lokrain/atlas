@@ -1,30 +1,42 @@
-# ADR-XXX Title
+# ADR-000 Title
 
-Status: Proposed | Accepted | Superseded | Rejected  
+Status: Proposed | Accepted | Superseded  
 Date: YYYY-MM-DD
 
 ## Context
 
-Describe the problem, forces, constraints, and why a decision is needed.
+Describe the problem, constraints, and current architecture pressure.
+
+Use precise Atlas vocabulary.
+
+State whether the decision affects:
+
+```text
+descriptors
+catalogs
+recipes
+accepted requests
+plans
+execution
+Unity package boundaries
+determinism
+```
 
 ## Decision
 
-State the decision clearly.
+State the decision directly.
 
-Use precise language:
+Include ownership and dependency direction.
 
-```text
-must
-must not
-owns
-is responsible for
-```
-
-Avoid vague future language.
+Use concrete type names when applicable.
 
 ## Consequences
 
-Describe what becomes easier, what becomes harder, and what the package must now enforce.
+List the rules this decision creates.
+
+List source files or tests that must change if directly relevant.
+
+Do not describe deferred execution features as implemented facts.
 
 ## Rejected Alternatives
 

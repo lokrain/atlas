@@ -3,12 +3,12 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using Lokrain.Atlas.Core;
+using Lokrain.Atlas.Resources;
 
 namespace Lokrain.Atlas.Stages
 {
     /// <summary>
-    /// Defines the symbolic input and output contract for a catalog-owned generation stage.
+    /// Defines the semantic input and output resource contract for a catalog-owned generation stage.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -17,13 +17,12 @@ namespace Lokrain.Atlas.Stages
     /// execution behavior, runtime bindings, job data, or native containers.
     /// </para>
     /// <para>
-    /// Required input symbols and produced output symbols are stable machine-facing contract values. They are
-    /// intentionally represented as symbols at this layer so later field, artifact, catalog, and runnable-plan
-    /// layers can resolve them without coupling stage metadata to execution storage.
+    /// Required inputs and produced outputs are semantic resource definitions. They answer what values are
+    /// required or produced by the stage, not how those values are stored or executed.
     /// </para>
     /// <para>
-    /// Required input symbols and produced output symbols may overlap. An overlap represents read-modify-write
-    /// behavior for a symbolic contract value.
+    /// Required inputs and produced outputs may overlap. An overlap represents read-modify-write behavior for
+    /// a semantic resource.
     /// </para>
     /// <para>
     /// Equality is based on <see cref="StageDefinition"/> because a stage has one contract identity. Contract
@@ -41,56 +40,58 @@ namespace Lokrain.Atlas.Stages
         /// Initializes a new instance of the <see cref="StageContract"/> class.
         /// </summary>
         /// <param name="stageDefinition">The stage definition described by this contract.</param>
-        /// <param name="requiredInputSymbols">The symbolic inputs required before the stage can execute.</param>
-        /// <param name="producedOutputSymbols">The symbolic outputs produced by the stage.</param>
+        /// <param name="requiredInputs">The semantic resources required before the stage can execute.</param>
+        /// <param name="producedOutputs">The semantic resources produced by the stage.</param>
         /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="stageDefinition"/>, <paramref name="requiredInputSymbols"/>,
-        /// or <paramref name="producedOutputSymbols"/> is null.
+        /// Thrown when <paramref name="stageDefinition"/>, <paramref name="requiredInputs"/>,
+        /// or <paramref name="producedOutputs"/> is null.
         /// </exception>
         /// <exception cref="ArgumentException">
-        /// Thrown when either symbol collection contains null entries or duplicate symbols, or when both
-        /// collections are empty.
+        /// Thrown when either resource collection contains null entries or duplicate resources, when a resource
+        /// belongs to a different generation schema than the stage, or when both collections are empty.
         /// </exception>
         public StageContract(
             StageDefinition stageDefinition,
-            IEnumerable<Symbol> requiredInputSymbols,
-            IEnumerable<Symbol> producedOutputSymbols)
+            IEnumerable<ResourceDefinition> requiredInputs,
+            IEnumerable<ResourceDefinition> producedOutputs)
         {
             if (stageDefinition is null)
             {
                 throw new ArgumentNullException(nameof(stageDefinition));
             }
 
-            if (requiredInputSymbols is null)
+            if (requiredInputs is null)
             {
-                throw new ArgumentNullException(nameof(requiredInputSymbols));
+                throw new ArgumentNullException(nameof(requiredInputs));
             }
 
-            if (producedOutputSymbols is null)
+            if (producedOutputs is null)
             {
-                throw new ArgumentNullException(nameof(producedOutputSymbols));
+                throw new ArgumentNullException(nameof(producedOutputs));
             }
 
-            Symbol[] copiedRequiredInputSymbols = CopySymbols(
-                requiredInputSymbols,
-                nameof(requiredInputSymbols),
-                "Stage contract required input symbols");
+            ResourceDefinition[] copiedRequiredInputs = CopyResourceDefinitions(
+                requiredInputs,
+                stageDefinition,
+                nameof(requiredInputs),
+                "Stage contract required inputs");
 
-            Symbol[] copiedProducedOutputSymbols = CopySymbols(
-                producedOutputSymbols,
-                nameof(producedOutputSymbols),
-                "Stage contract produced output symbols");
+            ResourceDefinition[] copiedProducedOutputs = CopyResourceDefinitions(
+                producedOutputs,
+                stageDefinition,
+                nameof(producedOutputs),
+                "Stage contract produced outputs");
 
-            if (copiedRequiredInputSymbols.Length == 0 && copiedProducedOutputSymbols.Length == 0)
+            if (copiedRequiredInputs.Length == 0 && copiedProducedOutputs.Length == 0)
             {
                 throw new ArgumentException(
-                    "Stage contract must contain at least one required input symbol or produced output symbol.",
-                    nameof(producedOutputSymbols));
+                    "Stage contract must contain at least one required input resource or produced output resource.",
+                    nameof(producedOutputs));
             }
 
             StageDefinition = stageDefinition;
-            RequiredInputSymbols = new ReadOnlyCollection<Symbol>(copiedRequiredInputSymbols);
-            ProducedOutputSymbols = new ReadOnlyCollection<Symbol>(copiedProducedOutputSymbols);
+            RequiredInputs = new ReadOnlyCollection<ResourceDefinition>(copiedRequiredInputs);
+            ProducedOutputs = new ReadOnlyCollection<ResourceDefinition>(copiedProducedOutputs);
         }
 
         /// <summary>
@@ -99,14 +100,14 @@ namespace Lokrain.Atlas.Stages
         public StageDefinition StageDefinition { get; }
 
         /// <summary>
-        /// Gets the symbolic inputs required before the stage can execute.
+        /// Gets the semantic resources required before the stage can execute.
         /// </summary>
-        public IReadOnlyList<Symbol> RequiredInputSymbols { get; }
+        public IReadOnlyList<ResourceDefinition> RequiredInputs { get; }
 
         /// <summary>
-        /// Gets the symbolic outputs produced by the stage.
+        /// Gets the semantic resources produced by the stage.
         /// </summary>
-        public IReadOnlyList<Symbol> ProducedOutputSymbols { get; }
+        public IReadOnlyList<ResourceDefinition> ProducedOutputs { get; }
 
         /// <inheritdoc/>
         public bool Equals(StageContract? other)
@@ -129,7 +130,7 @@ namespace Lokrain.Atlas.Stages
         /// <inheritdoc/>
         public override string ToString()
         {
-            return $"{nameof(StageContract)}({nameof(StageDefinition)}: {StageDefinition.Symbol}, {nameof(RequiredInputSymbols)}: {RequiredInputSymbols.Count}, {nameof(ProducedOutputSymbols)}: {ProducedOutputSymbols.Count})";
+            return $"{nameof(StageContract)}({nameof(StageDefinition)}: {StageDefinition.Symbol}, {nameof(RequiredInputs)}: {RequiredInputs.Count}, {nameof(ProducedOutputs)}: {ProducedOutputs.Count})";
         }
 
         /// <summary>
@@ -148,34 +149,42 @@ namespace Lokrain.Atlas.Stages
             return !Equals(left, right);
         }
 
-        private static Symbol[] CopySymbols(
-            IEnumerable<Symbol> symbols,
+        private static ResourceDefinition[] CopyResourceDefinitions(
+            IEnumerable<ResourceDefinition> resourceDefinitions,
+            StageDefinition stageDefinition,
             string parameterName,
             string description)
         {
-            var copiedSymbols = new List<Symbol>();
-            var uniqueSymbols = new HashSet<Symbol>();
+            var copiedResourceDefinitions = new List<ResourceDefinition>();
+            var uniqueResourceDefinitions = new HashSet<ResourceDefinition>();
 
-            foreach (Symbol? symbol in symbols)
+            foreach (ResourceDefinition? resourceDefinition in resourceDefinitions)
             {
-                if (symbol is null)
+                if (resourceDefinition is null)
                 {
                     throw new ArgumentException(
                         $"{description} cannot contain null entries.",
                         parameterName);
                 }
 
-                if (!uniqueSymbols.Add(symbol))
+                if (resourceDefinition.GenerationSchema != stageDefinition.GenerationSchema)
                 {
                     throw new ArgumentException(
-                        $"{description} cannot contain duplicate symbol '{symbol}'.",
+                        $"{description} cannot contain resource '{resourceDefinition.Symbol}' from generation schema '{resourceDefinition.GenerationSchema.Symbol}' because stage '{stageDefinition.Symbol}' belongs to generation schema '{stageDefinition.GenerationSchema.Symbol}'.",
                         parameterName);
                 }
 
-                copiedSymbols.Add(symbol);
+                if (!uniqueResourceDefinitions.Add(resourceDefinition))
+                {
+                    throw new ArgumentException(
+                        $"{description} cannot contain duplicate resource '{resourceDefinition.Symbol}'.",
+                        parameterName);
+                }
+
+                copiedResourceDefinitions.Add(resourceDefinition);
             }
 
-            return copiedSymbols.ToArray();
+            return copiedResourceDefinitions.ToArray();
         }
     }
 }

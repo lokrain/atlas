@@ -5,7 +5,7 @@ Date: 2026-05-17
 
 ## Context
 
-Atlas is being restarted with a new package architecture. The project needs a documentation system that prevents vocabulary drift, accidental architecture changes, and implementation-first design debt.
+Atlas is being rebuilt around strict domain invariants. The project needs documentation that prevents vocabulary drift, accidental architecture changes, and implementation-first design debt.
 
 The package must distinguish:
 
@@ -17,6 +17,8 @@ source code
 tests
 ```
 
+Documentation must also distinguish implemented facts from planned execution-layer work.
+
 ## Decision
 
 Atlas uses this documentation authority order:
@@ -24,22 +26,22 @@ Atlas uses this documentation authority order:
 ```text
 Architecture rules
 -> accepted ADRs
--> design specs
+-> design specifications
 -> implementation plans
 -> source code and tests
 ```
 
-ADRs freeze architectural decisions and rejected alternatives.
+ADRs record architectural decisions and rejected alternatives.
 
-Design specs explain algorithms, data ownership, compiler behavior, and runtime representation.
+Design specifications explain ownership, validation, data models, compilation behavior, and failure behavior.
 
-Implementation plans define order of work and test gates.
+Implementation plans define order of work and completion criteria.
 
 Source code implements accepted decisions.
 
 Tests enforce source-level invariants.
 
-## Rules
+## Documentation Rules
 
 An ADR must contain:
 
@@ -51,7 +53,7 @@ Consequences
 Rejected alternatives
 ```
 
-A design spec must contain:
+A design specification must contain:
 
 ```text
 Purpose
@@ -73,17 +75,38 @@ Rejected shortcuts
 Completion criteria
 ```
 
+Docs must not describe deferred execution features as implemented facts.
+
+Docs must use current architecture vocabulary:
+
+```text
+GenerationRequestDescriptor
+GenerationCatalog
+GenerationRequestResolver
+GenerationRequest
+GenerationPlanCompiler
+GenerationPlan
+```
+
+Docs must not describe the old flow:
+
+```text
+GenerationRequest + GenerationCatalog -> GenerationPlanCompilerResult
+```
+
 ## Consequences
 
-Design changes must be recorded before code is changed when they alter ownership, vocabulary, layering, or deterministic behavior.
+Design changes must be recorded before code changes when they alter ownership, vocabulary, layering, or deterministic behavior.
 
-Docs must not describe future execution features as implemented facts.
+Documents must be rewritten when source architecture changes materially.
+
+Tests prove behavior, but ADRs explain why the behavior exists.
 
 ## Rejected Alternatives
 
 ### Source-only architecture
 
-Rejected because source alone does not preserve vocabulary intent and makes later refactors harder.
+Rejected because source code alone does not preserve vocabulary intent and makes later refactors harder to audit.
 
 ### Large prose-only architecture document
 
