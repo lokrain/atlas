@@ -12,22 +12,27 @@ using Lokrain.Atlas.Schemas;
 namespace Lokrain.Atlas.Planning
 {
     /// <summary>
-    /// Represents a compiler-created resolved managed generation plan.
+    /// Represents a compiler-created managed semantic plan for one generation run.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation plan contains an accepted generation recipe, generation-wide run settings, and resolved
-    /// managed plan nodes created by the generation plan compiler. It does not contain executable bindings,
-    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
+    /// A generation plan contains the accepted generation recipe, generation-wide run settings, and resolved
+    /// managed stage plan nodes created by the generation plan compiler.
     /// </para>
     /// <para>
     /// Stage plan node order is compiler-created managed execution order. The order must satisfy stage contract
     /// dependencies: every required stage input must be available from a previous stage output.
     /// </para>
     /// <para>
-    /// Stage dependency validation uses accepted semantic resource definitions, not raw resource symbols.
-    /// Runnable-plan compilation later converts this managed plan into execution-ready metadata and resolved
-    /// runtime bindings. Jobs later receive only raw unmanaged data and native containers.
+    /// Dependency validation uses accepted semantic resource definitions, not raw resource symbols.
+    /// </para>
+    /// <para>
+    /// This type is managed planning data only. It does not contain executable metadata, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
+    /// </para>
+    /// <para>
+    /// Runnable-plan compilation later converts this managed plan into execution-ready metadata. Workspace,
+    /// scheduler, native-storage, and job ownership belong after this boundary.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationPlan"/> instance is always valid.
@@ -67,7 +72,7 @@ namespace Lokrain.Atlas.Planning
         }
 
         /// <summary>
-        /// Gets the accepted resolved generation recipe.
+        /// Gets the accepted generation recipe.
         /// </summary>
         public GenerationRecipeDefinition GenerationRecipeDefinition { get; }
 
@@ -77,7 +82,7 @@ namespace Lokrain.Atlas.Planning
         public GenerationRunSettings RunSettings { get; }
 
         /// <summary>
-        /// Gets the resolved generation schema definition.
+        /// Gets the accepted generation schema definition.
         /// </summary>
         public GenerationSchemaDefinition GenerationSchemaDefinition =>
             GenerationRecipeDefinition.GenerationSchemaDefinition;

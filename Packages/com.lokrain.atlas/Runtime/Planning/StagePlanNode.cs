@@ -8,17 +8,29 @@ using Lokrain.Atlas.Stages;
 namespace Lokrain.Atlas.Planning
 {
     /// <summary>
-    /// Represents a compiler-created resolved stage inside a generation plan.
+    /// Represents a compiler-created resolved stage occurrence inside a generation plan.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A stage plan node resolves one selected stage route to its stage definition, stage contract, and ordered
-    /// operation plan nodes. It is managed planning data only; it does not contain executable bindings, runtime
-    /// state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
+    /// operation plan nodes.
+    /// </para>
+    /// <para>
+    /// The stage definition identifies the semantic generation stage. The stage route definition identifies the
+    /// selected ordered route for satisfying that stage. The stage contract describes the semantic resource flow
+    /// for the stage. The operation plan nodes describe the resolved operation occurrences for the selected route.
+    /// </para>
+    /// <para>
+    /// Operation plan node order must match the selected route-step order exactly. Missing, extra, null, or
+    /// out-of-order operation plan nodes are invalid.
+    /// </para>
+    /// <para>
+    /// This type is managed planning data only. It does not contain executable metadata, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// Stage plan nodes are created by the generation plan compiler after resolving request selections through
-    /// an accepted generation catalog. Runnable-plan compilation later resolves execution bindings.
+    /// an accepted generation catalog. Runnable-plan compilation later resolves execution metadata.
     /// </para>
     /// <para>
     /// A non-null <see cref="StagePlanNode"/> instance is always valid.

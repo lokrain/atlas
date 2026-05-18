@@ -1,5 +1,7 @@
 #nullable enable
 
+using System;
+using System.Collections.Generic;
 using Lokrain.Atlas.Catalog;
 using Lokrain.Atlas.Core;
 using Lokrain.Atlas.Core.Map;
@@ -42,14 +44,25 @@ namespace Lokrain.Atlas.Planning.Tests
         }
 
         [Test]
-        public void Errors_OnFailedResult_AreStableSnapshot()
+        public void Errors_OnFailedResult_AreReadOnlyAndRejectMutation()
         {
-            Symbol unknownRecipeSymbol = Symbol.Create(UnknownRecipeSymbolText);
+            GenerationRequestResolutionResult result = ResolveUnknownRecipe(
+                Symbol.Create(UnknownRecipeSymbolText));
 
-            GenerationRequestResolutionResult result = ResolveUnknownRecipe(unknownRecipeSymbol);
+            Assert.That(
+                result.Errors,
+                Is.InstanceOf<ICollection<GenerationRequestResolutionError>>());
 
-            Assert.That(result.Errors, Has.Count.EqualTo(1));
-            Assert.That(result.Errors[0].SubjectSymbol, Is.EqualTo(unknownRecipeSymbol));
+            ICollection<GenerationRequestResolutionError> errors =
+                (ICollection<GenerationRequestResolutionError>)result.Errors;
+
+            Assert.That(errors.IsReadOnly, Is.True);
+
+            Assert.Throws<NotSupportedException>(
+                () => errors.Add(result.Errors[0]));
+
+            Assert.Throws<NotSupportedException>(
+                errors.Clear);
         }
 
         [Test]
@@ -84,6 +97,7 @@ namespace Lokrain.Atlas.Planning.Tests
         public void Equals_WithSuccessfulAndFailedResults_ReturnsFalse()
         {
             GenerationRequestResolutionResult left = ResolveKnownRecipe();
+
             GenerationRequestResolutionResult right = ResolveUnknownRecipe(
                 Symbol.Create(UnknownRecipeSymbolText));
 
@@ -106,6 +120,14 @@ namespace Lokrain.Atlas.Planning.Tests
             Assert.That(left.Equals((object)right), Is.False);
             Assert.That(left == right, Is.False);
             Assert.That(left != right, Is.True);
+        }
+
+        [Test]
+        public void Equals_WithNull_ReturnsFalse()
+        {
+            GenerationRequestResolutionResult result = ResolveKnownRecipe();
+
+            Assert.That(result.Equals(null), Is.False);
         }
 
         [Test]
@@ -178,7 +200,7 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             GenerationCatalog catalog = LandmassGenerationCatalog.CreateCatalog();
 
-            var descriptor = new GenerationRequestDescriptor(
+            GenerationRequestDescriptor descriptor = new(
                 recipeSymbol,
                 new GenerationRunSettings(
                     new Grid(256, 256),

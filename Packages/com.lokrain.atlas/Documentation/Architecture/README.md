@@ -1,207 +1,202 @@
 # Lokrain.Atlas architecture documentation
 
-This documentation defines the architecture of the Lokrain.Atlas Unity package.
+This directory contains the architecture documentation for Lokrain.Atlas.
 
-The architecture separates authored intent, accepted managed domain objects, semantic resources, managed plans, future executable metadata, native workspace storage, schedulers, and jobs. Each layer has a single ownership boundary. Objects that cross a boundary must be accepted, validated, and owned by the layer that exposes them.
+The documentation defines the package model, ownership boundaries, naming rules, dependency rules, error-handling rules, planned execution boundaries, and implementation order.
 
-## Architecture model
+The current Runtime architecture is managed architecture. It ends at `GenerationPlan`.
 
-Lokrain.Atlas uses a staged generation model.
+Future execution architecture is documented separately and must not be treated as implemented Runtime behavior until corresponding Runtime code exists.
+
+## Current Runtime scope
+
+The current Runtime architecture includes:
+
+- core value objects;
+- generation schemas;
+- semantic resource definitions;
+- stage kinds and operation kinds;
+- stage definitions, stage routes, and stage route steps;
+- operation definitions and operation implementation definitions;
+- stage and operation contracts;
+- generation recipes;
+- immutable generation catalogs;
+- generation run settings;
+- symbolic generation request descriptors;
+- operation implementation override descriptors;
+- request resolution into accepted generation requests;
+- request resolution results and errors;
+- managed generation plan compilation;
+- managed generation plans.
+
+The current Runtime architecture does not allocate native storage, compile runnable execution metadata, create field handles, schedule jobs, execute Burst jobs, produce artifacts, or integrate with ECS execution.
+
+## Planned execution scope
+
+The following concepts are planned architecture:
+
+- `FieldDefinition`;
+- `FieldDefinitionSet`;
+- execution profiles;
+- runnable plan compilation;
+- `RunnablePlan`;
+- runnable stages and runnable operations;
+- field bindings;
+- field handles;
+- `GenerationWorkspace`;
+- native storage allocation;
+- scratch memory ownership;
+- operation scheduling;
+- dependency wiring;
+- Burst job execution;
+- unsafe memory infrastructure;
+- generated artifacts;
+- execution diagnostics;
+- ECS execution integration.
+
+Future concepts must be documented as planned architecture. They must not be described as current Runtime behavior unless the corresponding Runtime code exists.
+
+## Architecture map
 
 ```mermaid
 flowchart TD
-    A[GenerationRequestDescriptor<br/>symbolic authoring intent] --> B[GenerationRequestResolver]
-    C[GenerationCatalog<br/>accepted package inventory] --> B
+    A[GenerationRequestDescriptor<br/>symbolic run input] --> B[GenerationRequestResolver]
+    C[GenerationCatalog<br/>accepted definition inventory] --> B
 
-    B --> D[GenerationRequest<br/>accepted resolved intent]
-    D --> E[GenerationPlanCompiler]
-    E --> F[GenerationPlan<br/>managed semantic plan]
+    B --> D[GenerationRequestResolutionResult]
+    D --> E[GenerationRequest<br/>accepted resolved run input]
+    E --> F[GenerationPlanCompiler]
+    F --> G[GenerationPlan<br/>managed semantic plan]
 
-    F --> G[RunnablePlanCompiler<br/>future]
-    H[Field definitions and execution profiles<br/>future] --> G
-    I[Scheduler bindings<br/>future] --> G
+    G --> H[RunnablePlanCompiler<br/>planned]
+    I[FieldDefinitionSet<br/>planned] --> H
+    J[Execution profiles<br/>planned] --> H
 
-    G --> J[RunnablePlan<br/>future executable metadata]
-    J --> K[GenerationWorkspace<br/>future native storage owner]
-    K --> L[Operation schedulers<br/>future job graph owners]
-    L --> M[Burst jobs<br/>future deterministic transforms]
-````
-
-## Current implemented architecture
-
-The current Runtime architecture covers the managed catalog, recipe, request, and plan model.
-
-The implemented model includes:
-
-* validated core value objects;
-* generation schemas;
-* semantic resource definitions;
-* stage and operation contracts;
-* stage, route, route-step, operation, and implementation definitions;
-* immutable generation catalogs;
-* symbolic request descriptors;
-* request resolution into accepted requests;
-* managed plan compilation.
-
-The implemented model does not include executable runtime plans, field definitions, execution profiles, native workspace allocation, scheduler APIs, or Burst jobs.
-
-## Current layer responsibilities
-
-### Core
-
-Core types define stable value objects and invariants used by the rest of the package.
-
-Core types must not depend on catalog, recipe, planning, execution, Unity objects, native containers, or jobs.
-
-### Definitions
-
-Definitions describe accepted package inventory.
-
-Definitions include schemas, resources, stages, routes, route steps, operations, operation implementations, and recipes. A non-null accepted definition instance is expected to be valid.
-
-Definitions do not represent one generation run. They do not own native memory, scheduler bindings, job handles, or runtime execution state.
-
-### Catalog
-
-`GenerationCatalog` is the accepted immutable inventory for available generation definitions.
-
-A catalog owns the accepted definition objects it exposes. Contracts and recipes must reference definitions owned by the same catalog. Cross-catalog object reuse is invalid.
-
-The catalog is not a request resolver, not a plan compiler, and not an execution system.
-
-### Request resolution
-
-`GenerationRequestDescriptor` represents symbolic authoring intent.
-
-`GenerationRequestResolver` resolves descriptor symbols through a `GenerationCatalog`, validates compatibility, and produces a `GenerationRequestResolutionResult`.
-
-`GenerationRequest` represents accepted resolved intent for one generation run. It contains accepted definitions and final implementation choices. It does not contain unresolved symbols, native containers, jobs, or execution metadata.
-
-### Plan compilation
-
-`GenerationPlanCompiler` transforms an accepted `GenerationRequest` into a managed `GenerationPlan`.
-
-`GenerationPlan` is semantic managed data. It orders the selected stages and operations for the run. It does not contain native storage, scheduler bindings, field handles, job handles, dependency handles, or executable job data.
-
-### Resources
-
-`ResourceDefinition` represents the semantic identity of a generated value.
-
-Stage and operation contracts use resource definitions for required inputs and produced outputs. Contracts must not use raw symbol lists to describe resource flow.
-
-A resource definition is not a field definition and is not native storage.
-
-### Future execution model
-
-The execution model is planned architecture and is not part of the current implemented Runtime.
-
-Future execution concepts include:
-
-* `FieldDefinition`;
-* execution profiles;
-* runnable plan compilation;
-* `RunnablePlan`;
-* `RunnableOperation`;
-* `GenerationWorkspace`;
-* field handles;
-* operation schedulers;
-* Burst jobs.
-
-Future execution code must preserve the current boundary: managed planning decides what should happen; execution systems decide how storage and jobs are scheduled; jobs perform deterministic transforms over native containers and unmanaged values only.
+    H --> K[RunnablePlan<br/>planned executable metadata]
+    K --> L[GenerationWorkspace<br/>planned native storage owner]
+    L --> M[OperationScheduler<br/>planned execution owner]
+    M --> N[Burst jobs<br/>planned deterministic transforms]
+```
 
 ## Documentation structure
 
 ### Overview
 
-| File                                      | Purpose                                                                          |
-| ----------------------------------------- | -------------------------------------------------------------------------------- |
-| `Overview/Atlas Architecture Overview.md` | Introduces the package architecture, major layers, and current/future boundary.  |
+| File | Purpose |
+| --- | --- |
+| `Overview/Atlas Architecture Overview.md` | Introduces the package architecture, major layers, and current/planned boundary. |
 | `Overview/Managed Generation Pipeline.md` | Explains descriptor resolution, accepted requests, and managed plan compilation. |
 
 ### Concepts
 
-| File                                                | Purpose                                                                                                         |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `Concepts/Accepted Domain Object Model.md`          | Defines accepted objects, descriptors, result objects, validation boundaries, and construction rules.           |
-| `Concepts/Catalog Recipe Request and Plan Model.md` | Explains how catalog inventory, recipes, request descriptors, accepted requests, and plans relate.              |
-| `Concepts/Resource Field and Workspace Boundary.md` | Defines the boundary between semantic resources, future field definitions, and future native workspace storage. |
+| File | Purpose |
+| --- | --- |
+| `Concepts/Accepted Domain Object Model.md` | Defines accepted objects, descriptors, result objects, validation boundaries, and construction rules. |
+| `Concepts/Catalog Recipe Request and Plan Model.md` | Explains how catalog inventory, recipes, request descriptors, accepted requests, and plans relate. |
+| `Concepts/Resource Field and Workspace Boundary.md` | Defines the boundary between semantic resources, planned field definitions, and planned native workspace storage. |
 
 ### Guidelines
 
-| File                                 | Purpose                                                                                             |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `Guidelines/Architecture Rules.md`   | Defines validity, ownership, layering, and boundary rules.                                          |
-| `Guidelines/Naming Guidelines.md`    | Defines naming rules for public API, domain concepts, symbols, resources, and landmass definitions. |
-| `Guidelines/Dependency Rules.md`     | Defines allowed dependency direction between package layers.                                        |
-| `Guidelines/Error Handling Rules.md` | Defines when APIs throw and when they return result objects.                                        |
+| File | Purpose |
+| --- | --- |
+| `Guidelines/Architecture Rules.md` | Defines validity, ownership, layering, and boundary rules. |
+| `Guidelines/Naming Guidelines.md` | Defines naming rules for public API, domain concepts, symbols, resources, and generation definitions. |
+| `Guidelines/Dependency Rules.md` | Defines allowed dependency direction between package layers. |
+| `Guidelines/Error Handling Rules.md` | Defines when APIs throw and when they return result objects. |
 
 ### Reference
 
-| File                    | Purpose                                                                            |
-| ----------------------- | ---------------------------------------------------------------------------------- |
+| File | Purpose |
+| --- | --- |
 | `Reference/Glossary.md` | Defines architecture terminology without design rationale or implementation plans. |
 
 ### Future
 
-| File                                                | Purpose                                                                                          |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `Future/Field Definition and Execution Profiles.md` | Defines the planned storage-facing field model and execution profile boundary.                   |
-| `Future/Runnable Plan Compilation.md`               | Defines the planned compiler from managed plans to executable metadata.                          |
-| `Future/Scheduler Workspace and Job Ownership.md`   | Defines planned ownership of native storage, scheduling, scratch memory, dependencies, and jobs. |
+| File | Purpose |
+| --- | --- |
+| `Future/Field Definition and Execution Profiles.md` | Defines the planned storage-facing field model and execution profile boundary. |
+| `Future/Runnable Plan Compilation.md` | Defines the planned compiler from managed plans to executable metadata. |
+| `Future/Scheduler Workspace and Job Ownership.md` | Defines planned ownership of native storage, scheduling, scratch memory, dependencies, and jobs. |
+| `Future/Low-Level Native Memory and Unsafe Collections.md` | Defines planned policy for native containers, unsafe collections, low-level memory APIs, canonical data, and data structure selection. |
 
 ### Decisions
 
-| File                                                     | Purpose                                                                             |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| File | Purpose |
+| --- | --- |
 | `Decisions/ResourceDefinition Before FieldDefinition.md` | Records why semantic resources are modeled before storage-facing field definitions. |
-| `Decisions/Rejections and Deferrals.md`                  | Records rejected architecture options and intentionally deferred concepts.          |
 
 ### Plans
 
-| File                           | Purpose                                                                             |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| `Plans/Implementation Plan.md` | Defines the ordered implementation work that follows from the current architecture. |
+| File | Purpose |
+| --- | --- |
+| `Plans/Implementation Plan.md` | Defines ordered implementation work. |
+
+## Documentation ownership
+
+Overview documents explain the architecture.
+
+Concept documents teach the model.
+
+Guideline documents define rules.
+
+Reference documents define terms.
+
+Future documents describe planned architecture that is not implemented.
+
+Decision documents record accepted rationale, rejected options, and deferrals.
+
+Plan documents define ordered work.
 
 ## Documentation rules
 
-Architecture documents describe the current required design.
-
-Concept documents explain the model. Guideline documents define rules. Reference documents define terms. Future documents describe planned architecture that is not implemented. Decision documents record rationale and rejected options. Plan documents define work order.
+Architecture documents describe the required design in present tense.
 
 Current architecture documents must not describe completed migration work, obsolete names, or previous designs as part of the active model.
 
-Future concepts must be explicitly marked as future architecture. They must not be described as implemented Runtime behavior until the corresponding code exists.
+Planned concepts must be explicitly marked as planned architecture.
 
-The glossary must define terms only. It must not argue for design choices, duplicate guideline rules, or contain implementation steps.
+The glossary defines terms only. It does not argue for design choices, duplicate guideline rules, or contain implementation steps.
 
-Naming guidelines must stay focused on names. Ownership, validity, dependency, and error-handling rules belong in their dedicated guideline documents.
+Naming guidelines stay focused on names. Ownership, validity, dependency, and error-handling rules belong in their dedicated guideline documents.
 
-Implementation plans must not redefine architecture. They should reference architecture documents and describe the next concrete work sequence.
+Implementation plans do not redefine architecture. They reference architecture documents and describe concrete work order.
 
-## Primary invariants
+## Primary Runtime invariants
 
-Accepted domain objects must be valid after construction.
+Accepted domain objects are valid after construction.
 
-Descriptors are symbolic input and are not accepted requests.
+Descriptors are symbolic input. They are not accepted requests.
+
+Result objects represent expected boundary failures.
 
 Catalogs own accepted definition objects and validate exact ownership.
 
-Recipes describe generation templates and do not represent one run.
+Catalog ownership is reference-exact. Symbol equality does not make a definition catalog-owned.
 
-Requests describe one accepted resolved generation run and contain no unresolved symbols.
+Recipes describe generation templates. They do not represent one generation run.
 
-Plans are managed semantic data and contain no native execution state.
+Requests describe one accepted resolved generation run. They contain accepted definitions and final implementation choices.
 
-Resource definitions describe generated values semantically.
+Requests contain no unresolved symbols.
 
-Field definitions are future storage-facing metadata.
+Plans are managed semantic data.
 
-Native containers belong to future workspace execution, not catalog or planning.
+Plans contain no native execution state, field handles, job handles, dependency handles, scheduler bindings, or executable job data.
 
-Schedulers own future execution control flow, dependency wiring, and job scheduling.
+`ResourceDefinition` describes the semantic identity of a generated value.
 
-Jobs must not know symbols, catalogs, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.
+Stage and operation contracts define semantic resource flow.
+
+Contracts use `ResourceDefinition` inputs and outputs.
+
+Contracts do not define storage.
+
+`FieldDefinition` is planned storage-facing metadata.
+
+Native containers belong to planned workspace execution, not catalogs, recipes, requests, plans, stages, operations, or resources.
+
+Schedulers own planned execution control flow, dependency wiring, scratch allocation, and job scheduling.
 
 Jobs receive native containers and unmanaged values only.
 
-```
+Jobs must not depend on symbols, catalogs, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.

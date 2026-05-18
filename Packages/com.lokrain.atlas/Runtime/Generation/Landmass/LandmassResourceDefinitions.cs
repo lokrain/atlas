@@ -13,15 +13,16 @@ namespace Lokrain.Atlas.Generation.Landmass
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Landmass resource definitions are stable catalog-owned semantic resources used by built-in landmass
-    /// stage and operation contracts. They describe what values exist in the managed generation graph.
+    /// Landmass resource definitions are stable built-in semantic resources used by landmass stage and operation
+    /// contracts. They describe what values exist in the managed generation graph.
     /// </para>
     /// <para>
-    /// They are not field definitions, artifact definitions, runtime identifiers, execution bindings, job data,
-    /// native containers, ECS systems, Unity runtime objects, storage layouts, or scheduler allocations.
+    /// These definitions are managed definition metadata only. They are not field definitions, artifact
+    /// definitions, runtime identifiers, execution bindings, job data, native containers, ECS systems, Unity
+    /// runtime objects, storage layouts, or scheduler allocations.
     /// </para>
     /// <para>
-    /// Field definitions and execution bindings will be introduced later by the execution/profile layer.
+    /// Catalog ownership is established when these definitions are added to a generation catalog.
     /// </para>
     /// </remarks>
     public static class LandmassResourceDefinitions

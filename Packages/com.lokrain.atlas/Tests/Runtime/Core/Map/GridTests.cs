@@ -483,7 +483,7 @@ namespace Lokrain.Atlas.Core.Map.Tests
         [Test]
         public void EqualityOperator_WithOneNull_ReturnsFalse()
         {
-            Grid? left = new Grid(256, 256);
+            Grid? left = new(256, 256);
             Grid? right = null;
 
             Assert.That(left == right, Is.False);

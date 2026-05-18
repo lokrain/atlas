@@ -40,7 +40,7 @@ namespace Lokrain.Atlas.Operations
         /// Initializes a new instance of the <see cref="OperationContract"/> class.
         /// </summary>
         /// <param name="operationDefinition">The operation definition described by this contract.</param>
-        /// <param name="requiredInputs">The semantic resources required before the operation can execute.</param>
+        /// <param name="requiredInputs">The semantic resources required by the operation.</param>
         /// <param name="producedOutputs">The semantic resources produced by the operation.</param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="operationDefinition"/>, <paramref name="requiredInputs"/>,
@@ -100,7 +100,7 @@ namespace Lokrain.Atlas.Operations
         public OperationDefinition OperationDefinition { get; }
 
         /// <summary>
-        /// Gets the semantic resources required before the operation can execute.
+        /// Gets the semantic resources required by the operation.
         /// </summary>
         public IReadOnlyList<ResourceDefinition> RequiredInputs { get; }
 

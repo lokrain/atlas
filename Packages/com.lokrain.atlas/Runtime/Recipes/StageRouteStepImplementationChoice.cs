@@ -7,19 +7,23 @@ using Lokrain.Atlas.Stages;
 namespace Lokrain.Atlas.Recipes
 {
     /// <summary>
-    /// Represents a resolved implementation choice for one stage route step.
+    /// Represents an accepted implementation choice for one stage route step.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A stage route step implementation choice binds one route-step occurrence to one operation definition,
-    /// operation contract, and selected operation implementation definition. It is recipe metadata only; it does
-    /// not contain executable bindings, runtime state, job data, native containers, ECS systems, Burst function
-    /// pointers, or Unity runtime objects.
+    /// one operation contract, and one selected operation implementation definition.
     /// </para>
     /// <para>
-    /// The route step identifies the operation occurrence. The operation definition and operation contract
-    /// describe what that occurrence does at the planning boundary. The implementation definition identifies the
-    /// selected implementation option for that operation.
+    /// The route step identifies the operation occurrence within a route. The operation definition identifies
+    /// the semantic operation referenced by that occurrence. The operation contract describes the semantic
+    /// resource flow for that operation. The implementation definition identifies the selected implementation
+    /// option for that operation.
+    /// </para>
+    /// <para>
+    /// This type is managed recipe and request-selection metadata only. It does not contain executable bindings,
+    /// scheduler bindings, runtime state, job data, native containers, ECS systems, Burst function pointers, or
+    /// Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="StageRouteStepImplementationChoice"/> instance is always valid.

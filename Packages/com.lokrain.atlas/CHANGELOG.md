@@ -6,6 +6,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.1.0] - 2026-05-15
 
-### This is the first release of *\<com.veralux.atlas.core\>*.
+### This is the first release of *\<com.lokrain.atlas\>*.
 
 *Short description of this release*

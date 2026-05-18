@@ -6,12 +6,17 @@ using Lokrain.Atlas.Core;
 namespace Lokrain.Atlas.Schemas
 {
     /// <summary>
-    /// Defines a generation schema boundary owned by a generation catalog.
+    /// Defines a generation schema.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation schema definition identifies a named generation domain, such as a built-in world-generation
-    /// schema or a package-provided extension schema.
+    /// A generation schema definition identifies one named generation domain, such as a built-in
+    /// world-generation schema or a package-provided extension schema.
+    /// </para>
+    /// <para>
+    /// A generation schema is managed definition metadata only. It does not contain resources, stages, routes,
+    /// operations, recipes, executable bindings, runtime state, job data, native containers, ECS systems, Burst
+    /// function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// The schema symbol is the stable machine-facing identity. The display name is user-facing metadata only
@@ -19,11 +24,12 @@ namespace Lokrain.Atlas.Schemas
     /// </para>
     /// <para>
     /// Equality is based on <see cref="Symbol"/> because two schema definitions with the same symbol represent
-    /// the same catalog identity. Metadata differences must be handled as catalog duplicate/conflict validation,
-    /// not as distinct schema identities.
+    /// the same catalog identity. Metadata conflicts must be handled by catalog validation, not by treating
+    /// duplicate symbols as distinct schema definitions.
     /// </para>
     /// <para>
-    /// A non-null <see cref="GenerationSchemaDefinition"/> instance is always valid.
+    /// A non-null <see cref="GenerationSchemaDefinition"/> instance is always syntactically valid.
+    /// Catalog-dependent semantic validity is established by the generation catalog.
     /// </para>
     /// </remarks>
     public sealed class GenerationSchemaDefinition : IEquatable<GenerationSchemaDefinition>

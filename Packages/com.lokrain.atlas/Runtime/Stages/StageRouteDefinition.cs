@@ -8,13 +8,13 @@ using Lokrain.Atlas.Core;
 namespace Lokrain.Atlas.Stages
 {
     /// <summary>
-    /// Defines an ordered route of operation occurrences for a catalog-owned generation stage.
+    /// Defines an ordered route of operation occurrences for a generation stage.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A stage route definition belongs to one stage definition and describes the ordered route steps that
-    /// compose that route. It is catalog metadata only; it does not contain operation implementations, runtime
-    /// bindings, execution state, job data, or native containers.
+    /// compose that route. It is managed definition metadata only; it does not contain operation implementations,
+    /// runtime bindings, execution state, job data, or native containers.
     /// </para>
     /// <para>
     /// Route steps are ordered operation occurrences. Multiple route steps may reference the same operation

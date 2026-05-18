@@ -40,7 +40,7 @@ namespace Lokrain.Atlas.Stages
         /// Initializes a new instance of the <see cref="StageContract"/> class.
         /// </summary>
         /// <param name="stageDefinition">The stage definition described by this contract.</param>
-        /// <param name="requiredInputs">The semantic resources required before the stage can execute.</param>
+        /// <param name="requiredInputs">The semantic resources required by the stage.</param>
         /// <param name="producedOutputs">The semantic resources produced by the stage.</param>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="stageDefinition"/>, <paramref name="requiredInputs"/>,

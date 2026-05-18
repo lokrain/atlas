@@ -20,7 +20,7 @@ namespace Lokrain.Atlas.Planning.Tests
             Symbol stageRouteStepSymbol = Symbol.Create(StageRouteStepSymbolText);
             Symbol implementationSymbol = Symbol.Create(ImplementationSymbolText);
 
-            var descriptor = new OperationImplementationOverrideDescriptor(
+            OperationImplementationOverrideDescriptor descriptor = new(
                 stageRouteStepSymbol,
                 implementationSymbol);
 
@@ -118,14 +118,12 @@ namespace Lokrain.Atlas.Planning.Tests
             Assert.That(descriptor, Is.Null);
         }
 
-        [TestCase(StageRouteStepSymbolText, ImplementationSymbolText)]
-        public void IsValid_WithValidSymbolValues_ReturnsTrue(
-            string stageRouteStepSymbol,
-            string implementationSymbol)
+        [Test]
+        public void IsValid_WithValidSymbolValues_ReturnsTrue()
         {
             bool isValid = OperationImplementationOverrideDescriptor.IsValid(
-                stageRouteStepSymbol,
-                implementationSymbol);
+                StageRouteStepSymbolText,
+                ImplementationSymbolText);
 
             Assert.That(isValid, Is.True);
         }
@@ -203,6 +201,17 @@ namespace Lokrain.Atlas.Planning.Tests
             Assert.That(left.Equals((object)right), Is.False);
             Assert.That(left == right, Is.False);
             Assert.That(left != right, Is.True);
+        }
+
+        [Test]
+        public void Equals_WithNull_ReturnsFalse()
+        {
+            OperationImplementationOverrideDescriptor descriptor =
+                OperationImplementationOverrideDescriptor.Create(
+                    StageRouteStepSymbolText,
+                    ImplementationSymbolText);
+
+            Assert.That(descriptor.Equals(null), Is.False);
         }
 
         [Test]

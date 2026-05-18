@@ -6,19 +6,19 @@ using Lokrain.Atlas.Core;
 namespace Lokrain.Atlas.Operations
 {
     /// <summary>
-    /// Defines a catalog-owned implementation option for a generation operation.
+    /// Defines an implementation option for a generation operation.
     /// </summary>
     /// <remarks>
     /// <para>
     /// An operation implementation definition identifies one selectable implementation for an operation
-    /// definition. It describes catalog metadata only; it does not contain executable bindings, delegates,
+    /// definition. It is managed definition metadata only; it does not contain executable bindings, delegates,
     /// reflection types, ECS systems, Burst function pointers, job structs, runtime state, job data, or native
     /// containers.
     /// </para>
     /// <para>
-    /// Executable implementation binding belongs to the runnable-plan compilation layer. This keeps catalog
-    /// definitions independent from Unity runtime execution concerns and allows managed planning to resolve
-    /// accepted implementation choices before unmanaged job data is produced.
+    /// Executable implementation binding belongs to the runnable-plan compilation layer. This keeps operation
+    /// implementation definitions independent from Unity runtime execution concerns and allows managed planning
+    /// to resolve accepted implementation choices before executable metadata is produced.
     /// </para>
     /// <para>
     /// The implementation symbol is the stable machine-facing identity. The display name is user-facing metadata
@@ -31,7 +31,8 @@ namespace Lokrain.Atlas.Operations
     /// validation, not by treating duplicate symbols as distinct implementation definitions.
     /// </para>
     /// <para>
-    /// A non-null <see cref="OperationImplementationDefinition"/> instance is always valid.
+    /// A non-null <see cref="OperationImplementationDefinition"/> instance is always syntactically valid.
+    /// Catalog-dependent semantic validity is established by the generation catalog.
     /// </para>
     /// </remarks>
     public sealed class OperationImplementationDefinition : IEquatable<OperationImplementationDefinition>

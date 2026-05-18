@@ -8,28 +8,32 @@ using Lokrain.Atlas.Core;
 namespace Lokrain.Atlas.Planning
 {
     /// <summary>
-    /// Describes symbol-based intent to create an accepted generation request.
+    /// Describes symbolic intent to create an accepted generation request.
     /// </summary>
     /// <remarks>
     /// <para>
     /// A generation request descriptor is unresolved symbolic input. It selects a generation recipe by symbol,
-    /// carries generation-wide run settings, and optionally describes implementation overrides by symbol.
+    /// carries generation-wide run settings, and optionally describes operation implementation overrides by symbol.
     /// </para>
     /// <para>
-    /// The descriptor is suitable for user input, editor tooling, importers, JSON descriptors, and higher-level
+    /// This type is suitable for user input, editor tooling, importers, serialized descriptors, and higher-level
     /// APIs. It is not an accepted generation request, resolved recipe, generation plan, executable binding,
-    /// runtime state, job data, native container, ECS system, Burst function pointer, or Unity runtime object.
+    /// scheduler binding, runtime state, job data, native container, ECS system, Burst function pointer, or Unity
+    /// runtime object.
+    /// </para>
+    /// <para>
+    /// A descriptor validates its own structure. Catalog-dependent satisfiability is established by
+    /// <see cref="GenerationRequestResolver"/>.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationRequestDescriptor"/> instance is always a valid symbolic descriptor.
-    /// Catalog-dependent satisfiability is established by a request resolver.
     /// </para>
     /// </remarks>
     public sealed class GenerationRequestDescriptor : IEquatable<GenerationRequestDescriptor>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="GenerationRequestDescriptor"/> class without implementation
-        /// overrides.
+        /// Initializes a new instance of the <see cref="GenerationRequestDescriptor"/> class without operation
+        /// implementation overrides.
         /// </summary>
         /// <param name="generationRecipeDefinitionSymbol">The selected generation-recipe-definition symbol.</param>
         /// <param name="runSettings">The generation-wide run settings.</param>
@@ -58,7 +62,7 @@ namespace Lokrain.Atlas.Planning
         /// </exception>
         /// <exception cref="ArgumentException">
         /// Thrown when <paramref name="operationImplementationOverrides"/> contains null entries or duplicate
-        /// route-step override symbols.
+        /// stage-route-step-definition symbols.
         /// </exception>
         public GenerationRequestDescriptor(
             Symbol generationRecipeDefinitionSymbol,
@@ -106,7 +110,8 @@ namespace Lokrain.Atlas.Planning
         public IReadOnlyList<OperationImplementationOverrideDescriptor> OperationImplementationOverrides { get; }
 
         /// <summary>
-        /// Creates a generation request descriptor from a recipe symbol value without implementation overrides.
+        /// Creates a generation request descriptor from a recipe symbol value without operation implementation
+        /// overrides.
         /// </summary>
         /// <param name="generationRecipeDefinitionSymbol">The selected generation-recipe-definition symbol value.</param>
         /// <param name="runSettings">The generation-wide run settings.</param>
@@ -151,8 +156,8 @@ namespace Lokrain.Atlas.Planning
         }
 
         /// <summary>
-        /// Attempts to create a generation request descriptor from a recipe symbol value without implementation
-        /// overrides.
+        /// Attempts to create a generation request descriptor from a recipe symbol value without operation
+        /// implementation overrides.
         /// </summary>
         /// <param name="generationRecipeDefinitionSymbol">The selected generation-recipe-definition symbol value.</param>
         /// <param name="runSettings">The generation-wide run settings.</param>

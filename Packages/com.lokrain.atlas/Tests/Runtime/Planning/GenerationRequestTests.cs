@@ -9,6 +9,9 @@ using Lokrain.Atlas.Generation.Landmass.Operations;
 using Lokrain.Atlas.Generation.Landmass.Routes;
 using Lokrain.Atlas.Operations;
 using Lokrain.Atlas.Recipes;
+using Lokrain.Atlas.Resources;
+using Lokrain.Atlas.Schemas;
+using Lokrain.Atlas.Stages;
 using NUnit.Framework;
 
 namespace Lokrain.Atlas.Planning.Tests
@@ -20,7 +23,7 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             GenerationRunSettings runSettings = CreateRunSettings();
 
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 runSettings);
 
@@ -52,7 +55,7 @@ namespace Lokrain.Atlas.Planning.Tests
             IReadOnlyList<StageRouteStepImplementationChoice> defaultChoices =
                 LandmassGenerationRecipes.PrimaryContinentalLandmass.StageRouteStepImplementationChoices;
 
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 runSettings,
                 defaultChoices);
@@ -70,7 +73,7 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
 
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings(),
                 choices);
@@ -78,6 +81,29 @@ namespace Lokrain.Atlas.Planning.Tests
             choices.RemoveAt(choices.Count - 1);
 
             Assert.That(request.StageRouteStepImplementationChoices, Has.Count.EqualTo(5));
+        }
+
+        [Test]
+        public void StageRouteStepImplementationChoices_AsMutableCollection_IsReadOnlyAndRejectsMutation()
+        {
+            GenerationRequest request = new(
+                LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                CreateRunSettings());
+
+            Assert.That(
+                request.StageRouteStepImplementationChoices,
+                Is.InstanceOf<ICollection<StageRouteStepImplementationChoice>>());
+
+            ICollection<StageRouteStepImplementationChoice> choices =
+                (ICollection<StageRouteStepImplementationChoice>)request.StageRouteStepImplementationChoices;
+
+            Assert.That(choices.IsReadOnly, Is.True);
+
+            Assert.Throws<NotSupportedException>(
+                () => choices.Add(request.StageRouteStepImplementationChoices[0]));
+
+            Assert.Throws<NotSupportedException>(
+                choices.Clear);
         }
 
         [Test]
@@ -148,9 +174,79 @@ namespace Lokrain.Atlas.Planning.Tests
         }
 
         [Test]
+        public void Constructor_WithChoiceForUnselectedRouteStep_ThrowsArgumentException()
+        {
+            List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+            choices[0] = CreateUnselectedRouteStepChoice();
+
+            Assert.Throws<ArgumentException>(
+                () => new GenerationRequest(
+                    LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                    CreateRunSettings(),
+                    choices));
+        }
+
+        [Test]
+        public void Constructor_WithSymbolEquivalentButDifferentRouteStepInstance_ThrowsArgumentException()
+        {
+            List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+            choices[0] = CreateSymbolEquivalentEvaluateContinentSuitabilityChoice();
+
+            Assert.Throws<ArgumentException>(
+                () => new GenerationRequest(
+                    LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                    CreateRunSettings(),
+                    choices));
+        }
+
+        [Test]
+        public void Constructor_WithChoiceForDifferentGenerationSchema_ThrowsArgumentException()
+        {
+            List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+            choices[0] = CreateDifferentSchemaEvaluateContinentSuitabilityChoice();
+
+            Assert.Throws<ArgumentException>(
+                () => new GenerationRequest(
+                    LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                    CreateRunSettings(),
+                    choices));
+        }
+
+        [Test]
+        public void Constructor_WithRouteStepInputNotAvailableFromStageInputOrPreviousStep_ThrowsArgumentException()
+        {
+            List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+            choices[0] = CreateEvaluateContinentSuitabilityChoiceWithUnavailableInput();
+
+            Assert.Throws<ArgumentException>(
+                () => new GenerationRequest(
+                    LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                    CreateRunSettings(),
+                    choices));
+        }
+
+        [Test]
+        public void Constructor_WithRouteNotProducingRequiredStageOutput_ThrowsArgumentException()
+        {
+            List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+
+            ReplaceChoice(
+                choices,
+                LandmassStageRouteSteps.PrimaryContinentalLandmassComposeBaseElevation.Symbol,
+                CreateComposeBaseElevationChoiceWithWrongOutput());
+
+            Assert.Throws<ArgumentException>(
+                () => new GenerationRequest(
+                    LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                    CreateRunSettings(),
+                    choices));
+        }
+
+        [Test]
         public void Constructor_WithAlternateCompatibleImplementationChoice_CreatesAcceptedRequest()
         {
             List<StageRouteStepImplementationChoice> choices = CreateDefaultChoiceList();
+
             StageRouteStepImplementationChoice alternateChoice =
                 CreateAlternateExtractMainContinentChoice();
 
@@ -159,7 +255,7 @@ namespace Lokrain.Atlas.Planning.Tests
                 LandmassStageRouteSteps.PrimaryContinentalLandmassExtractMainContinent.Symbol,
                 alternateChoice);
 
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings(),
                 choices);
@@ -169,6 +265,7 @@ namespace Lokrain.Atlas.Planning.Tests
                 LandmassStageRouteSteps.PrimaryContinentalLandmassExtractMainContinent.Symbol);
 
             Assert.That(selectedChoice, Is.SameAs(alternateChoice));
+
             Assert.That(
                 selectedChoice.OperationImplementationDefinition.Symbol,
                 Is.EqualTo(Symbol.Create("lokrain.atlas.tests.implementation.extract_main_continent.alternate")));
@@ -179,11 +276,11 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             GenerationRunSettings runSettings = CreateRunSettings();
 
-            var left = new GenerationRequest(
+            GenerationRequest left = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 runSettings);
 
-            var right = new GenerationRequest(
+            GenerationRequest right = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 runSettings);
 
@@ -197,11 +294,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithEquivalentRunSettings_ReturnsTrue()
         {
-            var left = new GenerationRequest(
+            GenerationRequest left = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 new GenerationRunSettings(new Grid(256, 256), new Seed(123UL)));
 
-            var right = new GenerationRequest(
+            GenerationRequest right = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 new GenerationRunSettings(new Grid(256, 256), new Seed(123UL)));
 
@@ -213,11 +310,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithDifferentRunSettings_ReturnsFalse()
         {
-            var left = new GenerationRequest(
+            GenerationRequest left = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 new GenerationRunSettings(new Grid(256, 256), new Seed(123UL)));
 
-            var right = new GenerationRequest(
+            GenerationRequest right = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 new GenerationRunSettings(new Grid(512, 256), new Seed(123UL)));
 
@@ -237,11 +334,11 @@ namespace Lokrain.Atlas.Planning.Tests
                 LandmassStageRouteSteps.PrimaryContinentalLandmassExtractMainContinent.Symbol,
                 CreateAlternateExtractMainContinentChoice());
 
-            var left = new GenerationRequest(
+            GenerationRequest left = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings());
 
-            var right = new GenerationRequest(
+            GenerationRequest right = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings(),
                 alternateChoices);
@@ -258,11 +355,11 @@ namespace Lokrain.Atlas.Planning.Tests
             List<StageRouteStepImplementationChoice> reversedChoices = CreateDefaultChoiceList();
             reversedChoices.Reverse();
 
-            var left = new GenerationRequest(
+            GenerationRequest left = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings());
 
-            var right = new GenerationRequest(
+            GenerationRequest right = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings(),
                 reversedChoices);
@@ -274,9 +371,19 @@ namespace Lokrain.Atlas.Planning.Tests
         }
 
         [Test]
+        public void Equals_WithNull_ReturnsFalse()
+        {
+            GenerationRequest request = new(
+                LandmassGenerationRecipes.PrimaryContinentalLandmass,
+                CreateRunSettings());
+
+            Assert.That(request.Equals(null), Is.False);
+        }
+
+        [Test]
         public void Equals_WithDifferentObjectType_ReturnsFalse()
         {
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings());
 
@@ -309,7 +416,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void ToString_ReturnsRequestSummary()
         {
-            var request = new GenerationRequest(
+            GenerationRequest request = new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass,
                 CreateRunSettings());
 
@@ -323,29 +430,163 @@ namespace Lokrain.Atlas.Planning.Tests
 
         private static GenerationRunSettings CreateRunSettings()
         {
-            return new GenerationRunSettings(
+            return new(
                 new Grid(256, 256),
                 new Seed(123UL));
         }
 
         private static List<StageRouteStepImplementationChoice> CreateDefaultChoiceList()
         {
-            return new List<StageRouteStepImplementationChoice>(
+            return new(
                 LandmassGenerationRecipes.PrimaryContinentalLandmass.StageRouteStepImplementationChoices);
         }
 
         private static StageRouteStepImplementationChoice CreateAlternateExtractMainContinentChoice()
         {
-            var alternateImplementation = new OperationImplementationDefinition(
+            OperationImplementationDefinition alternateImplementation = new(
                 LandmassOperationDefinitions.ExtractMainContinent,
                 Symbol.Create("lokrain.atlas.tests.implementation.extract_main_continent.alternate"),
                 DisplayName.Create("Alternate Extract Main Continent"));
 
-            return new StageRouteStepImplementationChoice(
+            return new(
                 LandmassStageRouteSteps.PrimaryContinentalLandmassExtractMainContinent,
                 LandmassOperationDefinitions.ExtractMainContinent,
                 LandmassOperationContracts.ExtractMainContinent,
                 alternateImplementation);
+        }
+
+        private static StageRouteStepImplementationChoice CreateUnselectedRouteStepChoice()
+        {
+            StageRouteStepDefinition routeStep = new(
+                Symbol.Create("lokrain.atlas.tests.route_step.unselected"),
+                DisplayName.Create("Unselected Route Step"),
+                LandmassOperationDefinitions.EvaluateContinentSuitability.Symbol);
+
+            return new(
+                routeStep,
+                LandmassOperationDefinitions.EvaluateContinentSuitability,
+                LandmassOperationContracts.EvaluateContinentSuitability,
+                LandmassOperationImplementations.EvaluateContinentSuitabilityDefault);
+        }
+
+        private static StageRouteStepImplementationChoice CreateSymbolEquivalentEvaluateContinentSuitabilityChoice()
+        {
+            StageRouteStepDefinition routeStep = new(
+                LandmassStageRouteSteps.PrimaryContinentalLandmassEvaluateContinentSuitability.Symbol,
+                DisplayName.Create("Symbol Equivalent Evaluate Continent Suitability"),
+                LandmassOperationDefinitions.EvaluateContinentSuitability.Symbol);
+
+            return new(
+                routeStep,
+                LandmassOperationDefinitions.EvaluateContinentSuitability,
+                LandmassOperationContracts.EvaluateContinentSuitability,
+                LandmassOperationImplementations.EvaluateContinentSuitabilityDefault);
+        }
+
+        private static StageRouteStepImplementationChoice CreateDifferentSchemaEvaluateContinentSuitabilityChoice()
+        {
+            GenerationSchemaDefinition schema = new(
+                Symbol.Create("lokrain.atlas.tests.schema.alternative"),
+                DisplayName.Create("Alternative Test Schema"));
+
+            OperationDefinition operationDefinition = new(
+                schema,
+                LandmassOperationKinds.ContinentSuitabilityEvaluation,
+                LandmassOperationDefinitions.EvaluateContinentSuitability.Symbol,
+                DisplayName.Create("Alternative Evaluate Continent Suitability"));
+
+            ResourceDefinition output = CreateResource(
+                schema,
+                "lokrain.atlas.tests.resource.alternative_continent_suitability",
+                "Alternative Continent Suitability");
+
+            OperationContract operationContract = new(
+                operationDefinition,
+                Array.Empty<ResourceDefinition>(),
+                new[]
+                {
+                    output
+                });
+
+            OperationImplementationDefinition implementationDefinition = new(
+                operationDefinition,
+                Symbol.Create("lokrain.atlas.tests.implementation.alternative_evaluate_continent_suitability.default"),
+                DisplayName.Create("Alternative Evaluate Continent Suitability Default"));
+
+            return new(
+                LandmassStageRouteSteps.PrimaryContinentalLandmassEvaluateContinentSuitability,
+                operationDefinition,
+                operationContract,
+                implementationDefinition);
+        }
+
+        private static StageRouteStepImplementationChoice CreateEvaluateContinentSuitabilityChoiceWithUnavailableInput()
+        {
+            ResourceDefinition missingInput = CreateWorldResource(
+                "lokrain.atlas.tests.resource.missing_input",
+                "Missing Input");
+
+            OperationContract operationContract = new(
+                LandmassOperationDefinitions.EvaluateContinentSuitability,
+                new[]
+                {
+                    missingInput
+                },
+                new[]
+                {
+                    LandmassResourceDefinitions.ContinentSuitability
+                });
+
+            return new(
+                LandmassStageRouteSteps.PrimaryContinentalLandmassEvaluateContinentSuitability,
+                LandmassOperationDefinitions.EvaluateContinentSuitability,
+                operationContract,
+                LandmassOperationImplementations.EvaluateContinentSuitabilityDefault);
+        }
+
+        private static StageRouteStepImplementationChoice CreateComposeBaseElevationChoiceWithWrongOutput()
+        {
+            ResourceDefinition wrongOutput = CreateWorldResource(
+                "lokrain.atlas.tests.resource.wrong_base_elevation",
+                "Wrong Base Elevation");
+
+            OperationContract operationContract = new(
+                LandmassOperationDefinitions.ComposeBaseElevation,
+                new[]
+                {
+                    LandmassResourceDefinitions.ContinentalLandmassArea
+                },
+                new[]
+                {
+                    wrongOutput
+                });
+
+            return new(
+                LandmassStageRouteSteps.PrimaryContinentalLandmassComposeBaseElevation,
+                LandmassOperationDefinitions.ComposeBaseElevation,
+                operationContract,
+                LandmassOperationImplementations.ComposeBaseElevationDefault);
+        }
+
+        private static ResourceDefinition CreateWorldResource(
+            string symbol,
+            string displayName)
+        {
+            return CreateResource(
+                BuiltInGenerationSchemas.World,
+                symbol,
+                displayName);
+        }
+
+        private static ResourceDefinition CreateResource(
+            GenerationSchemaDefinition schema,
+            string symbol,
+            string displayName)
+        {
+            return new(
+                Symbol.Create(symbol),
+                DisplayName.Create(displayName),
+                schema);
         }
 
         private static void ReplaceChoice(

@@ -12,20 +12,19 @@ namespace Lokrain.Atlas.Resources
     /// <remarks>
     /// <para>
     /// A resource definition identifies a semantic value that can be required or produced by stages and
-    /// operations at the managed catalog/planning boundary.
+    /// operations at the managed catalog and planning boundary.
     /// </para>
     /// <para>
-    /// A resource definition is not field storage, not artifact storage, not a native container, not a
-    /// scheduler binding, not job data, and not an execution allocation description.
+    /// A resource definition describes what value exists in the generation graph. It does not describe how that
+    /// value is stored, allocated, scheduled, executed, captured, serialized, or represented by native memory.
     /// </para>
     /// <para>
-    /// Resource definitions intentionally come before field definitions. A resource answers what semantic
-    /// value exists in the generation graph. A later field definition answers how that value is represented
-    /// for a specific execution profile.
+    /// A resource definition is not field storage, artifact storage, a native container, a scheduler binding,
+    /// job data, or an execution allocation description.
     /// </para>
     /// <para>
-    /// The symbol is stable machine-facing identity. The display name is user-facing metadata only and must
-    /// not be used for lookup, deterministic generation, catalog resolution, or artifact compatibility.
+    /// The symbol is stable machine-facing identity. The display name is user-facing metadata only and must not
+    /// be used for lookup, deterministic generation, catalog resolution, or artifact compatibility.
     /// </para>
     /// <para>
     /// Equality is based on <see cref="Symbol"/> because a resource definition has one catalog identity.

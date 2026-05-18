@@ -108,6 +108,30 @@ namespace Lokrain.Atlas.Catalog.Tests
             Assert.Throws<ArgumentException>(() => builder.Build());
         }
 
+
+        [Test]
+        public void Build_WithResourceDefinitionReferencingSymbolEquivalentSchemaNotOwnedByCatalog_ThrowsArgumentException()
+        {
+            GenerationSchemaDefinition catalogSchema = TestDefinitions.CreateSchema(
+                TestSymbols.Schema,
+                "Catalog Schema");
+
+            GenerationSchemaDefinition equivalentForeignSchema = TestDefinitions.CreateSchema(
+                TestSymbols.Schema,
+                "Equivalent Foreign Schema");
+
+            ResourceDefinition foreignResource = TestDefinitions.CreateResource(
+                equivalentForeignSchema,
+                TestSymbols.Output,
+                "Foreign Output");
+
+            var builder = new GenerationCatalogBuilder()
+                .AddGenerationSchemaDefinition(catalogSchema)
+                .AddResourceDefinition(foreignResource);
+
+            Assert.Throws<ArgumentException>(() => builder.Build());
+        }
+
         [Test]
         public void Build_WithDuplicateStageDefinitionSymbol_ThrowsArgumentException()
         {
@@ -131,7 +155,7 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            StageRouteDefinition duplicateRoute = new StageRouteDefinition(
+            StageRouteDefinition duplicateRoute = new(
                 graph.Stage,
                 graph.Route.Symbol,
                 DisplayName.Create("Duplicate Route"),
@@ -154,7 +178,7 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            StageRouteDefinition secondRoute = new StageRouteDefinition(
+            StageRouteDefinition secondRoute = new(
                 graph.Stage,
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.route.second"),
                 DisplayName.Create("Second Route"),
@@ -177,7 +201,7 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            StageContract duplicateStageContract = new StageContract(
+            StageContract duplicateStageContract = new(
                 graph.Stage,
                 Array.Empty<ResourceDefinition>(),
                 new[]
@@ -205,12 +229,40 @@ namespace Lokrain.Atlas.Catalog.Tests
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.resource.unregistered"),
                 "Unregistered Output");
 
-            StageContract stageContract = new StageContract(
+            StageContract stageContract = new(
                 graph.Stage,
                 Array.Empty<ResourceDefinition>(),
                 new[]
                 {
                     unregisteredResource
+                });
+
+            var builder = new GenerationCatalogBuilder()
+                .AddGenerationSchemaDefinition(graph.Schema)
+                .AddResourceDefinitions(graph.Resources)
+                .AddStageDefinition(graph.Stage)
+                .AddStageContract(stageContract);
+
+            Assert.Throws<ArgumentException>(() => builder.Build());
+        }
+
+
+        [Test]
+        public void Build_WithStageContractReferencingSymbolEquivalentResourceNotOwnedByCatalog_ThrowsArgumentException()
+        {
+            TestCatalogGraph graph = TestCatalogGraph.Create();
+
+            ResourceDefinition equivalentForeignResource = TestDefinitions.CreateResource(
+                graph.Schema,
+                graph.OutputResource.Symbol,
+                "Equivalent Foreign Output");
+
+            StageContract stageContract = new(
+                graph.Stage,
+                Array.Empty<ResourceDefinition>(),
+                new[]
+                {
+                    equivalentForeignResource
                 });
 
             var builder = new GenerationCatalogBuilder()
@@ -245,7 +297,7 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            OperationImplementationDefinition duplicateImplementation = new OperationImplementationDefinition(
+            OperationImplementationDefinition duplicateImplementation = new(
                 graph.Operation,
                 graph.OperationImplementation.Symbol,
                 DisplayName.Create("Duplicate Implementation"));
@@ -264,7 +316,7 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            OperationContract duplicateOperationContract = new OperationContract(
+            OperationContract duplicateOperationContract = new(
                 graph.Operation,
                 Array.Empty<ResourceDefinition>(),
                 new[]
@@ -292,12 +344,40 @@ namespace Lokrain.Atlas.Catalog.Tests
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.resource.unregistered"),
                 "Unregistered Output");
 
-            OperationContract operationContract = new OperationContract(
+            OperationContract operationContract = new(
                 graph.Operation,
                 Array.Empty<ResourceDefinition>(),
                 new[]
                 {
                     unregisteredResource
+                });
+
+            var builder = new GenerationCatalogBuilder()
+                .AddGenerationSchemaDefinition(graph.Schema)
+                .AddResourceDefinitions(graph.Resources)
+                .AddOperationDefinition(graph.Operation)
+                .AddOperationContract(operationContract);
+
+            Assert.Throws<ArgumentException>(() => builder.Build());
+        }
+
+
+        [Test]
+        public void Build_WithOperationContractReferencingSymbolEquivalentResourceNotOwnedByCatalog_ThrowsArgumentException()
+        {
+            TestCatalogGraph graph = TestCatalogGraph.Create();
+
+            ResourceDefinition equivalentForeignResource = TestDefinitions.CreateResource(
+                graph.Schema,
+                graph.OutputResource.Symbol,
+                "Equivalent Foreign Output");
+
+            OperationContract operationContract = new(
+                graph.Operation,
+                Array.Empty<ResourceDefinition>(),
+                new[]
+                {
+                    equivalentForeignResource
                 });
 
             var builder = new GenerationCatalogBuilder()
@@ -468,12 +548,12 @@ namespace Lokrain.Atlas.Catalog.Tests
         {
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
-            StageRouteStepDefinition missingOperationStep = new StageRouteStepDefinition(
+            StageRouteStepDefinition missingOperationStep = new(
                 TestSymbols.RouteStep,
                 DisplayName.Create("Missing Operation Step"),
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.operation.missing"));
 
-            StageRouteDefinition route = new StageRouteDefinition(
+            StageRouteDefinition route = new(
                 graph.Stage,
                 TestSymbols.Route,
                 DisplayName.Create("Route"),
@@ -511,7 +591,7 @@ namespace Lokrain.Atlas.Catalog.Tests
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.operation.foreign"),
                 "Foreign Operation");
 
-            OperationContract foreignOperationContract = new OperationContract(
+            OperationContract foreignOperationContract = new(
                 foreignOperation,
                 Array.Empty<ResourceDefinition>(),
                 new[]
@@ -519,17 +599,17 @@ namespace Lokrain.Atlas.Catalog.Tests
                     foreignResource
                 });
 
-            OperationImplementationDefinition foreignImplementation = new OperationImplementationDefinition(
+            OperationImplementationDefinition foreignImplementation = new(
                 foreignOperation,
                 Symbol.Create("lokrain.atlas.tests.catalog_validation.implementation.foreign"),
                 DisplayName.Create("Foreign Implementation"));
 
-            StageRouteStepDefinition foreignOperationStep = new StageRouteStepDefinition(
+            StageRouteStepDefinition foreignOperationStep = new(
                 TestSymbols.RouteStep,
                 DisplayName.Create("Foreign Operation Step"),
                 foreignOperation.Symbol);
 
-            StageRouteDefinition route = new StageRouteDefinition(
+            StageRouteDefinition route = new(
                 graph.Stage,
                 TestSymbols.Route,
                 DisplayName.Create("Route"),
@@ -563,7 +643,7 @@ namespace Lokrain.Atlas.Catalog.Tests
                 TestSymbols.MissingInput,
                 "Missing Input");
 
-            OperationContract operationContract = new OperationContract(
+            OperationContract operationContract = new(
                 graph.Operation,
                 new[]
                 {
@@ -598,7 +678,7 @@ namespace Lokrain.Atlas.Catalog.Tests
                 TestSymbols.DifferentOutput,
                 "Different Output");
 
-            OperationContract operationContract = new OperationContract(
+            OperationContract operationContract = new(
                 graph.Operation,
                 Array.Empty<ResourceDefinition>(),
                 new[]
@@ -655,19 +735,19 @@ namespace Lokrain.Atlas.Catalog.Tests
             TestCatalogGraph graph = TestCatalogGraph.Create();
 
             OperationImplementationDefinition unregisteredImplementation =
-                new OperationImplementationDefinition(
+                new(
                     graph.Operation,
                     Symbol.Create("lokrain.atlas.tests.catalog_validation.implementation.unregistered"),
                     DisplayName.Create("Unregistered Implementation"));
 
             StageRouteStepImplementationChoice unregisteredImplementationChoice =
-                new StageRouteStepImplementationChoice(
+                new(
                     graph.RouteStep,
                     graph.Operation,
                     graph.OperationContract,
                     unregisteredImplementation);
 
-            GenerationRecipeDefinition recipe = new GenerationRecipeDefinition(
+            GenerationRecipeDefinition recipe = new(
                 TestSymbols.Recipe,
                 DisplayName.Create("Recipe"),
                 graph.Schema,
@@ -769,7 +849,7 @@ namespace Lokrain.Atlas.Catalog.Tests
                     TestSymbols.Stage,
                     "Stage");
 
-                StageContract stageContract = new StageContract(
+                StageContract stageContract = new(
                     stage,
                     Array.Empty<ResourceDefinition>(),
                     new[]
@@ -782,7 +862,7 @@ namespace Lokrain.Atlas.Catalog.Tests
                     TestSymbols.Operation,
                     "Operation");
 
-                OperationContract operationContract = new OperationContract(
+                OperationContract operationContract = new(
                     operation,
                     Array.Empty<ResourceDefinition>(),
                     new[]
@@ -791,17 +871,17 @@ namespace Lokrain.Atlas.Catalog.Tests
                     });
 
                 OperationImplementationDefinition operationImplementation =
-                    new OperationImplementationDefinition(
+                    new(
                         operation,
                         TestSymbols.OperationImplementation,
                         DisplayName.Create("Operation Implementation"));
 
-                StageRouteStepDefinition routeStep = new StageRouteStepDefinition(
+                StageRouteStepDefinition routeStep = new(
                     TestSymbols.RouteStep,
                     DisplayName.Create("Route Step"),
                     operation.Symbol);
 
-                StageRouteDefinition route = new StageRouteDefinition(
+                StageRouteDefinition route = new(
                     stage,
                     TestSymbols.Route,
                     DisplayName.Create("Route"),
@@ -810,19 +890,19 @@ namespace Lokrain.Atlas.Catalog.Tests
                         routeStep
                     });
 
-                StageRouteChoice stageRouteChoice = new StageRouteChoice(
+                StageRouteChoice stageRouteChoice = new(
                     stage,
                     route,
                     stageContract);
 
                 StageRouteStepImplementationChoice operationImplementationChoice =
-                    new StageRouteStepImplementationChoice(
+                    new(
                         routeStep,
                         operation,
                         operationContract,
                         operationImplementation);
 
-                GenerationRecipeDefinition recipe = new GenerationRecipeDefinition(
+                GenerationRecipeDefinition recipe = new(
                     TestSymbols.Recipe,
                     DisplayName.Create("Recipe"),
                     schema,

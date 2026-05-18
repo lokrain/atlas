@@ -7,12 +7,12 @@ using Lokrain.Atlas.Schemas;
 namespace Lokrain.Atlas.Stages
 {
     /// <summary>
-    /// Defines a catalog-owned generation stage.
+    /// Defines a generation stage.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A stage definition identifies one authored generation stage within a generation schema. It describes
-    /// catalog metadata only; it does not define route ordering, operation membership, execution behavior,
+    /// A stage definition identifies one authored generation stage within a generation schema. It is managed
+    /// definition metadata only; it does not define route ordering, operation membership, execution behavior,
     /// runtime bindings, or job data.
     /// </para>
     /// <para>
@@ -25,7 +25,8 @@ namespace Lokrain.Atlas.Stages
     /// not by treating duplicate symbols as distinct definitions.
     /// </para>
     /// <para>
-    /// A non-null <see cref="StageDefinition"/> instance is always valid.
+    /// A non-null <see cref="StageDefinition"/> instance is always syntactically valid.
+    /// Catalog-dependent semantic validity is established by the generation catalog.
     /// </para>
     /// </remarks>
     public sealed class StageDefinition : IEquatable<StageDefinition>

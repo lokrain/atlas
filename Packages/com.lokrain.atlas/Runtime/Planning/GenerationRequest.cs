@@ -11,25 +11,30 @@ using Lokrain.Atlas.Stages;
 namespace Lokrain.Atlas.Planning
 {
     /// <summary>
-    /// Represents an accepted generation request.
+    /// Represents accepted resolved generation intent for one generation run.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation request combines a resolved generation recipe, generation-wide run settings, and the final
-    /// resolved route-step implementation choices for this run. It is an accepted domain object, not a raw symbol
-    /// descriptor and not an unresolved user selection.
+    /// A generation request combines an accepted generation recipe, generation-wide run settings, and the final
+    /// resolved route-step implementation choices for one run.
     /// </para>
     /// <para>
-    /// The recipe defines the selected schema and stage routes. The request stores the final implementation
-    /// choices after applying any descriptor-level implementation overrides to the recipe defaults.
+    /// This type is not a descriptor. It does not contain unresolved recipe symbols, unresolved route-step symbols,
+    /// unresolved implementation symbols, or unresolved user selections. Descriptor resolution happens before a
+    /// generation request is created.
+    /// </para>
+    /// <para>
+    /// The recipe defines the selected schema and stage routes. The request stores the final implementation choices
+    /// after applying any descriptor-level implementation overrides to the recipe defaults.
     /// </para>
     /// <para>
     /// Route and operation compatibility is validated through accepted semantic resource definitions, not raw
-    /// resource symbols.
+    /// resource symbols. Each selected route must satisfy its stage contract, and each route step must have exactly
+    /// one implementation choice.
     /// </para>
     /// <para>
-    /// A generation request does not contain executable bindings, runtime state, job data, native containers,
-    /// ECS systems, Burst function pointers, or Unity runtime objects.
+    /// This type is managed planning input only. It does not contain executable metadata, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationRequest"/> instance is always valid.

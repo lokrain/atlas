@@ -11,7 +11,8 @@ using Lokrain.Atlas.Stages;
 namespace Lokrain.Atlas.Recipes
 {
     /// <summary>
-    /// Defines an accepted resolved generation recipe.
+    /// A non-null <see cref="StageRouteChoice"/> instance is always valid within its own definition graph.
+    /// Catalog ownership is validated by the generation catalog.
     /// </summary>
     /// <remarks>
     /// <para>

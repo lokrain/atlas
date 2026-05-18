@@ -42,6 +42,9 @@ namespace Lokrain.Atlas.Planning
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="request"/> is null.
         /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when an accepted request violates a compiler-required invariant.
+        /// </exception>
         public GenerationPlan Compile(GenerationRequest request)
         {
             if (request is null)
@@ -71,23 +74,25 @@ namespace Lokrain.Atlas.Planning
                         stageRouteChoice.StageRouteDefinition.StageRouteStepDefinitions[stepIndex];
 
                     StageRouteStepImplementationChoice implementationChoice =
-                        implementationChoicesByRouteStepSymbol[stageRouteStepDefinition.Symbol];
+                        GetImplementationChoice(
+                            implementationChoicesByRouteStepSymbol,
+                            stageRouteStepDefinition);
 
-                    operationPlanNodes.Add(new(
+                    operationPlanNodes.Add(new OperationPlanNode(
                         implementationChoice.StageRouteStepDefinition,
                         implementationChoice.OperationDefinition,
                         implementationChoice.OperationImplementationDefinition,
                         implementationChoice.OperationContract));
                 }
 
-                stagePlanNodes.Add(new(
+                stagePlanNodes.Add(new StagePlanNode(
                     stageRouteChoice.StageDefinition,
                     stageRouteChoice.StageRouteDefinition,
                     stageRouteChoice.StageContract,
                     operationPlanNodes));
             }
 
-            return new(
+            return new GenerationPlan(
                 request.GenerationRecipeDefinition,
                 request.RunSettings,
                 stagePlanNodes);
@@ -157,6 +162,21 @@ namespace Lokrain.Atlas.Planning
             }
 
             return implementationChoicesByRouteStepSymbol;
+        }
+
+        private static StageRouteStepImplementationChoice GetImplementationChoice(
+            IReadOnlyDictionary<Symbol, StageRouteStepImplementationChoice> implementationChoicesByRouteStepSymbol,
+            StageRouteStepDefinition stageRouteStepDefinition)
+        {
+            if (implementationChoicesByRouteStepSymbol.TryGetValue(
+                stageRouteStepDefinition.Symbol,
+                out StageRouteStepImplementationChoice implementationChoice))
+            {
+                return implementationChoice;
+            }
+
+            throw new InvalidOperationException(
+                $"Accepted generation request does not contain an implementation choice for route step '{stageRouteStepDefinition.Symbol}'.");
         }
 
         private static bool AreRequiredInputsAvailable(

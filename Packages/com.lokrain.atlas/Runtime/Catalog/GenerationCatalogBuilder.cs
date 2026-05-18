@@ -15,22 +15,26 @@ namespace Lokrain.Atlas.Catalog
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A generation catalog builder is the mutable assembly surface for catalog definitions. It preserves
-    /// insertion order and rejects null entries immediately, but final duplicate, ownership, and semantic
-    /// graph validation is performed by <see cref="GenerationCatalog"/> when <see cref="Build"/> is called.
+    /// A generation catalog builder is the mutable assembly surface for catalog definitions. It preserves insertion
+    /// order and rejects null entries immediately.
     /// </para>
     /// <para>
-    /// Resource definitions are catalog-owned semantic resources. They are added before contracts can be
-    /// accepted by the catalog, because stage and operation contracts reference resources by accepted
-    /// definition object, not by raw symbol.
+    /// Final duplicate validation, ownership validation, graph validation, resource ownership validation, contract
+    /// validation, route validation, recipe validation, and cross-definition semantic validation are performed by
+    /// <see cref="GenerationCatalog"/> when <see cref="Build"/> is called.
+    /// </para>
+    /// <para>
+    /// Resource definitions are catalog-owned semantic resources. They are added before contracts can be accepted
+    /// by the catalog because stage and operation contracts reference accepted resource definitions, not raw
+    /// symbols.
     /// </para>
     /// <para>
     /// Route step definitions are owned by <see cref="StageRouteDefinition"/> instances and are not added
     /// independently to the builder.
     /// </para>
     /// <para>
-    /// The builder is not a catalog, registry, service locator, Unity asset, execution container, ECS world
-    /// object, runtime binding table, job scheduler, field-definition registry, or native data owner.
+    /// The builder is not a catalog, registry, service locator, Unity asset, execution container, ECS world object,
+    /// runtime binding table, job scheduler, field-definition registry, or native data owner.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationCatalogBuilder"/> instance is always valid.

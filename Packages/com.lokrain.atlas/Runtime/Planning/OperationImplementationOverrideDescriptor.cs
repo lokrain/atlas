@@ -11,21 +11,25 @@ namespace Lokrain.Atlas.Planning
     /// <remarks>
     /// <para>
     /// An operation implementation override descriptor is unresolved symbolic input. It is used by request
-    /// authoring, editor tooling, importers, and higher-level APIs to override the default implementation selected
-    /// by a generation recipe.
+    /// authoring, editor tooling, importers, serialized descriptors, and higher-level APIs to override the default
+    /// operation implementation selected by a generation recipe.
     /// </para>
     /// <para>
     /// The route-step symbol identifies the operation occurrence being overridden. The implementation symbol
     /// identifies the requested implementation for that occurrence.
     /// </para>
     /// <para>
-    /// This descriptor does not contain catalog definitions, accepted request nodes, resolved plan nodes,
-    /// executable bindings, runtime state, job data, native containers, ECS systems, Burst function pointers, or
-    /// Unity runtime objects.
+    /// This type validates descriptor structure only. Catalog-dependent satisfiability is established by
+    /// <see cref="GenerationRequestResolver"/>.
+    /// </para>
+    /// <para>
+    /// This descriptor does not contain catalog definitions, accepted requests, resolved plan nodes, executable
+    /// bindings, scheduler bindings, runtime state, job data, native containers, ECS systems, Burst function
+    /// pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="OperationImplementationOverrideDescriptor"/> instance is always a valid symbolic
-    /// descriptor. Catalog-dependent satisfiability is established by a request resolver.
+    /// descriptor.
     /// </para>
     /// </remarks>
     public sealed class OperationImplementationOverrideDescriptor :

@@ -14,9 +14,16 @@ namespace Lokrain.Atlas.Planning
     /// recipe, stage, route, operation, or implementation.
     /// </para>
     /// <para>
-    /// The grid defines the spatial domain and memory shape for generated data. The seed defines the root
-    /// deterministic input for generation. Recipe-specific algorithm settings belong in separate setting
-    /// descriptors later.
+    /// The grid defines the spatial domain and canonical cell addressing shape for generated data. The seed defines
+    /// the root deterministic input for generation.
+    /// </para>
+    /// <para>
+    /// Recipe-specific, stage-specific, operation-specific, and implementation-specific settings belong outside
+    /// this type.
+    /// </para>
+    /// <para>
+    /// This type is managed planning input only. It does not contain executable metadata, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationRunSettings"/> instance is always valid.
@@ -43,8 +50,8 @@ namespace Lokrain.Atlas.Planning
 
             Grid = grid;
             Seed = seed;
-        } 
-        
+        }
+
         /// <summary>
         /// Gets the accepted generation grid.
         /// </summary>

@@ -15,13 +15,14 @@ namespace Lokrain.Atlas.Planning
     /// <remarks>
     /// <para>
     /// A generation request resolver uses an accepted generation catalog to resolve descriptor symbols into
-    /// catalog-owned recipe and implementation definitions. It produces an accepted generation request when the
-    /// descriptor can be satisfied by the catalog.
+    /// catalog-owned recipe definitions, route-step selections, and operation implementation definitions.
+    /// It produces an accepted generation request when the descriptor can be satisfied by the catalog.
     /// </para>
     /// <para>
-    /// The resolver is the boundary between unresolved symbolic input and accepted planning domain objects. It
-    /// does not compile generation plans, create executable bindings, schedule jobs, allocate native containers,
-    /// or reference Unity runtime objects.
+    /// This type is the boundary between unresolved symbolic input and accepted managed planning domain objects.
+    /// It does not compile generation plans, create executable metadata, create scheduler bindings, allocate native
+    /// storage, schedule jobs, reference ECS systems, create Burst function pointers, or reference Unity runtime
+    /// objects.
     /// </para>
     /// <para>
     /// Invalid API usage throws exceptions. Descriptor/catalog satisfiability failures are returned as structured

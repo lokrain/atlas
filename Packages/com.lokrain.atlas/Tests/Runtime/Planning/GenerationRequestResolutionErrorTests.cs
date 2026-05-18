@@ -25,7 +25,7 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             Symbol code = Symbol.Create(CodeSymbolText);
 
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 code,
                 "Recipe was not found.");
 
@@ -40,7 +40,7 @@ namespace Lokrain.Atlas.Planning.Tests
             Symbol code = Symbol.Create(CodeSymbolText);
             Symbol subjectSymbol = Symbol.Create(SubjectSymbolText);
 
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 code,
                 "Recipe was not found.",
                 subjectSymbol);
@@ -55,7 +55,7 @@ namespace Lokrain.Atlas.Planning.Tests
         {
             Symbol code = Symbol.Create(CodeSymbolText);
 
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 code,
                 "  Recipe was not found.  ");
 
@@ -86,8 +86,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [TestCase("   ")]
         [TestCase("\t")]
         [TestCase("\n")]
-        public void Constructor_WithEmptyOrWhitespaceMessage_ThrowsArgumentException(
-            string message)
+        public void Constructor_WithEmptyOrWhitespaceMessage_ThrowsArgumentException(string message)
         {
             Symbol code = Symbol.Create(CodeSymbolText);
 
@@ -100,12 +99,12 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithSameCodeMessageAndSubjectSymbol_ReturnsTrue()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
@@ -120,28 +119,30 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithSameCodeAndMessageAndNoSubjectSymbol_ReturnsTrue()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.");
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.");
 
             Assert.That(left.Equals(right), Is.True);
+            Assert.That(left.Equals((object)right), Is.True);
             Assert.That(left == right, Is.True);
+            Assert.That(left != right, Is.False);
             Assert.That(left.GetHashCode(), Is.EqualTo(right.GetHashCode()));
         }
 
         [Test]
         public void Equals_WithDifferentCode_ReturnsFalse()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(OtherCodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
@@ -155,12 +156,12 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithDifferentMessage_ReturnsFalse()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(CodeSymbolText),
                 "Implementation was not found.",
                 Symbol.Create(SubjectSymbolText));
@@ -174,12 +175,12 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithDifferentSubjectSymbol_ReturnsFalse()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(OtherSubjectSymbolText));
@@ -193,12 +194,12 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithOneSubjectSymbolMissing_ReturnsFalse()
         {
-            var left = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError left = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
 
-            var right = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError right = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.");
 
@@ -209,9 +210,20 @@ namespace Lokrain.Atlas.Planning.Tests
         }
 
         [Test]
+        public void Equals_WithNull_ReturnsFalse()
+        {
+            GenerationRequestResolutionError error = new(
+                Symbol.Create(CodeSymbolText),
+                "Recipe was not found.",
+                Symbol.Create(SubjectSymbolText));
+
+            Assert.That(error.Equals(null), Is.False);
+        }
+
+        [Test]
         public void Equals_WithDifferentObjectType_ReturnsFalse()
         {
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));
@@ -245,7 +257,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void ToString_WithoutSubjectSymbol_ReturnsErrorText()
         {
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.");
 
@@ -260,7 +272,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void ToString_WithSubjectSymbol_ReturnsErrorText()
         {
-            var error = new GenerationRequestResolutionError(
+            GenerationRequestResolutionError error = new(
                 Symbol.Create(CodeSymbolText),
                 "Recipe was not found.",
                 Symbol.Create(SubjectSymbolText));

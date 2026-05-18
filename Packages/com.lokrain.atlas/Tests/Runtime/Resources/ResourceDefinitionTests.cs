@@ -70,15 +70,35 @@ namespace Lokrain.Atlas.Resources.Tests
         {
             GenerationSchemaDefinition generationSchema = CreateSchema();
 
-            ResourceDefinition left = new ResourceDefinition(
+            ResourceDefinition left = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Height Resource"),
                 generationSchema);
 
-            ResourceDefinition right = new ResourceDefinition(
+            ResourceDefinition right = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Different Height Resource Display Name"),
                 generationSchema);
+
+            Assert.That(left.Equals(right), Is.True);
+            Assert.That(left.Equals((object)right), Is.True);
+            Assert.That(left == right, Is.True);
+            Assert.That(left != right, Is.False);
+            Assert.That(left.GetHashCode(), Is.EqualTo(right.GetHashCode()));
+        }
+
+        [Test]
+        public void Equals_WithSameSymbolAndDifferentGenerationSchema_ReturnsTrue()
+        {
+            ResourceDefinition left = new(
+                Symbol.Create("lokrain.atlas.tests.resource.height"),
+                DisplayName.Create("Height Resource"),
+                CreateSchema());
+
+            ResourceDefinition right = new(
+                Symbol.Create("lokrain.atlas.tests.resource.height"),
+                DisplayName.Create("Different Height Resource Display Name"),
+                CreateAlternativeSchema());
 
             Assert.That(left.Equals(right), Is.True);
             Assert.That(left.Equals((object)right), Is.True);
@@ -92,12 +112,12 @@ namespace Lokrain.Atlas.Resources.Tests
         {
             GenerationSchemaDefinition generationSchema = CreateSchema();
 
-            ResourceDefinition left = new ResourceDefinition(
+            ResourceDefinition left = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Height Resource"),
                 generationSchema);
 
-            ResourceDefinition right = new ResourceDefinition(
+            ResourceDefinition right = new(
                 Symbol.Create("lokrain.atlas.tests.resource.moisture"),
                 DisplayName.Create("Moisture Resource"),
                 generationSchema);
@@ -111,7 +131,7 @@ namespace Lokrain.Atlas.Resources.Tests
         [Test]
         public void Equals_WithDifferentObjectType_ReturnsFalse()
         {
-            ResourceDefinition resourceDefinition = new ResourceDefinition(
+            ResourceDefinition resourceDefinition = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Height Resource"),
                 CreateSchema());
@@ -132,7 +152,7 @@ namespace Lokrain.Atlas.Resources.Tests
         [Test]
         public void EqualityOperator_WithOneNull_ReturnsFalse()
         {
-            ResourceDefinition? left = new ResourceDefinition(
+            ResourceDefinition? left = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Height Resource"),
                 CreateSchema());
@@ -146,7 +166,7 @@ namespace Lokrain.Atlas.Resources.Tests
         [Test]
         public void ToString_ReturnsResourceDefinitionSummary()
         {
-            ResourceDefinition resourceDefinition = new ResourceDefinition(
+            ResourceDefinition resourceDefinition = new(
                 Symbol.Create("lokrain.atlas.tests.resource.height"),
                 DisplayName.Create("Height Resource"),
                 CreateSchema());
@@ -164,6 +184,13 @@ namespace Lokrain.Atlas.Resources.Tests
             return new GenerationSchemaDefinition(
                 Symbol.Create("lokrain.atlas.tests.schema.world"),
                 DisplayName.Create("World Test Schema"));
+        }
+
+        private static GenerationSchemaDefinition CreateAlternativeSchema()
+        {
+            return new GenerationSchemaDefinition(
+                Symbol.Create("lokrain.atlas.tests.schema.alternative"),
+                DisplayName.Create("Alternative Test Schema"));
         }
     }
 }

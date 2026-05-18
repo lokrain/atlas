@@ -11,12 +11,17 @@ namespace Lokrain.Atlas.Planning
     /// <remarks>
     /// <para>
     /// A generation request resolution error describes why a symbolic generation request descriptor could not be
-    /// resolved into an accepted generation request using a generation catalog.
+    /// satisfied by a generation catalog.
     /// </para>
     /// <para>
-    /// The error code is a stable machine-facing symbol intended for tests, tooling, logs, and editor UI.
+    /// The error code is a stable machine-facing symbol for tests, tooling, logs, editor UI, and automated handling.
     /// The message is human-facing diagnostic text. The optional subject symbol identifies the primary descriptor
     /// or catalog symbol associated with the error when one exists.
+    /// </para>
+    /// <para>
+    /// This type is managed diagnostic data only. It does not contain exceptions, stack traces, executable metadata,
+    /// scheduler bindings, runtime state, job data, native containers, ECS systems, Burst function pointers, or
+    /// Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationRequestResolutionError"/> instance is always valid.

@@ -11,10 +11,10 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Constructor_WithGridAndSeed_StoresRunSettings()
         {
-            var grid = new Grid(256, 256);
-            var seed = new Seed(123UL);
+            Grid grid = new(256, 256);
+            Seed seed = new(123UL);
 
-            var settings = new GenerationRunSettings(grid, seed);
+            GenerationRunSettings settings = new(grid, seed);
 
             Assert.That(settings.Grid, Is.SameAs(grid));
             Assert.That(settings.Seed, Is.EqualTo(seed));
@@ -23,7 +23,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Constructor_WithNullGrid_ThrowsArgumentNullException()
         {
-            var seed = new Seed(123UL);
+            Seed seed = new(123UL);
 
             Assert.Throws<ArgumentNullException>(
                 () => new GenerationRunSettings(null!, seed));
@@ -32,11 +32,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithSameGridAndSeed_ReturnsTrue()
         {
-            var grid = new Grid(256, 256);
-            var seed = new Seed(123UL);
+            Grid grid = new(256, 256);
+            Seed seed = new(123UL);
 
-            var left = new GenerationRunSettings(grid, seed);
-            var right = new GenerationRunSettings(grid, seed);
+            GenerationRunSettings left = new(grid, seed);
+            GenerationRunSettings right = new(grid, seed);
 
             Assert.That(left.Equals(right), Is.True);
             Assert.That(left.Equals((object)right), Is.True);
@@ -48,11 +48,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithEquivalentGridAndSameSeed_ReturnsTrue()
         {
-            var left = new GenerationRunSettings(
+            GenerationRunSettings left = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
-            var right = new GenerationRunSettings(
+            GenerationRunSettings right = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
@@ -64,11 +64,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithDifferentGrid_ReturnsFalse()
         {
-            var left = new GenerationRunSettings(
+            GenerationRunSettings left = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
-            var right = new GenerationRunSettings(
+            GenerationRunSettings right = new(
                 new Grid(512, 256),
                 new Seed(123UL));
 
@@ -81,11 +81,11 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void Equals_WithDifferentSeed_ReturnsFalse()
         {
-            var left = new GenerationRunSettings(
+            GenerationRunSettings left = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
-            var right = new GenerationRunSettings(
+            GenerationRunSettings right = new(
                 new Grid(256, 256),
                 new Seed(456UL));
 
@@ -96,9 +96,19 @@ namespace Lokrain.Atlas.Planning.Tests
         }
 
         [Test]
+        public void Equals_WithNull_ReturnsFalse()
+        {
+            GenerationRunSettings settings = new(
+                new Grid(256, 256),
+                new Seed(123UL));
+
+            Assert.That(settings.Equals(null), Is.False);
+        }
+
+        [Test]
         public void Equals_WithDifferentObjectType_ReturnsFalse()
         {
-            var settings = new GenerationRunSettings(
+            GenerationRunSettings settings = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
@@ -118,7 +128,7 @@ namespace Lokrain.Atlas.Planning.Tests
         [Test]
         public void EqualityOperator_WithOneNull_ReturnsFalse()
         {
-            GenerationRunSettings? left = new GenerationRunSettings(
+            GenerationRunSettings? left = new(
                 new Grid(256, 256),
                 new Seed(123UL));
 
@@ -126,6 +136,21 @@ namespace Lokrain.Atlas.Planning.Tests
 
             Assert.That(left == right, Is.False);
             Assert.That(left != right, Is.True);
+        }
+
+        [Test]
+        public void ToString_ReturnsRunSettingsSummary()
+        {
+            GenerationRunSettings settings = new(
+                new Grid(256, 256),
+                new Seed(123UL));
+
+            string value = settings.ToString();
+
+            Assert.That(
+                value,
+                Is.EqualTo(
+                    "GenerationRunSettings(Grid: Grid(Width: 256, Depth: 256), Seed: 123)"));
         }
     }
 }

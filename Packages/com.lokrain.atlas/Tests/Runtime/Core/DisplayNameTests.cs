@@ -50,7 +50,7 @@ namespace Lokrain.Atlas.Core.Tests
         [Test]
         public void Create_WithMaximumLengthDisplayName_ReturnsDisplayName()
         {
-            string value = new string('A', DisplayName.MaxLength);
+            string value = new('A', DisplayName.MaxLength);
 
             DisplayName displayName = DisplayName.Create(value);
 
@@ -86,7 +86,7 @@ namespace Lokrain.Atlas.Core.Tests
         [Test]
         public void Create_WithTooLongDisplayName_ThrowsArgumentException()
         {
-            string value = new string('A', DisplayName.MaxLength + 1);
+            string value = new('A', DisplayName.MaxLength + 1);
 
             Assert.Throws<ArgumentException>(() => DisplayName.Create(value));
         }

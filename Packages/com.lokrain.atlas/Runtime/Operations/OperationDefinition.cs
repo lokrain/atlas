@@ -7,12 +7,12 @@ using Lokrain.Atlas.Schemas;
 namespace Lokrain.Atlas.Operations
 {
     /// <summary>
-    /// Defines a catalog-owned generation operation.
+    /// Defines a generation operation.
     /// </summary>
     /// <remarks>
     /// <para>
     /// An operation definition identifies one authored generation operation within a generation schema.
-    /// It describes catalog metadata only; it does not define stage route membership, implementation binding,
+    /// It is managed definition metadata only; it does not define stage route membership, implementation binding,
     /// execution behavior, runtime state, job data, or native containers.
     /// </para>
     /// <para>
@@ -30,7 +30,8 @@ namespace Lokrain.Atlas.Operations
     /// not by treating duplicate symbols as distinct definitions.
     /// </para>
     /// <para>
-    /// A non-null <see cref="OperationDefinition"/> instance is always valid.
+    /// A non-null <see cref="OperationDefinition"/> instance is always syntactically valid.
+    /// Catalog-dependent semantic validity is established by the generation catalog.
     /// </para>
     /// </remarks>
     public sealed class OperationDefinition : IEquatable<OperationDefinition>

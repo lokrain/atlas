@@ -17,8 +17,12 @@ namespace Lokrain.Atlas.Planning
     /// by a generation catalog.
     /// </para>
     /// <para>
-    /// The result is managed planning data only. It does not contain executable bindings, runtime state, job data,
-    /// native containers, ECS systems, Burst function pointers, or Unity runtime objects.
+    /// A successful result contains exactly one accepted generation request and no errors. A failed result contains
+    /// no generation request and at least one structured error.
+    /// </para>
+    /// <para>
+    /// This type is managed planning data only. It does not contain executable metadata, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// A non-null <see cref="GenerationRequestResolutionResult"/> instance is always valid.

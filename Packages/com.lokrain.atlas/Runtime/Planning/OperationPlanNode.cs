@@ -12,13 +12,21 @@ namespace Lokrain.Atlas.Planning
     /// <remarks>
     /// <para>
     /// An operation plan node resolves one stage route step to its operation definition, selected operation
-    /// implementation definition, and operation contract. It is managed planning data only; it does not contain
-    /// executable bindings, runtime state, job data, native containers, ECS systems, Burst function pointers, or
-    /// Unity runtime objects.
+    /// implementation definition, and operation contract.
+    /// </para>
+    /// <para>
+    /// The route step identifies the authored operation occurrence within the selected stage route. The operation
+    /// definition identifies the semantic operation referenced by that occurrence. The implementation definition
+    /// identifies the selected implementation option. The operation contract describes the semantic resource flow
+    /// for the operation.
+    /// </para>
+    /// <para>
+    /// This type is managed planning data only. It does not contain executable bindings, scheduler bindings,
+    /// runtime state, job data, native containers, ECS systems, Burst function pointers, or Unity runtime objects.
     /// </para>
     /// <para>
     /// Operation plan nodes are created by the generation plan compiler after resolving request selections through
-    /// an accepted generation catalog. Runnable-plan compilation later resolves execution bindings.
+    /// an accepted generation catalog. Runnable-plan compilation later resolves execution metadata.
     /// </para>
     /// <para>
     /// A non-null <see cref="OperationPlanNode"/> instance is always valid.
@@ -85,7 +93,7 @@ namespace Lokrain.Atlas.Planning
         public StageRouteStepDefinition StageRouteStepDefinition { get; }
 
         /// <summary>
-        /// Gets the resolved operation definition.
+        /// Gets the resolved operation definition referenced by the route step.
         /// </summary>
         public OperationDefinition OperationDefinition { get; }
 

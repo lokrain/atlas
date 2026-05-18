@@ -76,7 +76,7 @@ Runtime/
       LandmassStageKinds.cs
       LandmassOperationKinds.cs
       LandmassStageDefinitions.cs
-      LandmassResourceSymbols.cs
+      LandmassResourceDefinitions.cs 
       LandmassStageContracts.cs
       LandmassGenerationCatalog.cs
       LandmassGenerationRecipes.cs

@@ -117,7 +117,7 @@ Runtime/Planning/GenerationPlanCompiler.cs
 Runtime/Generation/Landmass/LandmassStageKinds.cs
 Runtime/Generation/Landmass/LandmassOperationKinds.cs
 Runtime/Generation/Landmass/LandmassStageDefinitions.cs
-Runtime/Generation/Landmass/LandmassResourceSymbols.cs
+Runtime/Generation/Landmass/LandmassResourceDefinitions.cs
 Runtime/Generation/Landmass/LandmassStageContracts.cs
 Runtime/Generation/Landmass/Operations/LandmassOperationDefinitions.cs
 Runtime/Generation/Landmass/Operations/LandmassOperationContracts.cs
