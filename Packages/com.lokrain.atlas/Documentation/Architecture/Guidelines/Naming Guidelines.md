@@ -398,23 +398,31 @@ Do not use execution names for managed semantic plans.
 
 Use execution names only for planned execution concepts.
 
-Correct planned names:
+Correct current managed metadata names:
 
 ```text
 FieldDefinition
 FieldDefinitionSet
 ExecutionProfile
+ExecutionProfileSet
+```
+
+Correct planned execution names:
+
+```text
 RunnablePlanCompiler
 RunnablePlan
 RunnableStage
 RunnableOperation
+FieldBinding
+SchedulerBinding
 FieldHandle
 GenerationWorkspace
 OperationScheduler
 OperationScratch
 ```
 
-Do not use these names for current managed Runtime concepts.
+Do not use planned execution names for current managed Runtime concepts.
 
 Incorrect current names:
 
@@ -429,7 +437,7 @@ StagePlanNode contains OperationScheduler
 
 Use `ResourceDefinition` for semantic generated values.
 
-Use `FieldDefinition` only for planned storage-facing metadata.
+Use `FieldDefinition` for current managed field metadata that maps one `ResourceDefinition` to representation metadata. Do not use it as resource identity, catalog inventory, native storage, or a field handle.
 
 Correct:
 
@@ -438,7 +446,7 @@ ResourceDefinition ContinentSuitability
 ResourceDefinition BaseElevation
 ```
 
-Correct planned:
+Correct current field metadata:
 
 ```text
 FieldDefinition BaseElevationField

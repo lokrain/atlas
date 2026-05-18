@@ -33,7 +33,7 @@ namespace Lokrain.Atlas.Generation.Landmass.Tests
         }
 
         [Test]
-        public void Default_ContainsFieldsForAllLandmassFieldDefinitions()
+        public void Default_ContainsFieldsForAllLandmassFieldDefinitionSymbols()
         {
             FieldDefinitionSet fieldDefinitionSet = LandmassFieldDefinitionSet.Default;
 
@@ -46,11 +46,46 @@ namespace Lokrain.Atlas.Generation.Landmass.Tests
                 Assert.That(
                     fieldDefinitionSet.GetFieldDefinition(fieldDefinition.Symbol),
                     Is.SameAs(fieldDefinition));
+
+                Assert.That(
+                    fieldDefinitionSet.TryGetFieldDefinition(
+                        fieldDefinition.Symbol,
+                        out FieldDefinition? resolvedFieldDefinition),
+                    Is.True);
+
+                Assert.That(resolvedFieldDefinition, Is.SameAs(fieldDefinition));
             }
         }
 
         [Test]
-        public void Default_ContainsFieldsForAllLandmassResourceDefinitions()
+        public void Default_ContainsFieldsForAllLandmassResourceDefinitionSymbols()
+        {
+            FieldDefinitionSet fieldDefinitionSet = LandmassFieldDefinitionSet.Default;
+
+            foreach (FieldDefinition fieldDefinition in LandmassFieldDefinitions.All)
+            {
+                Assert.That(
+                    fieldDefinitionSet.ContainsFieldDefinitionForResourceDefinitionSymbol(
+                        fieldDefinition.ResourceDefinition.Symbol),
+                    Is.True);
+
+                Assert.That(
+                    fieldDefinitionSet.GetFieldDefinitionForResourceDefinitionSymbol(
+                        fieldDefinition.ResourceDefinition.Symbol),
+                    Is.SameAs(fieldDefinition));
+
+                Assert.That(
+                    fieldDefinitionSet.TryGetFieldDefinitionForResourceDefinitionSymbol(
+                        fieldDefinition.ResourceDefinition.Symbol,
+                        out FieldDefinition? resolvedFieldDefinition),
+                    Is.True);
+
+                Assert.That(resolvedFieldDefinition, Is.SameAs(fieldDefinition));
+            }
+        }
+
+        [Test]
+        public void Default_ContainsFieldsForAllExactLandmassResourceDefinitions()
         {
             FieldDefinitionSet fieldDefinitionSet = LandmassFieldDefinitionSet.Default;
 
@@ -58,13 +93,21 @@ namespace Lokrain.Atlas.Generation.Landmass.Tests
             {
                 Assert.That(
                     fieldDefinitionSet.ContainsFieldDefinitionForResourceDefinition(
-                        fieldDefinition.ResourceDefinition.Symbol),
+                        fieldDefinition.ResourceDefinition),
                     Is.True);
 
                 Assert.That(
                     fieldDefinitionSet.GetFieldDefinitionForResourceDefinition(
-                        fieldDefinition.ResourceDefinition.Symbol),
+                        fieldDefinition.ResourceDefinition),
                     Is.SameAs(fieldDefinition));
+
+                Assert.That(
+                    fieldDefinitionSet.TryGetFieldDefinitionForResourceDefinition(
+                        fieldDefinition.ResourceDefinition,
+                        out FieldDefinition? resolvedFieldDefinition),
+                    Is.True);
+
+                Assert.That(resolvedFieldDefinition, Is.SameAs(fieldDefinition));
             }
         }
 

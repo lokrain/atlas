@@ -165,7 +165,7 @@ GenerationRecipeDefinition stores Seed.
 
 `ResourceDefinition` is current Runtime semantic metadata.
 
-`FieldDefinition` is planned storage-facing metadata.
+`FieldDefinition` is current managed field metadata.
 
 A resource answers:
 
@@ -173,7 +173,7 @@ A resource answers:
 What generated value is this?
 ```
 
-A field definition will answer:
+A field definition answers:
 
 ```text
 How is this generated value represented for execution?
@@ -181,7 +181,7 @@ How is this generated value represented for execution?
 
 Current contracts use resources.
 
-Future runnable compilation may bind resources to fields.
+Future runnable compilation may bind `GenerationPlan`, `FieldDefinitionSet`, and `ExecutionProfile` into runnable executable metadata.
 
 Correct current model:
 
@@ -190,12 +190,22 @@ StageContract -> ResourceDefinition
 OperationContract -> ResourceDefinition
 ```
 
-Correct planned model:
+Correct current field metadata model:
+
+```text
+FieldDefinition -> ResourceDefinition
+FieldDefinitionSet -> FieldDefinition
+ExecutionProfileSet -> ExecutionProfile
+```
+
+Correct planned runnable execution model:
 
 ```text
 GenerationPlan
+  + FieldDefinitionSet
+  + ExecutionProfile
   -> RunnablePlanCompiler
-  -> FieldDefinition
+  -> RunnablePlan
   -> FieldHandle
   -> GenerationWorkspace allocation
 ```

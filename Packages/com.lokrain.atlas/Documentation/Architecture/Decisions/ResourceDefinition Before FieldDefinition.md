@@ -98,9 +98,9 @@ OperationContract
   ProducedOutputs: IReadOnlyList<ResourceDefinition>
 ```
 
-Keep field definitions planned for storage-facing execution metadata.
+Keep field definitions outside semantic contracts. Use them as managed metadata when compiling a managed plan into future executable metadata.
 
-Planned model:
+Planned runnable-compilation model:
 
 ```text
 GenerationPlan
@@ -165,20 +165,19 @@ diagnostic capture
 
 ## FieldDefinition responsibilities
 
-Planned `FieldDefinition` owns storage-facing metadata.
+`FieldDefinition` owns current managed field metadata.
 
-A field definition may describe:
+A field definition describes:
 
 ```text
 resource mapping
+field symbol
+display name
 field shape
 field value kind
-storage role
-capture policy
-external binding policy
-diagnostic role
-execution profile compatibility
 ```
+
+Runnable compilation may combine field definitions with execution profiles, implementation metadata, scheduler bindings, capture policy, and diagnostics policy. Those later execution concerns do not belong to `FieldDefinition`.
 
 A field definition must not replace resource identity.
 
@@ -386,7 +385,7 @@ Trade-offs:
 
 ```text
 future runnable compilation must bind resources to fields explicitly
-future execution profiles must validate field coverage
+runnable compilation must validate field coverage for the selected execution profile
 tests must distinguish resource identity from field representation
 documentation must clearly mark fields as planned
 ```
@@ -405,7 +404,7 @@ Do not add field handles to current managed plans.
 
 Do not add native storage to resources, contracts, recipes, requests, or plans.
 
-Add field definitions only as planned storage-facing metadata after current Runtime planning remains stable.
+Keep field definitions as managed metadata outside contracts, catalogs, recipes, requests, and plans; use them during runnable compilation after semantic planning is stable.
 
 ## Correct examples
 
@@ -504,7 +503,7 @@ Resources do not contain storage metadata.
 Recipes do not contain execution policy.
 Requests do not contain field handles.
 Plans do not contain native storage.
-FieldDefinition remains planned until implemented.
+FieldDefinition is implemented managed metadata.
 RunnablePlanCompiler owns resource-to-field binding.
 GenerationWorkspace owns native allocation.
 OperationScheduler owns job scheduling.
@@ -512,7 +511,7 @@ OperationScheduler owns job scheduling.
 
 ## Summary
 
-`ResourceDefinition` comes before `FieldDefinition` because semantic resource flow must be valid before storage representation exists.
+`ResourceDefinition` comes before `FieldDefinition` because semantic resource flow must be valid before field representation participates in runnable compilation.
 
 Resources define what generated values are.
 

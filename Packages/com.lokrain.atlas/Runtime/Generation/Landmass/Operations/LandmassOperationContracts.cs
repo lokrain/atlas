@@ -3,7 +3,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using Lokrain.Atlas.Generation.Landmass;
 using Lokrain.Atlas.Operations;
 using Lokrain.Atlas.Resources;
 

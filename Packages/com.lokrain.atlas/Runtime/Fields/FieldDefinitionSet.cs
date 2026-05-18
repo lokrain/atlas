@@ -3,7 +3,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using Lokrain.Atlas.Core;
+using Lokrain.Atlas.Resources;
 
 namespace Lokrain.Atlas.Fields
 {
@@ -17,12 +19,17 @@ namespace Lokrain.Atlas.Fields
     /// </para>
     /// <para>
     /// The set validates metadata-level uniqueness and rejects unspecified enum defaults. It does not validate
-    /// catalog ownership, allocate storage, own native memory, schedule jobs, bind ECS data, or describe executable
-    /// operation data.
+    /// generation-catalog ownership, allocate storage, own native memory, schedule jobs, bind ECS data, capture
+    /// artifacts, capture runtime diagnostics, or describe executable operation data.
     /// </para>
     /// <para>
     /// Each accepted field definition must have a unique field symbol and must represent a unique resource
     /// definition symbol.
+    /// </para>
+    /// <para>
+    /// Resource-symbol lookup and reference-exact resource lookup are separate contracts. Symbol lookup finds a
+    /// field definition by the represented resource symbol. Reference-exact lookup additionally requires the
+    /// field definition to reference the exact supplied <see cref="ResourceDefinition"/> instance.
     /// </para>
     /// <para>
     /// Public enumeration order is deterministic. Field definitions are exposed in ordinal field-symbol order.
@@ -121,7 +128,7 @@ namespace Lokrain.Atlas.Fields
         /// </exception>
         public bool TryGetFieldDefinition(
             Symbol fieldDefinitionSymbol,
-            out FieldDefinition? fieldDefinition)
+            [NotNullWhen(true)] out FieldDefinition? fieldDefinition)
         {
             return TryGet(
                 _fieldDefinitionsBySymbol,
@@ -134,11 +141,11 @@ namespace Lokrain.Atlas.Fields
         /// Determines whether the set contains a field definition for the specified resource definition symbol.
         /// </summary>
         /// <param name="resourceDefinitionSymbol">The resource definition symbol to find.</param>
-        /// <returns><see langword="true"/> when a field definition exists for the resource; otherwise, <see langword="false"/>.</returns>
+        /// <returns><see langword="true"/> when a field definition exists for the resource symbol; otherwise, <see langword="false"/>.</returns>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="resourceDefinitionSymbol"/> is null.
         /// </exception>
-        public bool ContainsFieldDefinitionForResourceDefinition(Symbol resourceDefinitionSymbol)
+        public bool ContainsFieldDefinitionForResourceDefinitionSymbol(Symbol resourceDefinitionSymbol)
         {
             return ContainsKey(
                 _fieldDefinitionsByResourceDefinitionSymbol,
@@ -157,7 +164,7 @@ namespace Lokrain.Atlas.Fields
         /// <exception cref="KeyNotFoundException">
         /// Thrown when no field definition represents the specified resource definition symbol.
         /// </exception>
-        public FieldDefinition GetFieldDefinitionForResourceDefinition(Symbol resourceDefinitionSymbol)
+        public FieldDefinition GetFieldDefinitionForResourceDefinitionSymbol(Symbol resourceDefinitionSymbol)
         {
             return GetRequired(
                 _fieldDefinitionsByResourceDefinitionSymbol,
@@ -171,19 +178,104 @@ namespace Lokrain.Atlas.Fields
         /// </summary>
         /// <param name="resourceDefinitionSymbol">The resource definition symbol to find.</param>
         /// <param name="fieldDefinition">The matching field definition when found.</param>
-        /// <returns><see langword="true"/> when a field definition exists for the resource; otherwise, <see langword="false"/>.</returns>
+        /// <returns><see langword="true"/> when a field definition exists for the resource symbol; otherwise, <see langword="false"/>.</returns>
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="resourceDefinitionSymbol"/> is null.
         /// </exception>
-        public bool TryGetFieldDefinitionForResourceDefinition(
+        public bool TryGetFieldDefinitionForResourceDefinitionSymbol(
             Symbol resourceDefinitionSymbol,
-            out FieldDefinition? fieldDefinition)
+            [NotNullWhen(true)] out FieldDefinition? fieldDefinition)
         {
             return TryGet(
                 _fieldDefinitionsByResourceDefinitionSymbol,
                 resourceDefinitionSymbol,
                 nameof(resourceDefinitionSymbol),
                 out fieldDefinition);
+        }
+
+        /// <summary>
+        /// Determines whether the set contains a field definition for the exact specified resource definition instance.
+        /// </summary>
+        /// <param name="resourceDefinition">The resource definition instance to find.</param>
+        /// <returns>
+        /// <see langword="true"/> when a field definition exists for the resource symbol and references the exact
+        /// supplied resource definition instance; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="resourceDefinition"/> is null.
+        /// </exception>
+        public bool ContainsFieldDefinitionForResourceDefinition(ResourceDefinition resourceDefinition)
+        {
+            return TryGetFieldDefinitionForResourceDefinition(resourceDefinition, out _);
+        }
+
+        /// <summary>
+        /// Gets the field definition for the exact specified resource definition instance.
+        /// </summary>
+        /// <param name="resourceDefinition">The resource definition instance to find.</param>
+        /// <returns>The matching field definition.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="resourceDefinition"/> is null.
+        /// </exception>
+        /// <exception cref="KeyNotFoundException">
+        /// Thrown when no field definition represents the specified resource definition symbol.
+        /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a field definition exists for the resource symbol but references a different resource
+        /// definition instance.
+        /// </exception>
+        public FieldDefinition GetFieldDefinitionForResourceDefinition(ResourceDefinition resourceDefinition)
+        {
+            if (resourceDefinition is null)
+            {
+                throw new ArgumentNullException(nameof(resourceDefinition));
+            }
+
+            FieldDefinition fieldDefinition = GetFieldDefinitionForResourceDefinitionSymbol(resourceDefinition.Symbol);
+
+            if (!ReferenceEquals(fieldDefinition.ResourceDefinition, resourceDefinition))
+            {
+                throw new InvalidOperationException(
+                    $"Field definition '{fieldDefinition.Symbol}' represents resource definition '{fieldDefinition.ResourceDefinition.Symbol}', " +
+                    $"but it does not reference the exact requested resource definition instance '{resourceDefinition.Symbol}'.");
+            }
+
+            return fieldDefinition;
+        }
+
+        /// <summary>
+        /// Attempts to get the field definition for the exact specified resource definition instance.
+        /// </summary>
+        /// <param name="resourceDefinition">The resource definition instance to find.</param>
+        /// <param name="fieldDefinition">The matching field definition when found.</param>
+        /// <returns>
+        /// <see langword="true"/> when a field definition exists for the resource symbol and references the exact
+        /// supplied resource definition instance; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="resourceDefinition"/> is null.
+        /// </exception>
+        public bool TryGetFieldDefinitionForResourceDefinition(
+            ResourceDefinition resourceDefinition,
+            [NotNullWhen(true)] out FieldDefinition? fieldDefinition)
+        {
+            if (resourceDefinition is null)
+            {
+                throw new ArgumentNullException(nameof(resourceDefinition));
+            }
+
+            if (!TryGetFieldDefinitionForResourceDefinitionSymbol(resourceDefinition.Symbol, out fieldDefinition))
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(fieldDefinition.ResourceDefinition, resourceDefinition))
+            {
+                fieldDefinition = null;
+                return false;
+            }
+
+            return true;
         }
 
         /// <inheritdoc/>
@@ -300,7 +392,7 @@ namespace Lokrain.Atlas.Fields
             Dictionary<Symbol, FieldDefinition> fieldDefinitionsBySymbol,
             Symbol symbol,
             string parameterName,
-            out FieldDefinition? fieldDefinition)
+            [NotNullWhen(true)] out FieldDefinition? fieldDefinition)
         {
             if (symbol is null)
             {

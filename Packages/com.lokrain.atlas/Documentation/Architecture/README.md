@@ -1,10 +1,10 @@
 # Lokrain.Atlas architecture documentation
 
-This documentation set defines the current Lokrain.Atlas Runtime architecture, the planned execution architecture, and the rules used to keep both boundaries separate.
+This documentation set defines the current Lokrain.Atlas Runtime architecture, the current managed runnable-plan bridge, and the planned execution infrastructure that remains outside the implemented boundary.
 
-Current Runtime architecture includes managed domain objects, catalog validation, request resolution, managed plan compilation, managed field metadata, and managed execution profile identity.
+Current Runtime architecture includes managed domain objects, catalog validation, request resolution, managed semantic plan compilation, managed field metadata, managed execution-profile identity, and managed runnable metadata compilation.
 
-Current Runtime architecture still stops before runnable execution. `RunnablePlanCompiler`, `RunnablePlan`, `GenerationWorkspace`, `OperationScheduler`, native storage, Burst jobs, artifact capture, diagnostics, and ECS execution integration remain planned architecture.
+Current Runtime still stops before runtime execution. `GenerationWorkspace`, `OperationScheduler`, native storage ownership, Burst jobs, artifact capture execution, runtime diagnostic capture, and ECS execution integration remain planned architecture.
 
 ## Read first
 
@@ -13,6 +13,7 @@ Current Runtime architecture still stops before runnable execution. `RunnablePla
 - [Accepted Domain Object Model](Concepts/Accepted%20Domain%20Object%20Model.md)
 - [Resource, Field, and Workspace Boundary](Concepts/Resource%20Field%20and%20Workspace%20Boundary.md)
 - [Managed Field Metadata and Execution Profiles](Concepts/Managed%20Field%20Metadata%20and%20Execution%20Profiles.md)
+- [Runnable Plan Compilation](Concepts/Runnable%20Plan%20Compilation.md)
 
 ## Guidelines
 
@@ -30,7 +31,6 @@ Current Runtime architecture still stops before runnable execution. `RunnablePla
 
 ## Future architecture
 
-- [Runnable Plan Compilation](Future/Runnable%20Plan%20Compilation.md)
 - [Scheduler Workspace and Job Ownership](Future/Scheduler%20Workspace%20and%20Job%20Ownership.md)
 - [Low-Level Native Memory and Unsafe Collections](Future/Low-Level%20Native%20Memory%20and%20Unsafe%20Collections.md)
 
@@ -47,12 +47,19 @@ Current Runtime code must preserve these invariants:
 ```text
 Accepted objects validate their own construction invariants.
 GenerationCatalog owns semantic inventory only.
+GenerationCatalog does not own FieldDefinition or ExecutionProfile.
 StageContract and OperationContract use ResourceDefinition inputs and outputs.
 GenerationRequestDescriptor is symbolic caller intent.
 GenerationRequest contains accepted resolved intent.
-GenerationPlan is managed semantic order, not executable metadata.
-FieldDefinitionSet owns managed field metadata and deterministic symbol order.
-ExecutionProfileSet owns managed execution profile identity and deterministic symbol order.
+GenerationPlan is managed semantic order, not runtime execution state.
+FieldDefinitionSet owns managed field metadata and deterministic field-symbol order.
+ExecutionProfileSet owns managed execution-profile identity and deterministic profile-symbol order.
+RunnablePlanCompiler consumes GenerationPlan, FieldDefinitionSet, and ExecutionProfile.
+RunnablePlan is managed executable metadata, not runtime execution state.
+ResourceFieldBinding connects ResourceDefinition to FieldDefinition by reference-exact ownership.
+FieldIndex, StageIndex, and OperationIndex are dense plan-local table positions, not durable identities.
+FieldPlanRole describes plan input/output role, not storage lifetime.
+FieldCapturePolicy records future capture intent, not capture execution.
 Dictionaries and hash sets are lookup or membership indexes only, never public order.
-Runnable execution remains outside the current implemented boundary.
+Workspace allocation, scheduler execution, jobs, native storage, ECS, artifacts, and diagnostics remain outside the current implemented boundary.
 ```

@@ -29,22 +29,38 @@ GenerationRequestResolver
 GenerationRequest
 GenerationPlanCompiler
 GenerationPlan
+FieldValueKind
+FieldShape
 FieldDefinition
 FieldDefinitionSet
 ExecutionProfile
 ExecutionProfileSet
+BuiltInExecutionProfiles
+BuiltInExecutionProfileSet
+LandmassFieldDefinitions
+LandmassFieldDefinitionSet
 ```
 
 The following are planned or deferred concepts:
 
 ```text
+FieldBinding
+SchedulerBinding
+RunnablePlanCompiler
 RunnablePlan
+RunnableStage
+RunnableOperation
 GenerationWorkspace
+FieldHandle
+WorkspaceAllocation
 OperationScheduler
+OperationScratch
 native storage
 Burst jobs
 artifact capture
+execution diagnostics
 ECS execution integration
+unsafe execution infrastructure
 ```
 
 ## Rejected: raw resource symbol lists in contracts
@@ -82,11 +98,8 @@ Rejected model:
 
 ```text
 catalog owns ResourceDefinition A
-
 contract references ResourceDefinition B
-
 A.Symbol == B.Symbol
-
 therefore B is accepted
 ```
 
@@ -94,7 +107,6 @@ Correct model:
 
 ```text
 catalog owns ResourceDefinition A
-
 contract references ResourceDefinition A
 ```
 
@@ -118,7 +130,7 @@ ResourceDefinition.AllocationPolicy
 
 Reason:
 
-A resource is semantic identity. Storage representation belongs to planned field definitions and workspace allocation.
+A resource is semantic identity. Managed representation metadata belongs to field definitions. Storage lifetime belongs to planned workspace allocation.
 
 ## Rejected: FieldDefinition in current contracts
 
@@ -140,7 +152,7 @@ OperationContract.ProducedOutputs -> IReadOnlyList<ResourceDefinition>
 
 Reason:
 
-Contracts describe semantic resource flow. Field definitions are planned storage-facing metadata and belong after managed planning.
+Contracts describe semantic resource flow. `FieldDefinition` is current managed representation metadata and belongs beside runnable compilation, not inside semantic contracts.
 
 ## Rejected: GenerationPlan as executable plan
 
@@ -176,15 +188,17 @@ StagePlanNode.NativeArray
 OperationPlanNode.NativeArray
 OperationContract.NativeArray
 ResourceDefinition.NativeArray
+FieldDefinition.NativeArray
+ExecutionProfile.NativeArray
 ```
 
 Reason:
 
-Current Runtime planning objects are managed semantic objects. Native storage belongs to planned workspace execution.
+Current Runtime planning and metadata objects are managed semantic or managed metadata objects. Native storage belongs to planned workspace execution.
 
 ## Rejected: scheduler behavior in definitions
 
-Definitions must not schedule work or own scheduler policy.
+Definitions must not schedule work or own scheduler behavior.
 
 Rejected placements:
 
@@ -194,15 +208,17 @@ OperationDefinition.Scheduler
 OperationImplementationDefinition.JobHandle
 GenerationRecipeDefinition.OperationScheduler
 StageRouteDefinition.ExecutionPolicy
+FieldDefinition.SchedulerBinding
+ExecutionProfile.OperationScheduler
 ```
 
 Reason:
 
-Definitions are reusable inventory. Scheduler ownership belongs to planned execution architecture.
+Definitions are reusable inventory or managed metadata. Scheduler ownership belongs to planned execution architecture.
 
 ## Rejected: jobs receiving semantic objects
 
-Jobs must not receive semantic domain objects.
+Jobs must not receive semantic domain objects or managed metadata objects.
 
 Rejected job inputs:
 
@@ -211,8 +227,10 @@ GenerationCatalog
 GenerationRecipeDefinition
 GenerationRequest
 GenerationPlan
+RunnablePlan
 ResourceDefinition
 FieldDefinition
+ExecutionProfile
 GenerationWorkspace
 OperationScheduler
 Symbol
@@ -381,7 +399,7 @@ OperationImplementationDefinition.Execute()
 
 Reason:
 
-Operation definitions and implementation definitions are selectable metadata. Execution belongs to planned scheduler and jobs.
+Operation definitions and implementation definitions are selectable metadata. Execution belongs to planned runnable metadata, scheduler infrastructure, and jobs.
 
 ## Rejected: managed object graphs as canonical generation data
 
@@ -431,51 +449,91 @@ Reason:
 
 Generation-relevant ordering must be explicit and deterministic.
 
-## Implemented: FieldDefinition
+## Current: FieldDefinition
 
-`FieldDefinition` is deferred.
+`FieldDefinition` is current managed field metadata.
 
-It will describe planned storage-facing metadata for resources.
+It maps one `ResourceDefinition` to representation metadata such as field symbol, display name, field shape, and field value kind.
 
-It should be introduced after current managed Runtime planning is stable.
+It must not:
+
+```text
+allocate native storage
+own native memory
+create field handles
+schedule jobs
+bind ECS data
+capture artifacts
+describe executable operation data
+```
 
 Required foundations:
 
 ```text
 ResourceDefinition
-Resource-definition-based contracts
+resource-definition-based contracts
 GenerationCatalog ownership validation
 GenerationPlan
 ```
 
-## Deferred: FieldDefinitionSet
+## Current: FieldDefinitionSet
 
-`FieldDefinitionSet` is deferred.
+`FieldDefinitionSet` is current managed field-metadata acceptance.
 
-It will group accepted field definitions used by runnable plan compilation.
+It groups accepted field definitions used by future runnable plan compilation.
 
-It should not replace `GenerationCatalog`.
+It validates field metadata consistency and exposes deterministic canonical order by field symbol.
+
+It must not replace `GenerationCatalog`.
 
 Catalogs validate semantic definition graphs.
 
-Field definition sets validate storage-facing metadata.
+Field definition sets validate managed representation metadata.
 
-## Deferred: ExecutionProfile
+## Current: ExecutionProfile
 
-Execution profiles are deferred.
+`ExecutionProfile` is current managed execution-profile identity metadata.
 
-They will define planned execution policy such as:
+It identifies a reusable execution-profile variant by symbol and display name.
+
+It does not currently store executable policy switches.
+
+It must not:
 
 ```text
-storage representation
-capture policy
-diagnostic policy
-temporary retention
-scheduler policy
-artifact policy
+change semantic resource identity
+select jobs
+allocate storage
+schedule work
+capture artifacts
+bind ECS data
 ```
 
-Execution profiles must not change semantic resource identity.
+Concrete execution behavior belongs to future runnable compilation, workspace, scheduler, and job infrastructure.
+
+## Current: ExecutionProfileSet
+
+`ExecutionProfileSet` is current managed execution-profile acceptance.
+
+It validates accepted execution profiles and exposes deterministic canonical order by profile symbol.
+
+It must not replace `GenerationCatalog` and must not define semantic resource ownership.
+
+## Deferred: FieldBinding
+
+`FieldBinding` is deferred until Phase 5 runnable-plan bridge implementation.
+
+It should connect a semantic `ResourceDefinition` to a matching `FieldDefinition` without allocating storage or creating handles.
+
+It should validate that the field definition represents the same resource as the resource side of the binding.
+
+## Deferred: SchedulerBinding
+
+`SchedulerBinding` is deferred until it is justified by runnable metadata.
+
+It may record managed scheduler-facing metadata, but it must not schedule jobs, own dependencies, or allocate scratch.
+
+If no immediate invariant requires this type during Phase 5, it should remain deferred.
 
 ## Deferred: RunnablePlanCompiler
 
@@ -562,7 +620,7 @@ Burst job execution is deferred.
 
 Jobs must receive native containers and unmanaged values only.
 
-Jobs must not receive semantic Runtime objects.
+Jobs must not receive semantic Runtime objects or managed metadata objects.
 
 ## Deferred: artifacts
 
@@ -570,7 +628,7 @@ Artifact capture is deferred.
 
 Artifacts will be produced from workspace-owned execution data according to capture policy.
 
-Artifacts must not be owned by resources, contracts, recipes, requests, or managed plans.
+Artifacts must not be owned by resources, contracts, recipes, requests, field definitions, execution profiles, or managed plans.
 
 ## Deferred: execution diagnostics
 
@@ -586,7 +644,7 @@ operation validation summaries
 artifact metadata
 ```
 
-Execution diagnostics must not be stored in current semantic definitions, requests, or plans.
+Execution diagnostics must not be stored in current semantic definitions, requests, field definitions, execution profiles, or plans.
 
 ## Deferred: ECS execution integration
 
@@ -627,6 +685,38 @@ Runtime/Hashing
 
 Unsafe code must not leak into current semantic Runtime layers.
 
+## Rejected: GenerationCatalog owning field definitions or execution profiles
+
+`GenerationCatalog` must not own `FieldDefinition`, `FieldDefinitionSet`, `ExecutionProfile`, or `ExecutionProfileSet`.
+
+The catalog owns semantic generation inventory. Field metadata and execution profile metadata are separate managed inputs to future runnable compilation.
+
+Rejected model:
+
+```text
+GenerationCatalog.FieldDefinitions
+GenerationCatalog.ExecutionProfiles
+GenerationCatalogBuilder.AddFieldDefinition(...)
+GenerationCatalogBuilder.AddExecutionProfile(...)
+```
+
+Correct model:
+
+```text
+GenerationCatalog owns semantic inventory.
+FieldDefinitionSet owns field metadata lookup and canonical ordering.
+ExecutionProfileSet owns execution-profile lookup and canonical ordering.
+RunnablePlanCompiler consumes GenerationPlan + FieldDefinitionSet + ExecutionProfile.
+```
+
+## Rejected: LandmassExecutionProfiles
+
+Landmass-specific execution profile providers are rejected unless landmass owns a real execution-policy invariant.
+
+Built-in execution profiles are package-level execution metadata under `Runtime/Execution`.
+
+Landmass content may own resource definitions and field definitions. It must not own package-level execution policy by default.
+
 ## Reconsideration rule
 
 A rejected option may be reconsidered only with a new decision record.
@@ -657,7 +747,7 @@ If yes, confirm prerequisite current Runtime foundations are stable.
 Does this cross the current GenerationPlan boundary?
 If yes, place it in planned execution architecture.
 
-Does this add storage to semantic objects?
+Does this add storage to semantic objects or managed metadata objects?
 If yes, reject or move it to workspace/field architecture.
 
 Does this add scheduler behavior to definitions?
@@ -672,22 +762,8 @@ If yes, rewrite the documentation.
 
 ## Summary
 
-Rejected options protect the semantic Runtime boundary.
+Rejected options protect the managed Runtime boundary.
 
-Deferred options belong to planned execution architecture.
+Current managed field metadata and current managed execution profile identity are implemented, but they are not execution runtime.
 
-Current Runtime remains managed and semantic through `GenerationPlan`.
-
-Execution architecture starts after `GenerationPlan`.
-
-## Rejected: GenerationCatalog owning field definitions or execution profiles
-
-`GenerationCatalog` must not own `FieldDefinition`, `FieldDefinitionSet`, `ExecutionProfile`, or `ExecutionProfileSet`.
-
-The catalog owns semantic generation inventory. Field metadata and execution profile metadata are separate managed inputs to future runnable compilation.
-
-## Rejected: LandmassExecutionProfiles
-
-Landmass-specific execution profile providers are rejected unless landmass owns a real execution-policy invariant.
-
-Built-in execution profiles are package-level execution metadata under `Runtime/Execution`.
+Deferred execution architecture starts after `GenerationPlan` and after the managed metadata inputs required for runnable compilation.

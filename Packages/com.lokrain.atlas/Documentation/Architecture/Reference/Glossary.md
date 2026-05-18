@@ -1,558 +1,219 @@
-# Implementation plan
+# Glossary
 
-This plan defines the recommended implementation order for Lokrain.Atlas.
+This glossary defines Lokrain.Atlas architecture terms used by Runtime code, tests, and architecture documentation.
 
-The plan protects the current managed Runtime boundary and delays execution infrastructure until semantic planning is stable.
+## Status terms
 
-Current semantic planning ends at `GenerationPlan`. Managed field metadata and managed execution profile identity are current Runtime metadata.
+`Current` means the concept is implemented in Runtime code and may be documented as present behavior.
 
-## Status
+`Planned` means the concept is part of the approved architecture direction but is not implemented unless corresponding Runtime code exists.
 
-Current managed Runtime stabilization and managed metadata introduction are complete gates. The next gate is runnable plan compilation.
+`Future` means planned and intentionally outside the current implemented Runtime boundary.
 
-## Implementation principles
+`Rejected` means the concept, name, dependency, or responsibility must not be introduced without a new decision record.
 
-Implement one boundary at a time.
+`Deferred` means the concept is not current behavior and requires explicit implementation work before it can be described as implemented.
 
-Do not mix semantic architecture with execution architecture.
-
-Do not add future execution state to current managed Runtime objects.
-
-Do not introduce native storage before runnable metadata and workspace ownership exist.
-
-Do not introduce jobs before scheduler ownership and workspace data access are defined.
+## Architecture boundary terms
 
-## Current Runtime gate
+`Current Runtime` is the implemented managed Runtime surface. It includes domain values, definitions, contracts, catalogs, recipes, request resolution, accepted requests, managed semantic plan compilation, managed field metadata, managed execution-profile identity, and managed runnable metadata compilation.
 
-The current Runtime gate includes:
+`Managed semantic Runtime` is the Runtime layer that describes generation meaning, identity, validation, request intent, and semantic plan order without native execution state.
 
-```text
-Core values
-Generation schemas
-Resource definitions
-Stage and operation definitions
-Stage and operation contracts
-Generation recipes
-Generation catalogs
-Generation request descriptors
-Generation request resolution
-Generation requests
-Generation plan compilation
-Generation plans
-Field metadata
-Execution profile identity
-```
-
-The gate is complete when:
-
-```text
-Runtime APIs match architecture documentation.
-Tests cover local invariants and graph validation.
-Catalog ownership is reference-exact.
-Contracts use ResourceDefinition inputs and outputs.
-Requests contain accepted definitions and no unresolved symbols.
-Plans contain managed semantic data only.
-Documentation does not describe future concepts as current behavior.
-```
+`Managed runnable metadata` is immutable metadata compiled from a `GenerationPlan`, field metadata, and an execution profile. It prepares table-oriented executable metadata without allocating storage, scheduling jobs, binding ECS data, capturing artifacts, or capturing runtime diagnostics.
 
-## Current Runtime validation checklist
-
-Verify these names do not appear in current Runtime code except in future documentation, decisions, or plans:
-
-```text
-LandmassResourceSymbols
-RequiredInputSymbols
-ProducedOutputSymbols
-```
-
-Verify current contracts use:
-
-```text
-IReadOnlyList<ResourceDefinition> RequiredInputs
-IReadOnlyList<ResourceDefinition> ProducedOutputs
-```
-
-Verify current managed planning objects do not contain:
-
-```text
-RunnablePlan
-FieldHandle
-GenerationWorkspace
-OperationScheduler
-NativeArray<T>
-JobHandle
-Entity
-UnityEngine.Object
-```
-
-## Phase 1: Documentation consistency
-
-Goal: make architecture documentation match current Runtime and planned execution boundaries.
-
-Tasks:
-
-```text
-Update README navigation and documentation-set contract.
-Keep glossary term-only.
-Keep architecture rules concise and normative.
-Split detailed rules into focused guideline documents.
-Mark future execution concepts as planned.
-Move rationale to decision records.
-Move work order to this plan.
-Remove migration-history wording from current architecture documents.
-Remove stale resource-symbol terminology.
-```
-
-Completion criteria:
-
-```text
-No current document presents FieldDefinition as implemented.
-No current document presents RunnablePlan as implemented.
-No current document presents GenerationWorkspace as implemented.
-No current document presents OperationScheduler as implemented.
-No current document presents jobs or ECS execution as implemented.
-Glossary defines terms only.
-Naming guidelines discuss names only.
-Architecture rules define governing rules only.
-Future documents clearly state planned status.
-Decision documents record rationale and rejected options.
-```
-
-## Phase 2: Current Runtime static consistency
-
-Goal: verify current Runtime code matches documented architecture.
-
-Tasks:
-
-```text
-Search Runtime and Tests for stale symbol-list terminology.
-Verify ResourceDefinition is current semantic resource identity.
-Verify StageContract uses ResourceDefinition inputs and outputs.
-Verify OperationContract uses ResourceDefinition inputs and outputs.
-Verify GenerationCatalog owns ResourceDefinitions.
-Verify catalog validation rejects symbol-equivalent external definitions.
-Verify generation modules expose ResourceDefinition groups.
-Verify request descriptors remain symbolic.
-Verify accepted requests contain accepted choices.
-Verify plans contain no native execution state.
-```
-
-Completion criteria:
-
-```text
-No stale resource-symbol API remains.
-No contract exposes raw resource symbol lists.
-No current managed plan object exposes future execution state.
-Catalog validation owns graph consistency.
-Request resolution owns descriptor satisfiability.
-Plan compilation owns managed semantic ordering.
-```
-
-## Phase 3: Current Runtime test gate
-
-Goal: lock current Runtime behavior before adding future execution architecture.
-
-Required test areas:
-
-```text
-Core value object invariants.
-Definition constructor invariants.
-Symbol-based definition equality.
-Contract resource-flow invariants.
-Catalog ownership and graph validation.
-Generation module built-in definition wiring.
-Recipe route and implementation-choice invariants.
-Request descriptor validation.
-Request resolver success and failure results.
-Accepted request validation.
-Plan compiler ordering and operation-node creation.
-Generation plan invariants.
-```
-
-Completion criteria:
-
-```text
-Full PlayMode test suite passes.
-Tests cover ResourceDefinition exact ownership.
-Tests cover symbol-equivalent but non-owned definition rejection.
-Tests cover request-resolution errors as result objects.
-Tests cover managed plan ordering.
-Tests do not assert implementation details that should remain private.
-```
-
-## Phase 4: Field metadata and execution profile identity
-
-Goal: add storage-facing metadata without adding execution storage.
-
-Add planned types:
-
-```text
-FieldDefinition
-FieldDefinitionSet
-FieldShape
-FieldValueKind
-ExecutionProfile
-```
-
-Responsibilities:
-
-```text
-FieldDefinition maps a ResourceDefinition to storage-facing metadata.
-FieldDefinitionSet validates field metadata consistency.
-FieldShape describes planned structural shape.
-FieldValueKind describes planned stored value category.
-ExecutionProfile describes planned execution policy.
-```
-
-Do not add:
-
-```text
-NativeArray<T>
-FieldHandle
-GenerationWorkspace
-OperationScheduler
-JobHandle
-Burst jobs
-```
-
-Completion criteria:
-
-```text
-FieldDefinition does not allocate storage.
-FieldDefinitionSet does not replace GenerationCatalog.
-ExecutionProfile does not change semantic resource identity.
-Current contracts still use ResourceDefinition.
-GenerationPlan still contains no field handles.
-Tests cover field metadata invariants.
-Documentation marks implemented field metadata accurately after code exists.
-```
-
-## Phase 5: Runnable plan compilation
-
-Goal: add the bridge from managed semantic plans to executable metadata.
-
-Add planned types:
-
-```text
-RunnablePlanCompiler
-RunnablePlan
-RunnableStage
-RunnableOperation
-FieldBinding
-SchedulerBinding
-```
-
-Responsibilities:
-
-```text
-RunnablePlanCompiler validates resource-to-field binding.
-RunnablePlan records immutable executable metadata.
-RunnableStage records executable stage metadata.
-RunnableOperation records executable operation metadata.
-FieldBinding connects semantic resources to planned execution fields.
-SchedulerBinding connects runnable operations to scheduler metadata.
-```
-
-Do not add:
-
-```text
-native storage allocation
-job scheduling
-workspace lifetime ownership
-artifact writing
-ECS integration
-```
-
-Completion criteria:
-
-```text
-Runnable compilation preserves GenerationPlan stage order.
-Runnable compilation preserves route operation order.
-Runnable compilation rejects missing field definitions.
-Runnable compilation rejects incompatible field metadata.
-RunnablePlan exposes read-only metadata.
-RunnablePlan does not own native storage.
-Tests cover deterministic runnable metadata creation.
-```
-
-## Phase 6: Workspace ownership
-
-Goal: add native storage ownership for one generation run.
-
-Add planned types:
-
-```text
-GenerationWorkspace
-FieldHandle
-WorkspaceAllocation
-WorkspaceFieldStorage
-ExternalFieldBinding
-DiagnosticFieldStorage
-```
-
-Responsibilities:
-
-```text
-GenerationWorkspace owns native allocation lifetime.
-FieldHandle identifies workspace-owned field storage during execution.
-WorkspaceAllocation records allocation metadata.
-ExternalFieldBinding records borrowed or caller-owned data.
-DiagnosticFieldStorage owns diagnostic capture storage.
-```
-
-Do not add scheduler policy to workspace.
-
-Do not make workspace resolve symbols or choose recipes.
-
-Completion criteria:
-
-```text
-Workspace owns allocation and disposal.
-Field handles are valid only for the owning workspace.
-External binding ownership is explicit.
-Disposed workspace access fails predictably.
-No semantic Runtime object stores field handles.
-Tests cover allocation, disposal, invalid handle use, and wrong-workspace use.
-```
-
-## Phase 7: Scheduler ownership
-
-Goal: add operation execution control flow.
-
-Add planned types:
-
-```text
-OperationScheduler
-OperationScratch
-SchedulerExecutionContext
-OperationExecutionResult
-OperationExecutionDiagnostic
-```
-
-Responsibilities:
-
-```text
-OperationScheduler owns dependency wiring.
-OperationScheduler schedules jobs.
-OperationScheduler owns operation scratch policy.
-OperationScheduler owns iteration and termination policy.
-OperationScheduler owns execution failure policy.
-```
-
-Do not make schedulers own semantic identity.
-
-Do not make definitions schedule themselves.
-
-Completion criteria:
-
-```text
-Schedulers receive runnable metadata and workspace access.
-Schedulers do not perform catalog lookup.
-Schedulers do not resolve descriptors.
-Schedulers do not compile managed plans.
-Schedulers schedule deterministic work.
-Tests cover dependency ordering and scratch lifetime.
-```
-
-## Phase 8: Job implementation
-
-Goal: implement deterministic Burst-compatible generation jobs.
-
-Add jobs only after runnable metadata, workspace storage, and scheduler ownership exist.
-
-Job rules:
-
-```text
-Jobs receive native containers and unmanaged values only.
-Jobs do not receive Symbol.
-Jobs do not receive ResourceDefinition.
-Jobs do not receive GenerationPlan.
-Jobs do not receive GenerationWorkspace.
-Jobs do not receive OperationScheduler.
-Jobs do not access UnityEngine.Object or UnityEditor.
-```
-
-Completion criteria:
-
-```text
-Jobs are Burst-compatible where required.
-Jobs use explicit dimensions and seeds.
-Jobs avoid managed allocations.
-Jobs avoid nondeterministic ordering.
-Jobs are scheduled by OperationScheduler.
-Tests cover deterministic repeated output.
-```
-
-## Phase 9: Artifacts and diagnostics
-
-Goal: add captured output and execution diagnostics.
-
-Add planned areas:
-
-```text
-Artifact capture
-Artifact metadata
-Diagnostic field capture
-Workspace allocation diagnostics
-Scheduler timing diagnostics
-Operation execution diagnostics
-```
-
-Responsibilities:
-
-```text
-Artifacts capture selected execution outputs.
-Diagnostics explain execution behavior and validation results.
-Capture policy comes from execution profile and runnable metadata.
-```
-
-Do not store artifacts in semantic definitions, requests, or managed plans.
-
-Completion criteria:
-
-```text
-Artifact capture reads workspace data through explicit policy.
-Diagnostics do not alter semantic output.
-Diagnostics do not leak into current managed Runtime objects.
-Tests cover capture policy and diagnostic selection.
-```
-
-## Phase 10: Unity and ECS integration
-
-Goal: adapt execution results into Unity-facing workflows.
-
-Potential integration areas:
-
-```text
-ScriptableObject authoring adapters
-Editor preview tools
-Import/export tools
-ECS output adapters
-ECS execution integration
-```
-
-Rules:
-
-```text
-Unity adapters translate data into or out of Atlas domain objects.
-Unity object identity does not become domain identity.
-Runtime semantic objects do not depend on UnityEditor.
-ECS integration stays outside current managed planning objects.
-```
-
-Completion criteria:
-
-```text
-Authoring adapters do not replace Runtime domain objects.
-Editor tooling does not leak into Runtime assemblies.
-ECS integration does not change semantic resource identity.
-Tests or validation tools cover adapter behavior.
-```
-
-## Dependency order
-
-Recommended implementation order:
-
-```text
-1. Documentation consistency.
-2. Current Runtime static consistency.
-3. Current Runtime test gate.
-4. FieldDefinition and FieldDefinitionSet.
-5. ExecutionProfile.
-6. RunnablePlanCompiler and RunnablePlan.
-7. GenerationWorkspace and FieldHandle.
-8. OperationScheduler and OperationScratch.
-9. Burst-compatible jobs.
-10. Artifacts and execution diagnostics.
-11. Unity and ECS integration.
-```
-
-Do not skip from `GenerationPlan` directly to jobs.
-
-Do not add native storage before workspace ownership exists.
-
-Do not add scheduler behavior before runnable metadata exists.
-
-## Review gates
-
-Before starting a new phase, verify the previous phase is stable.
-
-A phase is stable when:
-
-```text
-public API names match the architecture vocabulary
-tests cover owned invariants
-documentation matches implemented status
-future concepts are not described as current behavior
-dependency direction is preserved
-```
-
-## Stop conditions
-
-Stop implementation and return to architecture review when:
-
-```text
-a type gains more than one responsibility
-a lower layer depends on a higher layer
-a current managed object receives execution state
-a descriptor receives accepted definitions
-a request receives unresolved symbols
-a plan receives native storage or job state
-a job receives semantic metadata
-Unity object identity becomes domain identity
-```
-
-## Current next action
-
-After the current documentation pass, perform a static consistency scan for:
-
-```text
-LandmassResourceSymbols
-RequiredInputSymbols
-ProducedOutputSymbols
-FieldDefinition as current behavior
-RunnablePlan as current behavior
-GenerationWorkspace as current behavior
-OperationScheduler as current behavior
-```
-
-Then run the full PlayMode test suite.
-
-If tests pass and documentation is consistent, begin Phase 4 with managed field metadata.
-
-## Summary
-
-Stabilize current managed Runtime first.
-
-Keep current architecture semantic through `GenerationPlan`.
-
-Introduce field metadata before runnable metadata.
-
-Introduce runnable metadata before workspace storage.
-
-Introduce workspace storage before schedulers.
-
-Introduce schedulers before jobs.
-
-Introduce artifacts, diagnostics, Unity adapters, and ECS integration last.
-
-## Phase 4 completion note
-
-Phase 4 is complete when these current metadata types exist with tests:
-
-```text
-FieldValueKind
-FieldShape
-FieldDefinition
-FieldDefinitionSet
-ExecutionProfile
-ExecutionProfileSet
-BuiltInExecutionProfiles
-BuiltInExecutionProfileSet
-LandmassFieldDefinitions
-LandmassFieldDefinitionSet
-```
-
-`FieldDefinitionSet` and `ExecutionProfileSet` must expose deterministic ordinal symbol order. Private dictionaries and hash sets are lookup or membership indexes only.
-
-Do not change `GenerationCatalog` or `GenerationCatalogBuilder` for Phase 4.
+`Execution infrastructure` is the planned layer after managed runnable metadata. It includes workspace storage, scheduling, jobs, artifacts, diagnostics, and ECS execution integration.
+
+`Semantic object` is a managed domain object that describes identity, meaning, configuration, contracts, accepted requests, or plans. Semantic objects do not own native containers, job handles, field handles, workspace allocations, scheduler state, or Unity object identity.
+
+`Accepted object` is a validated object created inside an acceptance boundary. Accepted objects contain resolved references and construction invariants instead of unresolved caller symbols.
+
+`Definition` is reusable managed inventory. Definitions describe stable package-domain concepts such as schemas, resources, fields, stages, routes, operations, operation implementations, execution profiles, and recipes.
+
+`Contract` is semantic resource-flow metadata for a stage or operation. Contracts use accepted `ResourceDefinition` instances, not raw resource-symbol lists.
+
+`Descriptor` is symbolic caller intent. Descriptors are input to resolution and may contain symbols before catalog-dependent validation occurs.
+
+`Resolver` is a service that converts symbolic caller intent into accepted objects or structured resolution errors.
+
+`Compiler` is a service that converts one accepted representation into another accepted representation without hidden lookup or mutable global state.
+
+`Catalog ownership` is reference-exact ownership of accepted generation inventory by `GenerationCatalog`.
+
+`Reference-exact ownership` means an object is owned only when the exact instance is registered by the owning object. Symbol-equivalent replacement instances are not owned.
+
+`Symbol-equivalent` means two objects have equal symbols but are not necessarily the same instance or accepted by the same owner.
+
+`Semantic resource flow` is the ordered dependency relationship between required and produced `ResourceDefinition` instances in stage and operation contracts.
+
+`Storage-facing metadata` is managed metadata that describes how semantic resources are represented for execution. It is not storage ownership.
+
+`Executable metadata` is immutable managed metadata derived from semantic plans, field metadata, execution-profile metadata, and implementation metadata. It does not own native storage.
+
+`Native execution state` means native containers, handles, dependencies, workspace allocations, scheduler state, job structs, artifact buffers, or ECS execution data.
+
+`Canonical order` is a deterministic public order defined by domain rules, explicit lists, arrays, or ordinal symbol sorting.
+
+`Declared order` is the order in which a built-in provider intentionally lists items.
+
+`Lookup index` is a private dictionary or hash set used only for lookup or membership. Lookup indexes do not define public order, generation order, diagnostic order, artifact order, or serialized order.
+
+`Deterministic` means repeated execution with the same accepted inputs produces the same accepted ordering, metadata, and results without relying on unordered enumeration, allocation order, thread timing, current time, Unity scene order, or editor state.
+
+## Current core terms
+
+`Symbol` is stable package-domain identity text. Symbols are used for lookup, equality, deterministic ordering, and compatibility.
+
+`DisplayName` is validated user-facing text for editor UI, diagnostics, and documentation. Display names are not identity.
+
+`Grid` is validated terrain-grid dimensions and coordinate/index conversion.
+
+`Cell` is a validated grid coordinate value.
+
+`CellIndex` is a validated flattened zero-based grid-cell index value.
+
+`Seed` is a deterministic numeric generation seed.
+
+## Current schema and resource terms
+
+`GenerationSchemaDefinition` is reusable semantic schema identity.
+
+`BuiltInGenerationSchemas` is the built-in provider for package-owned schema definitions.
+
+`ResourceDefinition` is semantic identity for a generated value. It belongs to a generation schema and is used by stage and operation contracts.
+
+`LandmassResourceDefinitions` is the built-in landmass resource-definition provider.
+
+`ResourceDefinition` is not field metadata, storage layout, workspace allocation, a native container, an artifact buffer, or an execution handle.
+
+## Current field metadata terms
+
+`FieldValueKind` identifies the managed value category used to represent a resource field.
+
+`FieldShape` identifies the managed shape used to represent a resource field.
+
+`FieldDefinition` maps one `ResourceDefinition` to managed field representation metadata.
+
+`FieldDefinitionSet` is the accepted field metadata set used for field lookup and canonical field-symbol ordering.
+
+`LandmassFieldDefinitions` is the built-in landmass field-definition provider.
+
+`LandmassFieldDefinitionSet` is the accepted built-in landmass field metadata set.
+
+`FieldDefinition` is not native storage, a workspace allocation, a field handle, an ECS binding, an artifact, or executable code.
+
+## Current execution profile terms
+
+`ExecutionProfile` identifies managed execution-profile metadata.
+
+`ExecutionProfileSet` is the accepted execution-profile metadata set used for profile lookup and canonical profile-symbol ordering.
+
+`BuiltInExecutionProfiles` is the built-in provider for package-owned execution-profile definitions.
+
+`BuiltInExecutionProfileSet` is the accepted built-in execution-profile metadata set.
+
+`ExecutionProfile` does not allocate storage, schedule work, select a job system path, capture artifacts, or execute operations.
+
+## Current stage terms
+
+`StageKind` classifies a stage at the managed semantic level.
+
+`StageDefinition` is reusable stage identity.
+
+`StageRouteDefinition` is an ordered reusable route through operation-definition symbols.
+
+`StageRouteStepDefinition` is authored route-step metadata that identifies a route occurrence of an operation definition by symbol.
+
+`StageContract` is semantic resource-flow metadata for one stage. It declares required inputs and produced outputs as `ResourceDefinition` instances.
+
+## Current operation terms
+
+`OperationKind` classifies an operation at the managed semantic level.
+
+`OperationDefinition` is reusable operation identity.
+
+`OperationContract` is semantic resource-flow metadata for one operation. It declares required inputs and produced outputs as `ResourceDefinition` instances.
+
+`OperationImplementationDefinition` is selectable managed metadata for an implementation of an operation definition.
+
+## Current catalog and recipe terms
+
+`GenerationCatalog` is the accepted inventory boundary for schemas, resources, stages, routes, operations, operation implementations, and recipes.
+
+`GenerationCatalogBuilder` builds a `GenerationCatalog` from explicit inventory and performs catalog construction validation.
+
+`GenerationRecipeDefinition` is a reusable generation template made from stage route choices.
+
+`StageRouteChoice` selects one route for a stage inside a recipe.
+
+`StageRouteStepImplementationChoice` selects an operation implementation for one route step.
+
+## Current request and semantic plan terms
+
+`GenerationRequestDescriptor` is symbolic caller intent for a generation run.
+
+`OperationImplementationOverrideDescriptor` is symbolic caller intent for overriding an operation implementation selection.
+
+`GenerationRequestResolver` resolves a descriptor against a catalog into an accepted generation request or structured resolution errors.
+
+`GenerationRequestResolutionResult` is the result object returned by request resolution.
+
+`GenerationRequestResolutionError` is a structured request-resolution diagnostic.
+
+`GenerationRequest` is accepted resolved generation intent.
+
+`GenerationRunSettings` contains accepted run-level settings such as grid and seed.
+
+`GenerationPlanCompiler` converts an accepted generation request into a managed semantic generation plan.
+
+`GenerationPlan` is managed semantic planning output. It contains selected stage and operation plan nodes in deterministic order and does not contain native execution state.
+
+`StagePlanNode` is accepted plan metadata for one selected stage.
+
+`OperationPlanNode` is accepted plan metadata for one selected operation occurrence.
+
+## Current runnable metadata terms
+
+`FieldIndex` is a dense zero-based plan-local field-binding table position. It is not a durable identity, storage handle, resource identity, or field-definition identity.
+
+`StageIndex` is a dense zero-based plan-local runnable-stage table position. It is not a durable identity or stage-definition identity.
+
+`OperationIndex` is a dense zero-based plan-local runnable-operation table position. It is not a durable identity or operation-definition identity.
+
+`FieldPlanRole` classifies a field binding as required input, produced output, or both at the runnable-plan boundary. It does not describe storage lifetime.
+
+`FieldCapturePolicy` records future capture intent for a field binding. It does not capture artifacts or diagnostics.
+
+`ResourceFieldBinding` is one immutable runnable field table row that connects a `ResourceDefinition` to its `FieldDefinition` by reference-exact ownership.
+
+`RunnableOperation` is immutable managed runnable metadata for one operation plan-node occurrence.
+
+`RunnableStage` is immutable managed runnable metadata for one stage plan-node occurrence.
+
+`RunnablePlan` is immutable managed runnable metadata compiled from a `GenerationPlan`, `FieldDefinitionSet`, and `ExecutionProfile`.
+
+`RunnablePlanCompiler` converts a `GenerationPlan`, `FieldDefinitionSet`, and `ExecutionProfile` into a `RunnablePlan` or deterministic structured compilation errors.
+
+`RunnablePlanCompilationResult` is the result object returned by runnable-plan compilation.
+
+`RunnablePlanCompilationError` is a structured runnable-plan compilation diagnostic.
+
+`RunnablePlanCompilationErrorCode` is a stable machine-readable runnable-plan compilation failure code.
+
+## Future execution terms
+
+`GenerationWorkspace` is planned native storage ownership for executable generation data.
+
+`FieldHandle` is a planned execution handle to workspace-owned field storage.
+
+`WorkspaceAllocation` is planned metadata or state for workspace-owned allocation.
+
+`OperationScheduler` is planned execution control flow for runnable operations, dependencies, scratch, and jobs.
+
+`OperationScratch` is planned temporary execution memory for operations.
+
+`Artifact capture` is planned execution infrastructure for retaining or exporting selected outputs.
+
+`Runtime diagnostic capture` is planned execution infrastructure for runtime observability.
+
+`ECS execution integration` is planned Unity ECS-facing execution integration.
