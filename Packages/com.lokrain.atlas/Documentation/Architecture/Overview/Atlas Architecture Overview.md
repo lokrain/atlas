@@ -2,9 +2,9 @@
 
 Lokrain.Atlas is a managed Unity package for deterministic world-generation architecture.
 
-The current Runtime model defines validated domain objects, reusable generation inventory, catalog validation, request resolution, and managed plan compilation.
+The current Runtime model defines validated domain objects, reusable generation inventory, catalog validation, request resolution, managed plan compilation, managed field metadata, and managed execution profile identity.
 
-Current Runtime architecture ends at `GenerationPlan`.
+Current semantic planning ends at `GenerationPlan`. Current Runtime also includes managed field metadata and managed execution profile identity used by future runnable compilation.
 
 Execution after `GenerationPlan` is planned architecture.
 
@@ -20,6 +20,7 @@ Reusable definitions
   -> Accepted generation requests
   -> Managed plan compilation
   -> Managed generation plans
+  -> Managed field metadata and execution profile selection
   -> Planned runnable execution
 ```
 
@@ -34,6 +35,8 @@ Each boundary owns a different responsibility.
 | Request | Represent one accepted resolved generation run. |
 | Plan compiler | Compile accepted run intent into a managed semantic plan. |
 | Plan | Represent current managed semantic generation order. |
+| Field metadata | Describe managed field representation for semantic resources. |
+| Execution profile | Identify a reusable execution-policy variant. |
 | Future execution | Compile runnable metadata, allocate storage, schedule jobs, and capture outputs. |
 
 ## Current Runtime scope
@@ -58,12 +61,17 @@ Generation plan compilation
 Generation plans
 Stage plan nodes
 Operation plan nodes
+Field value kinds
+Field shapes
+Field definitions
+Field definition sets
+Execution profiles
+Execution profile sets
 ```
 
 Current Runtime does not include:
 
 ```text
-FieldDefinition
 RunnablePlan
 GenerationWorkspace
 OperationScheduler

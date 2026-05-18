@@ -1,10 +1,10 @@
 # Resource, field, and workspace boundary
 
-This article explains the boundary between semantic resources, planned storage-facing fields, and planned execution workspace ownership.
+This article explains the boundary between semantic resources, current managed field metadata, current managed execution profile identity, and planned execution workspace ownership.
 
-Current Runtime architecture implements `ResourceDefinition`.
+Current Runtime architecture implements `ResourceDefinition`, `FieldDefinition`, `FieldDefinitionSet`, `FieldShape`, `FieldValueKind`, `ExecutionProfile`, and `ExecutionProfileSet`.
 
-`FieldDefinition`, `RunnablePlan`, `GenerationWorkspace`, `OperationScheduler`, native storage, jobs, artifacts, and ECS execution integration are planned architecture.
+`RunnablePlanCompiler`, `RunnablePlan`, `GenerationWorkspace`, `OperationScheduler`, native storage, jobs, artifacts, and ECS execution integration are planned architecture.
 
 ## Boundary summary
 
@@ -12,7 +12,9 @@ The boundary is:
 
 ```text
 ResourceDefinition
-  -> FieldDefinition          planned
+  -> FieldDefinition          current managed metadata
+  -> FieldDefinitionSet       current managed metadata
+  -> ExecutionProfile         current managed metadata
   -> RunnablePlanCompiler     planned
   -> RunnablePlan             planned
   -> GenerationWorkspace      planned
@@ -20,14 +22,17 @@ ResourceDefinition
   -> Jobs                     planned
 ```
 
-Current Runtime stops before `FieldDefinition`.
+Current Runtime stops before runnable compilation, workspace ownership, scheduler ownership, and job execution.
 
 ## Responsibility summary
 
 | Concept | Status | Responsibility |
 | --- | --- | --- |
 | `ResourceDefinition` | Current | Semantic identity of a generated value. |
-| `FieldDefinition` | Planned | Storage-facing metadata for representing a resource during execution. |
+| `FieldDefinition` | Current | Managed field metadata for representing a resource during execution. |
+| `FieldDefinitionSet` | Current | Accepted deterministic set of managed field definitions. |
+| `ExecutionProfile` | Current | Managed execution-policy identity for runnable compilation. |
+| `ExecutionProfileSet` | Current | Accepted deterministic set of execution profiles. |
 | `RunnablePlanCompiler` | Planned | Binds managed plan metadata to execution metadata. |
 | `RunnablePlan` | Planned | Immutable executable metadata. |
 | `GenerationWorkspace` | Planned | Native storage allocation, access, lifetime, and disposal for one run. |
@@ -135,7 +140,7 @@ It must not contain execution state for one run.
 
 ## FieldDefinition
 
-`FieldDefinition` is planned storage-facing metadata.
+`FieldDefinition` is current managed field metadata.
 
 A field definition will describe how a semantic resource is represented for execution.
 
@@ -632,3 +637,11 @@ Resolve metadata before scheduling the job.
 Jobs are planned deterministic native transforms.
 
 Keep semantic planning and execution ownership separate.
+
+## Deterministic metadata order
+
+`FieldDefinitionSet` and `ExecutionProfileSet` expose deterministic public order.
+
+Field definitions are sorted by ordinal field symbol. Execution profiles are sorted by ordinal profile symbol.
+
+Dictionaries and hash sets may be used internally for lookup and membership, but their enumeration order must not define public order, generation order, serialized order, diagnostic order, or artifact order.

@@ -14,7 +14,7 @@ This document is a decision record, not an implementation plan.
 
 ## Current Runtime boundary
 
-Current Runtime architecture ends at `GenerationPlan`.
+Current semantic planning ends at `GenerationPlan`. Current Runtime also includes managed field metadata and managed execution profile identity.
 
 The following are current Runtime concepts:
 
@@ -29,12 +29,15 @@ GenerationRequestResolver
 GenerationRequest
 GenerationPlanCompiler
 GenerationPlan
+FieldDefinition
+FieldDefinitionSet
+ExecutionProfile
+ExecutionProfileSet
 ```
 
 The following are planned or deferred concepts:
 
 ```text
-FieldDefinition
 RunnablePlan
 GenerationWorkspace
 OperationScheduler
@@ -428,7 +431,7 @@ Reason:
 
 Generation-relevant ordering must be explicit and deterministic.
 
-## Deferred: FieldDefinition
+## Implemented: FieldDefinition
 
 `FieldDefinition` is deferred.
 
@@ -676,3 +679,15 @@ Deferred options belong to planned execution architecture.
 Current Runtime remains managed and semantic through `GenerationPlan`.
 
 Execution architecture starts after `GenerationPlan`.
+
+## Rejected: GenerationCatalog owning field definitions or execution profiles
+
+`GenerationCatalog` must not own `FieldDefinition`, `FieldDefinitionSet`, `ExecutionProfile`, or `ExecutionProfileSet`.
+
+The catalog owns semantic generation inventory. Field metadata and execution profile metadata are separate managed inputs to future runnable compilation.
+
+## Rejected: LandmassExecutionProfiles
+
+Landmass-specific execution profile providers are rejected unless landmass owns a real execution-policy invariant.
+
+Built-in execution profiles are package-level execution metadata under `Runtime/Execution`.

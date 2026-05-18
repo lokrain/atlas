@@ -2,7 +2,7 @@
 
 This document defines the boundary between current managed Runtime architecture and planned execution architecture.
 
-Current Runtime ends at `GenerationPlan`.
+Current semantic planning ends at `GenerationPlan`. Current Runtime also includes managed field metadata and managed execution profile identity.
 
 Execution architecture after `GenerationPlan` is planned unless corresponding Runtime code exists.
 
@@ -51,6 +51,13 @@ GenerationPlanCompiler
 GenerationPlan
 StagePlanNode
 OperationPlanNode
+
+FieldValueKind
+FieldShape
+FieldDefinition
+FieldDefinitionSet
+ExecutionProfile
+ExecutionProfileSet
 ```
 
 Current Runtime does not allocate native storage, bind field handles, schedule jobs, execute Burst jobs, capture artifacts, or integrate with ECS execution.
@@ -60,9 +67,6 @@ Current Runtime does not allocate native storage, bind field handles, schedule j
 The following concepts are planned execution architecture:
 
 ```text
-FieldDefinition
-FieldDefinitionSet
-ExecutionProfile
 RunnablePlanCompiler
 RunnablePlan
 RunnableStage
@@ -641,3 +645,13 @@ It resolves symbolic intent, validates accepted objects, and compiles managed ge
 Future execution architecture compiles runnable metadata, owns native storage, schedules jobs, captures artifacts, and integrates with ECS.
 
 Keep those boundaries separate.
+
+## Metadata ordering rule
+
+Accepted metadata sets must expose deterministic order.
+
+`FieldDefinitionSet` exposes field definitions in ordinal field-symbol order.
+
+`ExecutionProfileSet` exposes execution profiles in ordinal profile-symbol order.
+
+Dictionaries and hash sets may be used for private lookup and membership only. They must not define public order, generation order, diagnostic order, serialized order, or artifact order.

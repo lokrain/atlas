@@ -4,11 +4,11 @@ This decision record explains why Lokrain.Atlas models semantic resources before
 
 ## Decision
 
-Lokrain.Atlas defines `ResourceDefinition` as current Runtime architecture before introducing `FieldDefinition`.
+Lokrain.Atlas defines `ResourceDefinition` as semantic Runtime architecture before using `FieldDefinition` as managed field metadata.
 
 `ResourceDefinition` is semantic metadata.
 
-`FieldDefinition` is planned storage-facing metadata.
+`FieldDefinition` is current managed field metadata.
 
 Current contracts use `ResourceDefinition` for required inputs and produced outputs.
 
@@ -20,9 +20,9 @@ Accepted.
 
 `ResourceDefinition` is implemented.
 
-`FieldDefinition` is planned architecture.
+`FieldDefinition` is implemented as managed metadata.
 
-Current Runtime architecture ends at `GenerationPlan`.
+Current semantic planning ends at `GenerationPlan`; managed field metadata is current Runtime metadata used by future runnable compilation.
 
 ## Context
 
@@ -521,3 +521,9 @@ Fields define how those values are represented for execution.
 Current Runtime owns resources.
 
 Future execution owns fields, workspaces, schedulers, and jobs.
+
+## Current implementation note
+
+`FieldDefinition`, `FieldDefinitionSet`, `FieldShape`, `FieldValueKind`, `ExecutionProfile`, and `ExecutionProfileSet` are now implemented managed metadata.
+
+The decision still stands: contracts use `ResourceDefinition`, not `FieldDefinition`; `GenerationCatalog` owns semantic inventory, not field or execution profile metadata; and runnable execution remains planned.

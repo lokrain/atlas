@@ -2,9 +2,11 @@
 
 This article explains the current managed generation pipeline in Lokrain.Atlas.
 
-The managed pipeline starts with reusable generation inventory and ends at `GenerationPlan`.
+The managed semantic pipeline starts with reusable generation inventory and ends at `GenerationPlan`.
 
-Execution after `GenerationPlan` is planned architecture.
+Managed field metadata and execution profile identity are current Runtime metadata consumed by future runnable compilation.
+
+Execution after `GenerationPlan` is planned architecture. `FieldDefinitionSet` and `ExecutionProfile` are current managed metadata; `RunnablePlanCompiler`, `RunnablePlan`, workspace ownership, scheduler ownership, and jobs remain planned.
 
 ## Pipeline summary
 
@@ -22,6 +24,8 @@ GenerationCatalog
 
 This pipeline is managed and semantic.
 
+Field metadata and execution profile metadata are managed Runtime metadata used after semantic planning and before future runnable execution.
+
 It does not allocate native storage, bind field handles, schedule jobs, execute Burst jobs, capture artifacts, or integrate with ECS execution.
 
 ## Pipeline stages
@@ -33,7 +37,8 @@ It does not allocate native storage, bind field handles, schedule jobs, execute 
 | Request resolution | Catalog and descriptor | `GenerationRequestResolutionResult` | Resolve symbols into accepted definitions or errors. |
 | Accepted request | Successful resolution | `GenerationRequest` | Represent one accepted resolved run. |
 | Plan compilation | Accepted request | `GenerationPlan` | Create managed semantic stage and operation order. |
-| Planned execution | Managed plan | Planned runnable execution | Compile executable metadata, allocate storage, and schedule jobs. |
+| Managed metadata bridge | Managed plan, field metadata, and execution profile | Planned runnable compilation input | Provide field and profile metadata without allocating storage. |
+| Planned execution | Managed metadata bridge | Planned runnable execution | Compile executable metadata, allocate storage, and schedule jobs. |
 
 ## Catalog construction
 

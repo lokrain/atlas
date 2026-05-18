@@ -17,6 +17,8 @@ Core
   -> Catalog
   -> Recipes
   -> Planning
+  -> Fields
+  -> Execution metadata
   -> Future execution
   -> Unity adapters
   -> Editor tooling
@@ -356,6 +358,8 @@ Operations
 Catalog
 Recipes
 Planning
+Fields
+Execution metadata
 ```
 
 Generation modules must not depend on:

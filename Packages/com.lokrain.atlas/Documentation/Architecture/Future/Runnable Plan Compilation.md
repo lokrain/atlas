@@ -56,8 +56,8 @@ The planned runnable compiler uses:
 
 ```text
 GenerationPlan
-FieldDefinitionSet
-ExecutionProfile
+FieldDefinitionSet       current managed metadata
+ExecutionProfile         current managed metadata
 ```
 
 ### GenerationPlan
@@ -376,8 +376,8 @@ Inputs that may affect output must be explicit:
 
 ```text
 GenerationPlan
-FieldDefinitionSet
-ExecutionProfile
+FieldDefinitionSet       current managed metadata
+ExecutionProfile         current managed metadata
 implementation metadata
 scheduler metadata
 capture policy

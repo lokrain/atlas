@@ -13,7 +13,7 @@ namespace Lokrain.Atlas.Fields
     /// </para>
     /// <para>
     /// The value names use CLR type terminology. Storage-specific formats, packing, quantization, and native
-    /// memory layout belong to future execution infrastructure.
+    /// memory layout belong to execution infrastructure.
     /// </para>
     /// </remarks>
     public enum FieldValueKind
