@@ -1,58 +1,49 @@
 # Error handling rules
 
-This document defines error-handling rules for Lokrain.Atlas Runtime architecture.
+This document defines error handling rules for Lokrain.Atlas.
 
-Atlas separates invalid API usage from expected domain failure.
+Lokrain.Atlas uses exceptions for invalid API usage and result objects for expected boundary failures.
 
-Use exceptions for invalid API usage.
+## Core rule
 
-Use result objects for expected failure at a domain boundary.
+Use exceptions when the caller violates the API contract.
 
-## Primary rule
-
-Throw for invalid API usage.
-
-Return a result object for expected domain failure.
+Use result objects when failure is an expected outcome of a boundary operation.
 
 Correct:
 
 ```text
-Symbol.Create(invalidText) -> throws
-Grid.GetCell(outOfRangeIndex) -> throws
-GenerationRequestResolver.Resolve(validDescriptorWithMissingRecipe) -> failed result
-````
+Symbol.Create("Invalid.Symbol") throws ArgumentException.
+new Grid(0, 256) throws ArgumentOutOfRangeException.
+GenerationRequestResolver.Resolve(...) returns a failed GenerationRequestResolutionResult for an unknown recipe symbol.
+```
 
 Incorrect:
 
 ```text
-Symbol.Create(invalidText) -> failed result
-GenerationRequestResolver.Resolve(validDescriptorWithMissingRecipe) -> throws
-GenerationPlanCompiler.Compile(descriptor) -> tries to resolve symbols
+Symbol.Create("Invalid.Symbol") returns null.
+new Grid(0, 256) creates an invalid grid.
+GenerationRequestResolver.Resolve(...) throws for an unknown recipe symbol.
 ```
 
 ## Exception boundary
 
-Exceptions represent caller misuse, invalid constructor input, violated preconditions, or impossible object state.
+Throw exceptions for programmer errors and invalid local state.
 
-Throw exceptions when the caller passes data that the API contract does not accept.
-
-Examples:
+Use exceptions for:
 
 ```text
-null required argument
-invalid symbol text
-invalid display name text
-invalid grid dimensions
-out-of-range grid coordinate
-null collection entry
-duplicate constructor input where uniqueness is required
-attempting to create a success result without a value
-attempting to create a failure result without errors
+null required arguments
+out-of-range primitive values
+invalid primitive text in Create or Parse methods
+duplicate entries in accepted object constructors
+invalid local resource flow
+invalid final request choices
+invalid catalog inventory
+invalid managed plan construction
 ```
 
-Exceptions should be precise and standard where possible.
-
-Preferred exception types:
+Examples:
 
 ```text
 ArgumentNullException
@@ -61,158 +52,227 @@ ArgumentOutOfRangeException
 InvalidOperationException
 ```
 
-Do not create custom exceptions unless the package needs a stable catchable exception contract.
+Do not use custom exceptions unless a caller needs to catch a package-specific exception type.
 
-## Result boundary
+## Result-object boundary
 
-Result objects represent expected negative outcomes where the caller supplied valid symbolic input but the current domain state cannot satisfy it.
+Use result objects when failure is normal for the operation.
 
-Current result boundary:
+Current result-object boundary:
 
 ```text
 GenerationRequestResolver.Resolve(...)
 ```
 
-Expected request-resolution failures include:
+Request resolution may fail because symbolic caller intent cannot be satisfied by a catalog.
+
+Expected resolver failures include:
 
 ```text
-requested recipe symbol not found
-override route-step symbol not found in selected recipe
-implementation symbol not found
-implementation incompatible with targeted route-step operation
-duplicate override target
-descriptor cannot be satisfied by catalog
+unknown recipe symbol
+override route step not selected by recipe
+unknown implementation symbol
+implementation operation mismatch
 ```
 
-These are not exceptional. They are normal outcomes of resolving symbolic input against a catalog.
+These failures should produce `GenerationRequestResolutionResult` with structured errors.
 
-## Boundary ownership
+They should not throw.
 
-The object that owns a boundary owns its errors.
+## Descriptor resolution rule
 
-| Failure                                   | Owner                                       |
-| ----------------------------------------- | ------------------------------------------- |
-| Invalid symbol text                       | `Symbol`                                    |
-| Invalid display name text                 | `DisplayName`                               |
-| Invalid grid dimensions                   | `Grid`                                      |
-| Invalid cell coordinate for a grid        | `Grid`                                      |
-| Invalid resource constructor input        | `ResourceDefinition`                        |
-| Invalid stage contract input              | `StageContract`                             |
-| Invalid operation contract input          | `OperationContract`                         |
-| Duplicate or cross-catalog definitions    | `GenerationCatalog`                         |
-| Descriptor cannot be satisfied by catalog | `GenerationRequestResolver`                 |
-| Invalid accepted request construction     | `GenerationRequest`                         |
-| Invalid managed plan construction         | `GenerationPlanCompiler` / `GenerationPlan` |
-| Native allocation failure                 | Future workspace                            |
-| Job dependency failure                    | Future scheduler                            |
+Descriptors are symbolic input.
 
-Do not make unrelated layers report or repair failures they do not own.
-
-## Constructor and factory errors
-
-Constructors and factories must validate local invariants.
-
-They should throw immediately when local invariants are invalid.
+A descriptor can be structurally valid while still being unsatisfied by a catalog.
 
 Correct:
 
 ```text
-ResourceDefinition(null, displayName, schema) -> throws
-StageContract(requiredInputsWithNullEntry, producedOutputs) -> throws
-GenerationRunSettings(null, seed) -> throws
+GenerationRequestDescriptor contains a valid recipe symbol.
+GenerationRequestResolver returns recipe-not-found error when the catalog does not contain that symbol.
 ```
 
 Incorrect:
 
 ```text
-ResourceDefinition stores null and waits for catalog validation.
-StageContract stores null resources and waits for plan compilation.
-GenerationRunSettings accepts null grid and waits for execution.
+GenerationRequestDescriptor constructor requires a catalog.
+GenerationRequestDescriptor constructor throws because the recipe symbol is unknown to one catalog.
 ```
 
-Accepted objects must not expose partially valid state.
+Catalog-dependent failures belong to the resolver.
 
-## Collection input errors
+## Catalog construction rule
 
-APIs that accept collections must snapshot and validate them.
+Catalog construction is an accepted-inventory boundary.
 
-They should reject:
+Invalid catalog inventory should throw.
+
+Catalog construction failures are not request-resolution failures.
+
+Throw for:
 
 ```text
-null collection argument
-null collection entry
-duplicate entries when uniqueness is required
-entries that violate the local type contract
+duplicate definitions
+definitions referencing schemas not owned by the catalog
+contracts referencing resources not owned by the catalog
+routes referencing missing operations
+recipes referencing definitions not owned by the catalog
+schema-inconsistent graphs
+unsatisfied recipe graph dependencies
 ```
 
-Correct behavior:
+Correct:
 
 ```text
-copy enumerable input
-validate copied values
-store read-only snapshot
-throw precise exception for invalid local input
+GenerationCatalogBuilder.Build() throws for invalid inventory.
 ```
 
-Incorrect behavior:
+Incorrect:
 
 ```text
-store caller-owned mutable list
-allow null entries
-defer local validation to catalog or compiler
-depend on lazy enumerable evaluation after construction
+GenerationCatalogBuilder.Build() returns GenerationRequestResolutionResult.
 ```
 
-## Catalog errors
+## Constructor rule
 
-Catalog construction errors are invalid accepted-inventory errors.
+Constructors for accepted objects must reject invalid local state.
 
-`GenerationCatalog` should throw when candidate inventory violates catalog invariants.
-
-Catalog construction errors include:
+Use:
 
 ```text
-duplicate definition symbols
-schema ownership mismatch
-resource ownership mismatch
-stage ownership mismatch
-route-step graph inconsistency
-operation implementation incompatibility
-contract resource ownership mismatch
-recipe graph inconsistency
-cross-catalog object reuse
+ArgumentNullException
+ArgumentException
+ArgumentOutOfRangeException
 ```
 
-These are not request-resolution failures. They mean the package inventory is invalid.
+Correct:
 
-## Descriptor errors
+```text
+new ResourceDefinition(null, displayName, schema)
+  -> ArgumentNullException
 
-Descriptor construction errors are invalid API usage.
+new StageContract(stage, duplicatedInputs, outputs)
+  -> ArgumentException
 
-A descriptor should throw when its own local shape is invalid.
+new Grid(128, 256)
+  -> ArgumentOutOfRangeException
+```
+
+Incorrect:
+
+```text
+constructor stores invalid state
+constructor returns null
+constructor logs and continues
+```
+
+## Factory rule
+
+`Create` and `Parse` methods throw when input is invalid.
+
+`TryCreate` and `TryParse` methods return `false` when input is invalid.
+
+Correct:
+
+```text
+Symbol.Create(value)
+Symbol.TryCreate(value, out Symbol? symbol)
+
+Seed.Parse(value)
+Seed.TryParse(value, out Seed seed)
+```
+
+Incorrect:
+
+```text
+TryCreate throws for ordinary invalid input.
+Create returns null for invalid input.
+Parse returns default for invalid input.
+```
+
+## Null argument rule
+
+Throw `ArgumentNullException` for required null arguments.
+
+The parameter name must match the public API parameter.
+
+Correct:
+
+```csharp
+throw new ArgumentNullException(nameof(value));
+```
+
+Incorrect:
+
+```csharp
+throw new ArgumentException("Value cannot be null.");
+throw new ArgumentNullException("input");
+```
+
+Use nullable annotations so nullability is visible in the API.
+
+## Invalid value rule
+
+Throw `ArgumentException` when a value has invalid shape or violates a non-range invariant.
+
+Use this for:
+
+```text
+invalid symbol text
+invalid display-name text
+duplicate collection entries
+null entries inside required collections
+invalid local graph shape
+```
+
+Correct:
+
+```csharp
+throw new ArgumentException("Symbol is invalid.", nameof(value));
+```
+
+Do not use `InvalidOperationException` for invalid constructor arguments.
+
+## Out-of-range rule
+
+Throw `ArgumentOutOfRangeException` when a numeric value is outside an allowed range.
+
+Use this for:
+
+```text
+grid width
+grid depth
+cell coordinates
+flattened cell index
+```
+
+Correct:
+
+```csharp
+throw new ArgumentOutOfRangeException(
+    nameof(width),
+    width,
+    "Grid width must be between 256 and 4096.");
+```
+
+## Invalid operation rule
+
+Use `InvalidOperationException` when the object is valid but the requested operation cannot be completed in the current state.
 
 Examples:
 
 ```text
-null recipe symbol
-null run settings
-null override descriptor
-duplicate override target when descriptor owns uniqueness
+managed plan compilation detects an impossible dependency state
+a required internal mapping is missing after prior validation should have established it
 ```
 
-A descriptor should not throw because a catalog does not contain its symbols.
+Do not use `InvalidOperationException` for null arguments or invalid primitive input.
 
-That failure belongs to request resolution.
+## Error object rule
 
-## Resolution errors
+A structured error object must contain enough information for callers and tools to understand the failure.
 
-`GenerationRequestResolver` owns symbolic satisfiability.
-
-It should return `GenerationRequestResolutionResult` failure when a valid descriptor cannot be satisfied by a catalog.
-
-Resolution errors should be structured.
-
-A resolution error should expose:
+`GenerationRequestResolutionError` contains:
 
 ```text
 Code
@@ -220,436 +280,301 @@ Message
 SubjectSymbol
 ```
 
-The code is stable machine-facing identity.
+The code is a stable symbol.
 
-The message is human-facing diagnostic text.
+The message is human-readable diagnostic text.
 
-The subject symbol identifies the relevant descriptor or catalog symbol when available.
+The subject symbol identifies the recipe, route step, implementation, or other symbol involved when available.
 
-## Resolution error codes
+## Error code rule
 
-Resolution error codes must be stable and specific.
+Error codes must be stable symbols.
 
-Good examples:
-
-```text
-RecipeNotFound
-OverrideTargetNotFound
-ImplementationNotFound
-ImplementationNotCompatible
-DuplicateOverrideTarget
-```
-
-Avoid vague codes:
-
-```text
-Error
-Invalid
-Failed
-BadRequest
-UnknownProblem
-```
-
-Use `Unknown` only when the architecture explicitly needs a fallback for externally sourced errors.
-
-## Diagnostic messages
-
-Diagnostic messages should be clear and human-facing.
-
-They may include:
-
-```text
-the failing symbol
-the expected category
-the selected recipe or route-step context
-the incompatible implementation and operation when relevant
-```
-
-Messages must not be used as machine-facing identity.
-
-Tests and tooling should assert error codes and subject symbols, not full message text, except where message formatting itself is intentionally under test.
-
-## Subject symbols
-
-Use `SubjectSymbol` for the primary symbol related to an error.
-
-Examples:
-
-| Error                       | Subject symbol                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------- |
-| Missing recipe              | Requested recipe symbol.                                                                    |
-| Missing override target     | Route-step symbol from the override descriptor.                                             |
-| Missing implementation      | Implementation symbol from the override descriptor.                                         |
-| Incompatible implementation | Implementation symbol or targeted route-step symbol, depending on which is more actionable. |
-| Duplicate override target   | Duplicated route-step symbol.                                                               |
-
-When no useful subject exists, the subject may be absent according to the result model.
-
-Do not use display names as diagnostic identity.
-
-## Success and failure result shape
-
-A result object must have exactly one state: success or failure.
-
-A successful result must contain the accepted value.
-
-A failed result must contain one or more errors.
-
-Invalid states are not allowed:
-
-```text
-success without value
-failure without errors
-success with errors
-failure with accepted value
-```
-
-The result type must make invalid states impossible or reject them at construction.
-
-## Plan compiler errors
-
-`GenerationPlanCompiler` consumes an accepted `GenerationRequest`.
-
-The compiler should throw when given invalid API input.
-
-Examples:
-
-```text
-null request
-request with invalid impossible internal state
-duplicate plan nodes where the compiler requires uniqueness
-```
-
-The compiler should not return request-resolution errors.
-
-The compiler should not resolve descriptor symbols.
-
-If the compiler receives an accepted request, normal missing-symbol errors should already be impossible.
-
-## Runtime execution errors
-
-Execution error policy is future architecture.
-
-Future workspace and scheduler errors may include:
-
-```text
-native allocation failure
-field binding failure
-scheduler binding failure
-job dependency failure
-operation timeout or termination failure
-artifact capture failure
-```
-
-These errors must be owned by future workspace, runnable compiler, scheduler, or artifact systems.
-
-Do not add execution failure policy to current catalog, recipe, request, or managed plan objects.
-
-## Throwing versus Try methods
-
-Use throwing APIs when invalid input is caller misuse.
-
-Examples:
-
-```text
-Symbol.Create(...)
-DisplayName.Create(...)
-Seed.Parse(...)
-Grid.GetCell(...)
-Grid.GetIndex(...)
-```
-
-Use `Try` APIs when invalid or missing input is common and non-exceptional.
-
-Examples:
-
-```text
-Symbol.TryCreate(...)
-DisplayName.TryCreate(...)
-Seed.TryParse(...)
-Grid.TryGetCell(...)
-Grid.TryGetIndex(...)
-GenerationCatalog.TryGetResourceDefinition(...)
-```
-
-A `Try` method should follow the .NET pattern:
-
-```text
-bool TryGetX(..., out X value)
-```
-
-Do not use `Try` for methods that still throw for normal negative outcomes.
-
-## Parse versus Create
-
-Use `Parse` / `TryParse` for text conversion.
-
-Examples:
-
-```text
-Seed.Parse(string value)
-Seed.TryParse(string value, out Seed seed)
-```
-
-Use `Create` / `TryCreate` for validated domain creation.
-
-Examples:
-
-```text
-Symbol.Create(string value)
-Symbol.TryCreate(string value, out Symbol symbol)
-DisplayName.Create(string value)
-DisplayName.TryCreate(string value, out DisplayName displayName)
-```
-
-`Parse` implies conversion from a textual representation.
-
-`Create` implies validated construction from input.
-
-## Null handling
-
-Required reference arguments must be rejected.
-
-Use `ArgumentNullException` when the argument itself is null.
-
-Use `ArgumentException` when the argument exists but contains invalid data.
-
-Examples:
-
-```text
-null collection -> ArgumentNullException
-collection with null entry -> ArgumentException
-null required value object -> ArgumentNullException
-empty symbol text -> ArgumentException
-```
-
-Do not silently replace null with defaults unless the API explicitly defines that behavior.
-
-## Range handling
-
-Use `ArgumentOutOfRangeException` for numeric values outside the accepted range.
-
-Examples:
-
-```text
-grid width below minimum
-grid depth above maximum
-cell X outside grid
-cell Z outside grid
-flattened index outside grid
-```
-
-Range error messages should include the valid range when practical.
-
-## Duplicate handling
-
-Reject duplicates at the boundary that owns uniqueness.
-
-Examples:
-
-| Duplicate                                                            | Owner                                                          |
-| -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Duplicate resource symbols in catalog                                | `GenerationCatalog`                                            |
-| Duplicate required resources in a contract if uniqueness is required | `StageContract` / `OperationContract`                          |
-| Duplicate route-step override target                                 | Descriptor or resolver, depending on where uniqueness is owned |
-| Duplicate stage plan node when impossible                            | `GenerationPlanCompiler` / `GenerationPlan`                    |
-
-Do not allow duplicates and rely on later systems to pick an arbitrary winner.
-
-## Defensive validation
-
-Defensive validation is allowed at trust boundaries.
-
-It must not duplicate architecture ownership unnecessarily.
-
-Correct defensive validation:
-
-```text
-public constructor rejects null
-public method rejects null request
-catalog rejects cross-catalog object reuse
-compiler rejects impossible accepted request state
-```
-
-Incorrect defensive validation:
-
-```text
-every operation plan node re-resolves symbols through the catalog
-jobs validate resource symbols
-workspace validates recipe choices
-ResourceDefinition validates catalog membership
-```
-
-Defensive validation must not reverse dependency direction.
-
-## Determinism and errors
-
-Error handling must not introduce nondeterminism.
-
-Do not depend on:
-
-```text
-dictionary enumeration order
-hash set enumeration order
-managed object allocation order
-thread timing
-current time
-Unity scene order
-Unity asset import order
-```
-
-When returning multiple errors, order must be stable.
-
-Preferred ordering should follow descriptor order, recipe order, route-step order, or sorted symbol order, depending on the boundary.
-
-The owner of the boundary must define the ordering.
-
-## Logging
-
-Domain-layer APIs should not log as their primary error mechanism.
-
-They should return result errors or throw exceptions.
-
-Logging may be added by adapters, tooling, tests, or execution systems that have a clear output surface.
-
-Incorrect:
-
-```text
-resolver logs missing recipe and returns success with fallback
-catalog logs duplicate symbol and keeps first entry
-plan compiler logs invalid route and skips it
-```
+Use lowercase dot-separated package symbols.
 
 Correct:
 
 ```text
-resolver returns failed result
-catalog throws
-plan compiler throws
+lokrain.atlas.planning.recipe_not_found
+lokrain.atlas.planning.route_step_not_selected_by_recipe
+lokrain.atlas.planning.implementation_not_found
+lokrain.atlas.planning.implementation_operation_mismatch
 ```
 
-## Fallbacks
-
-Do not silently fall back across architecture boundaries.
-
-Invalid:
+Incorrect:
 
 ```text
-missing recipe -> use first recipe
-missing implementation -> use first implementation in catalog
-invalid symbol -> normalize into different identity
-invalid grid -> clamp to valid range
-missing resource -> create placeholder resource
+RecipeNotFound
+404
+MissingImplementation
+implementation mismatch
 ```
 
-Fallbacks are allowed only when the API explicitly defines them as domain behavior.
+Do not localize error codes.
 
-When fallback behavior exists, it must be deterministic and documented.
+## Error message rule
 
-## Message style
+Error messages are diagnostics.
 
-Exception and diagnostic messages should be specific.
+They should be clear, specific, and short.
 
-Good:
+They may include the relevant symbol text.
+
+They must not be used as programmatic identity.
+
+Correct:
 
 ```text
-"Grid width must be between 256 and 4096."
-"Display name cannot contain whitespace characters other than ordinary spaces."
-"Recipe symbol was not found in the catalog."
+Generation recipe was not found in the catalog: lokrain.atlas.tests.recipe.unknown.
 ```
 
-Bad:
+Incorrect:
 
 ```text
-"Invalid."
-"Bad data."
-"Something went wrong."
-"Failed."
+Bad.
+Something went wrong.
+Recipe not found!!! Please fix.
 ```
 
-Messages should describe the violated rule, not internal implementation details.
+## Result object rule
 
-## Public API consistency
+A result object must make success and failure explicit.
 
-Equivalent APIs should use equivalent failure behavior.
-
-If one constructor throws for null input, similar constructors should also throw for null input.
-
-If one catalog lookup uses `TryGet`, similar optional lookups should also use `TryGet`.
-
-If one resolver boundary returns structured errors, related expected satisfiability failures should use the same result model.
-
-Do not mix exceptions and result objects for the same category of failure.
-
-## Test rules
-
-Tests should verify both success and failure behavior.
-
-For exception tests, verify:
+Correct:
 
 ```text
-exception type
-parameter name when meaningful
-accepted valid boundary cases
-rejected invalid boundary cases
+Succeeded
+Failed
+GenerationRequest
+Errors
 ```
 
-For result tests, verify:
+On success:
 
 ```text
-IsSuccess / IsFailure
-accepted value presence on success
-error count on failure
-error code
-subject symbol
-stable error ordering when multiple errors exist
+Succeeded == true
+Failed == false
+GenerationRequest != null
+Errors is empty
 ```
 
-Avoid tests that depend on full diagnostic message text unless the message text is an explicit public contract.
-
-## Documentation rules
-
-Documentation must describe the active error model.
-
-Do not document obsolete failure behavior.
-
-Do not describe result failures as exceptions.
-
-Do not describe invalid API usage as expected result failure.
-
-Future execution error policy must be marked as future architecture until implemented.
-
-## Review checklist
-
-Before accepting error-handling code, verify:
+On failure:
 
 ```text
-Invalid API usage throws.
-Expected symbolic satisfiability failure returns a result object.
-The error is reported by the boundary that owns it.
-Constructors reject invalid local state.
-Catalog construction rejects invalid inventory.
-Request resolution does not throw for missing valid symbols.
-Plan compilation does not resolve descriptors.
-Error codes are stable and specific.
-Diagnostic messages are human-facing only.
-Tests do not parse diagnostic messages as identity.
-Multiple errors are returned in stable order.
-No domain object logs instead of throwing or returning errors.
-No silent fallback hides invalid input.
-Future execution errors are not added to current planning objects.
+Succeeded == false
+Failed == true
+GenerationRequest == null
+Errors is not empty
 ```
 
-## Summary
+Avoid ambiguous result states.
 
-Use exceptions when the caller violates an API contract.
+## Multiple error rule
 
-Use result objects when valid symbolic input cannot be satisfied by the current catalog.
+When a boundary can discover multiple independent expected errors, return all useful errors in stable order.
 
-Keep errors owned by the boundary that detects and understands them.
+For request resolution, override errors should follow descriptor override order.
 
-Keep error codes stable, messages diagnostic, and ordering deterministic.
+Correct:
 
-Do not use logging, fallback, or higher-layer validation to hide invalid architecture boundaries.
+```text
+override[0] -> route step not selected
+override[1] -> implementation not found
+```
 
+Incorrect:
+
+```text
+unordered error output
+first error only when later independent errors are cheap and safe to report
+random hash-map order
+```
+
+Do not continue after an error when later checks depend on missing accepted data.
+
+## No logging as control flow
+
+Do not use logs as the primary error mechanism.
+
+Correct:
+
+```text
+throw exception
+return failed result object
+```
+
+Incorrect:
+
+```text
+Debug.LogError(...)
+return default
+continue with invalid state
+```
+
+Logging may supplement an error at Unity adapter or tooling boundaries. It must not replace exceptions or result objects in Runtime domain logic.
+
+## No null-as-error rule
+
+Do not use `null` as the only failure signal.
+
+Correct:
+
+```text
+TryGetResourceDefinition(symbol, out ResourceDefinition? definition)
+GenerationRequestResolutionResult.Failed
+```
+
+Incorrect:
+
+```text
+GetResourceDefinition(symbol) returns null when missing.
+Resolve(...) returns null when resolution fails.
+```
+
+Use `TryGet` for non-throwing lookup.
+
+Use `Get` for throwing lookup.
+
+Use result objects for boundary operations with structured failure.
+
+## Lookup rules
+
+Use standard lookup semantics.
+
+`Contains...` returns `true` or `false`.
+
+`TryGet...` returns `true` or `false` and sets an out value.
+
+`Get...` returns the value or throws when missing.
+
+Correct:
+
+```text
+ContainsResourceDefinition(symbol)
+TryGetResourceDefinition(symbol, out ResourceDefinition? resourceDefinition)
+GetResourceDefinition(symbol)
+```
+
+Incorrect:
+
+```text
+FindResourceDefinition(symbol) returns null
+MaybeResource(symbol)
+GetResourceDefinition(symbol, bool throwIfMissing)
+```
+
+## Unity boundary rule
+
+Runtime domain code must not depend on Unity logging, Unity dialogs, editor UI, or console behavior for error handling.
+
+Correct Runtime behavior:
+
+```text
+throw ArgumentException
+return GenerationRequestResolutionResult
+```
+
+Correct adapter behavior:
+
+```text
+catch exception or inspect result
+display message in editor UI
+log diagnostic if useful
+```
+
+Incorrect Runtime behavior:
+
+```text
+EditorUtility.DisplayDialog(...)
+Debug.LogError(...)
+```
+
+## Future execution rule
+
+Future execution should keep the same boundary model.
+
+Expected execution failures should use structured result objects or diagnostics.
+
+Invalid API usage should throw.
+
+Planned examples:
+
+```text
+RunnablePlanCompiler returns structured failure if field definitions cannot satisfy a plan.
+GenerationWorkspace throws for invalid allocation requests.
+OperationScheduler returns structured execution diagnostics for expected execution failure.
+```
+
+Do not mix scheduler diagnostics into current managed planning objects.
+
+## Exception message rule
+
+Exception messages should state the violated rule.
+
+They should not include excessive implementation detail.
+
+Correct:
+
+```text
+Grid width must be between 256 and 4096.
+Display name cannot contain whitespace characters other than ordinary spaces.
+Generation request must contain exactly one implementation choice for each selected route step.
+```
+
+Incorrect:
+
+```text
+bad width
+invalid
+System failed in internal method ValidateThing at index 3
+```
+
+## Testing rule
+
+Tests must assert the error boundary.
+
+Use exception assertions for invalid API usage.
+
+Use result assertions for expected resolver failure.
+
+Correct:
+
+```text
+Assert.Throws<ArgumentNullException>(...)
+Assert.That(result.Succeeded, Is.False)
+Assert.That(result.Errors[0].Code, Is.EqualTo(...))
+```
+
+Incorrect:
+
+```text
+expect resolver to throw for unknown recipe
+expect constructor to return failed result for null argument
+```
+
+## Checklist
+
+Before adding error handling, verify:
+
+```text
+Is this invalid API usage?
+If yes, throw a precise exception.
+
+Is this an expected boundary failure?
+If yes, return a result object.
+
+Is the input symbolic and catalog-dependent?
+If yes, resolver failure should be a structured result.
+
+Is the inventory graph invalid?
+If yes, catalog construction should throw.
+
+Is this a TryCreate, TryParse, or TryGet method?
+If yes, ordinary invalid input should return false.
+
+Does the result object have unambiguous success and failure states?
+Does each structured error have a stable code?
+Are errors returned in stable order?
+Is null avoided as the only failure signal?
+Is logging avoided as control flow?
 ```

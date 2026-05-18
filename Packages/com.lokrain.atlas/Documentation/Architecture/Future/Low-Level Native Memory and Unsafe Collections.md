@@ -1,1300 +1,720 @@
 # Low-level native memory and unsafe collections
 
-Package: `com.lokrain.atlas`  
-Status: Future architecture policy  
-Applies to: future execution, workspace, memory, topology, artifact, diagnostics, interop, hashing, and test infrastructure
+This document describes planned architecture.
 
-This document defines when Atlas may use Unity low-level native functionality and unsafe collections.
+Low-level native memory, unsafe collections, custom allocators, unmanaged topology builders, and unsafe execution infrastructure are not current Runtime behavior unless corresponding Runtime code exists.
 
-These rules apply to future execution infrastructure. They do not change the current managed architecture, which ends at `GenerationPlan`.
+Current Runtime architecture ends at `GenerationPlan`.
 
 ## Purpose
 
-Atlas uses standard Unity native containers by default.
+Low-level native memory exists to support deterministic execution workloads that cannot be represented efficiently or safely enough with higher-level managed objects.
 
-Use low-level native functionality only when standard `Native*` containers cannot express a package-level requirement clearly enough. Valid requirements include memory layout, lifetime ownership, sparse topology construction, controlled aliasing, bulk memory operations, interop, artifact layout, or a measured workload-specific performance need.
+Use standard Unity native containers by default.
 
-Unsafe code is an implementation detail. It must not become an authoring model, resource model, stage-definition model, operation-definition model, recipe model, request model, or managed-plan model.
+Use unsafe or low-level APIs only when the data shape, ownership model, interop requirement, or measured target workload requires them.
 
-## Architecture boundary
+## Current boundary
 
-The current architecture is semantic and managed:
+Current Runtime must not use unsafe execution infrastructure in semantic architecture layers.
 
-```text
-ResourceDefinition
-  -> StageContract / OperationContract
-  -> GenerationRequest
-  -> GenerationPlan
-````
-
-Future execution introduces storage and scheduling boundaries:
+Do not introduce unsafe memory or native containers into:
 
 ```text
-GenerationPlan
-  -> RunnablePlanCompiler
-  -> RunnablePlan
-  -> GenerationWorkspace
-  -> OperationScheduler
-  -> Jobs
+Runtime/Core
+Runtime/Schemas
+Runtime/Resources
+Runtime/Stages
+Runtime/Operations
+Runtime/Catalog
+Runtime/Recipes
+Runtime/Planning
+Runtime/Generation module definitions
 ```
 
-Low-level native functionality belongs only below future runnable compilation.
-
-The required boundary is:
+Do not add these to current managed objects:
 
 ```text
-Resource contracts define semantic meaning.
-Runnable compilation resolves meaning into executable bindings.
-The workspace owns memory.
-Schedulers own execution control flow.
-Jobs operate on resolved native views and unmanaged values.
-Artifacts own durable output.
-```
-
-`StageContract` and `OperationContract` must remain resource-definition-based semantic contracts. They must not own pointers, allocators, field handles, safety handles, native containers, or unsafe memory.
-
-## Baseline
-
-Atlas targets Unity 6000.4.x for this policy.
-
-The expected Collections baseline is:
-
-```text
-com.unity.collections@6.4.0
-```
-
-This baseline is not a permanent constraint. If the package version changes through Unity or Package Manager, this document must be reviewed against the updated Unity documentation and release notes.
-
-## Scope
-
-This policy covers the following APIs and patterns:
-
-```text
-Unity.Collections.LowLevel.Unsafe
-UnsafeUtility
-NativeArrayUnsafeUtility
+NativeArray<T>
+NativeList<T>
+NativeHashMap<TKey, TValue>
 UnsafeList<T>
-UnsafeStream
-UnsafeAppendBuffer
-UnsafeBitArray
-AllocatorManager
-RewindableAllocator
-custom native containers
-raw pointer access
-raw unmanaged allocation
-direct memory copy, clear, move, compare, and hash operations
-safety-disabling attributes
+UnsafeHashMap<TKey, TValue>
+UnsafePtrList<T>
+BlobAssetReference<T>
+void*
+byte*
+AllocatorManager.AllocatorHandle
+JobHandle
 ```
 
-This policy also covers safe native APIs when they are part of low-level execution infrastructure decisions.
+Current managed Runtime objects are semantic and stop at `GenerationPlan`.
 
-Example:
+## Planned ownership areas
+
+Unsafe and low-level native APIs may be valid in future infrastructure areas such as:
 
 ```text
+Runtime/Memory
+Runtime/Execution
+Runtime/Topology
+Runtime/Diagnostics
+Runtime/Artifacts
+Runtime/Interop
+Runtime/Hashing
+```
+
+These areas must remain below semantic Runtime layers.
+
+Semantic definitions, catalogs, recipes, requests, and plans must not expose unsafe implementation details.
+
+## Default container rule
+
+Prefer standard Unity native containers first.
+
+Use these before unsafe equivalents:
+
+```text
+NativeArray<T>
+NativeList<T>
+NativeHashMap<TKey, TValue>
+NativeParallelHashMap<TKey, TValue>
+NativeParallelMultiHashMap<TKey, TValue>
+NativeQueue<T>
 NativeStream
 ```
 
-`NativeStream` is a safe native container, but it commonly participates in stream, emission, merge, and deterministic materialization workflows.
+Use unsafe containers only when standard containers do not satisfy a documented requirement.
 
-## Non-goals
+## Valid reasons for unsafe code
 
-Atlas does not use low-level native functionality to:
-
-```text
-hide unclear ownership
-bypass invalid field contracts
-bypass runnable compiler validation
-avoid deterministic merge or sort steps
-make every dense field a raw pointer
-make stage code responsible for memory layout
-store managed data in Burst jobs
-expose allocators or pointers through authoring APIs
-make canonical output depend on job scheduling order
-replace standard containers without a correctness or measured performance reason
-```
-
-Low-level native functionality must make the architecture safer, clearer, or measurably better for the target workload.
-
-## Risk tiers
-
-Use the lowest tier that correctly expresses the required ownership and access pattern.
-
-| Tier | Category                                                 | Examples                                                                                                  | Policy                                                                                          |
-| ---: | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-|    0 | Standard safe native containers                          | `NativeArray<T>`, `NativeList<T>`, `NativeBitArray`, `NativeStream`, `NativeParallelHashMap<TKey,TValue>` | Preferred default for normal execution code.                                                    |
-|    1 | Safe containers with unsafe access inside infrastructure | `GetUnsafePtr`, `MemCpy`, `MemClear`, pointer-based hashing over a validated native range                 | Allowed in memory, artifact, hashing, diagnostics, and interop infrastructure.                  |
-|    2 | Unsafe collections                                       | `UnsafeList<T>`, `UnsafeStream`, `UnsafeAppendBuffer`, `UnsafeBitArray`                                   | Allowed for builders, topology construction, diagnostics, and tightly owned infrastructure.     |
-|    3 | Raw unmanaged memory                                     | `UnsafeUtility.Malloc`, `UnsafeUtility.Free`, manually aligned blocks                                     | Prohibited except inside allocator, container, artifact-memory, or external-memory owner types. |
-|    4 | Custom native containers                                 | `[NativeContainer]`, `AtomicSafetyHandle`, custom safety and disposal policy                              | Prohibited until a repeated Atlas invariant cannot be enforced with lower tiers.                |
-
-## Decision rule
-
-A low-level native implementation must satisfy at least one condition:
+Unsafe code may be justified for:
 
 ```text
-Standard native containers cannot represent the required layout.
-Standard native containers cannot represent the required lifetime.
-The data shape requires nested or variable-length topology construction.
-The operation is a memory-range operation, not an element algorithm.
-Atlas must control aliasing beyond what Unity safety can infer.
-Atlas must bridge externally owned or Unity-owned memory without copying.
-A stable package invariant must be encoded in an infrastructure API.
-A benchmark shows material improvement in the target workload.
+specific memory layout
+explicit allocation lifetime
+high-volume topology construction
+controlled aliasing
+memory-range operations
+custom compact graph layouts
+interop with external native data
+artifact serialization layout
+measured target workload performance
+Burst-compatible low-level algorithms
 ```
 
-If none of these conditions apply, use standard native containers.
+Unsafe code is not justified by preference, style, or speculative optimization.
 
-## Measurement rule
+## Required justification
 
-Do not replace a standard native container with an unsafe collection for speculative performance.
+Every unsafe infrastructure type must have a clear reason to exist.
 
-A replacement requires one of:
+Document:
 
 ```text
-a correctness reason
-a lifecycle reason
-an interop reason
-a layout reason
-a benchmark demonstrating material improvement
+owner
+lifetime
+allocation strategy
+disposal strategy
+thread access model
+aliasing rules
+deterministic ordering rules
+safe public surface
+test coverage
+reason standard native containers are insufficient
 ```
 
-Benchmarks must use the relevant:
+Do not merge unsafe code without this ownership model.
+
+## Isolation rule
+
+Unsafe details must be isolated behind infrastructure-owned APIs.
+
+Correct planned boundary:
 
 ```text
-Unity version
-Collections package version
-Burst configuration
-safety-check configuration
-data-size range
-target platform when platform behavior matters
+OperationScheduler
+  -> execution infrastructure
+    -> unsafe topology builder
+      -> frozen deterministic arrays
 ```
 
-A benchmark-only justification is not sufficient when the unsafe design weakens maintainability, ownership, determinism, or testability.
-
-## Default container policy
-
-Use the highest-level Unity native container that correctly expresses ownership and access.
-
-| Data shape                 | Default choice                                 | Escalate only when                                                                 |
-| -------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Dense per-cell field       | `NativeArray<T>` or future typed field storage | Multiple logical fields share a pool and require compiler-resolved address access. |
-| Packed mask                | `NativeBitArray`                               | Custom bit addressing, pooled bit ranges, or packed artifact layout is required.   |
-| Variable-size records      | `NativeList<T>`                                | Records must be nested, arena-owned, or frozen after custom append phases.         |
-| Parallel variable emission | `NativeStream`                                 | Safe stream behavior is insufficient and infrastructure owns the full lifecycle.   |
-| Temporary scratch arrays   | `NativeArray<T>` with execution allocator      | Many allocations share a run, phase, or operation-group lifetime.                  |
-| Graph adjacency            | Frozen `NativeArray<T>` layout                 | Mutable construction requires nested or variable-length builders.                  |
-| Diagnostics                | Typed native lists or streams                  | Heterogeneous event payloads are required.                                         |
-| Artifact data              | Typed arrays and validated field views         | Direct memory-range copy, hash, or internal binary writing is required.            |
-
-## Data structure selection
-
-Atlas chooses data structures by data shape, ownership, lifetime, and determinism requirements.
-
-Dense raster data uses row-major one-dimensional storage. Public APIs and infrastructure APIs may expose coordinate helpers, but canonical dense storage is one-dimensional.
-
-Fixed-degree topology uses direct computation or fixed-stride arrays.
-
-Variable one-to-many topology uses frozen compressed sparse layouts.
-
-Mutable topology builders may use streams, unsafe lists, or native multi-hash maps during construction. They must freeze into deterministic arrays before becoming canonical state.
-
-Connectivity labeling uses union-find, deterministic flood-fill frontiers, or another explicitly ordered labeling algorithm.
-
-Priority propagation uses deterministic heaps, bucket queues, radix-style queues, or another priority structure with explicit tie-breaking.
-
-Spatial lookup uses chunk buckets before tree structures. Trees are reserved for editor tooling, rendering, LOD, sparse spatial acceleration, or cases where chunk buckets are proven insufficient.
-
-Canonical graph state is represented as arrays of nodes, edges, offsets, counts, and values.
-
-Atlas does not use managed object graphs as canonical generation data.
-
-## Placement rule
-
-Low-level native functionality belongs in future infrastructure areas.
-
-Recommended locations:
+Incorrect boundary:
 
 ```text
-Runtime/Memory/
-Runtime/Execution/
-Runtime/Topology/
-Runtime/Diagnostics/
-Runtime/Artifacts/
-Runtime/Interop/
-Runtime/Hashing/
+ResourceDefinition exposes UnsafeList<T>.
+GenerationPlan stores void*.
+OperationContract stores NativeArray<T>.
+GenerationRecipeDefinition owns unsafe buffers.
 ```
 
-Avoid low-level native functionality in current semantic model areas:
-
-```text
-Runtime/Resources/
-Runtime/Stages/
-Runtime/Operations/
-Runtime/Catalog/
-Runtime/Recipes/
-Runtime/Requests/
-Runtime/Plans/
-Runtime/Generation/
-```
-
-These paths express ownership boundaries. They are not mandatory final folder names.
-
-## Canonical data policy
-
-Canonical Atlas state must be:
-
-```text
-ordered
-validated
-hashable
-serializable
-deterministic
-owned by a clear lifetime boundary
-```
-
-Allowed canonical storage patterns include:
-
-```text
-dense typed field pools
-NativeArray<T> fields
-NativeBitArray masks when directly owned
-frozen topology arrays
-explicit record arrays
-artifact-owned immutable payloads
-```
-
-Disallowed canonical storage patterns include:
-
-```text
-raw stream append order
-mutable nested unsafe lists
-schema-less byte buffers
-externally owned memory with unclear lifetime
-scratch-allocator memory
-unvalidated unmanaged memory
-```
-
-Intermediate low-level structures must be normalized before they become canonical state.
-
-## Field pool aliasing
-
-### Policy
-
-Future workspace storage may store multiple logical fields inside shared typed pools.
-
-Example:
-
-```text
-FinalElevation      -> Int32 pool, offset A
-HydrologyElevation  -> Int32 pool, offset B
-Temperature         -> Int32 pool, offset C
-Curvature           -> Int32 pool, offset D
-```
-
-Unity job safety understands native containers. It does not understand Atlas field roles, compiler-resolved bindings, operation write exclusivity, or field-address ranges.
-
-Use an Atlas-owned field address model only when pooled layout creates a real aliasing or layout requirement.
-
-Candidate infrastructure names include:
-
-```text
-AtlasFieldAddress
-AtlasFieldRange
-AtlasFieldPool
-AtlasFieldPoolViews
-AtlasFieldView<T>
-AtlasBitFieldView
-```
-
-These are candidate names, not committed API.
-
-### Required flow
-
-Future pooled field access must follow this boundary:
-
-```text
-ResourceDefinition
-  -> FieldDefinition
-  -> RunnablePlanCompiler field binding
-  -> workspace layout entry
-  -> resolved field address or field range
-  -> validated pool view
-  -> job read/write
-```
-
-Jobs must not resolve field IDs, symbols, resources, field definitions, or workspace entries.
-
-Jobs receive resolved numeric addresses, typed native views, and unmanaged parameters only.
-
-### Allowed use
-
-Use low-level or safety-restricted pool access when:
-
-```text
-multiple logical fields share a native pool
-runnable compiler validation has proven read/write contracts
-Unity safety is too coarse for the Atlas layout
-access can be validated against concrete address and range metadata
-unsafe access is hidden inside package-owned field-view infrastructure
-```
-
-### Disallowed use
-
-Do not use low-level field access when:
-
-```text
-a single NativeArray<T> clearly owns the data
-there is no aliasing problem
-the data is operation-local
-standard containers are equally clear and efficient
-```
+Unsafe APIs must not leak into semantic domain objects.
 
 ## Safety-disabling attributes
 
-Safety-disabling attributes weaken Unity safety checks and are high-risk.
-
-Examples:
-
-```text
-NativeDisableParallelForRestriction
-NativeDisableContainerSafetyRestriction
-NativeDisableUnsafePtrRestriction
-```
-
-### Policy
-
-Use safety-disabling attributes only inside package-owned infrastructure views or explicitly approved exceptions.
-
-Allowed by default only in future infrastructure areas:
-
-```text
-Runtime/Memory/
-Runtime/Execution/
-Runtime/Topology/
-Runtime/Artifacts/
-Runtime/Diagnostics/
-Runtime/Interop/
-```
-
-Disallowed by default in semantic and operation-definition areas:
-
-```text
-Runtime/Resources/
-Runtime/Stages/
-Runtime/Operations/
-Runtime/Catalog/
-Runtime/Recipes/
-Runtime/Requests/
-Runtime/Plans/
-```
-
-A stage or operation job must not directly add a safety-disabling attribute unless an architecture note or decision record defines:
-
-```text
-why standard safety cannot model the access
-which invariant replaces the disabled safety check
-how write ranges are proven unique or synchronized
-which tests cover the exception
-why the exception cannot be moved into infrastructure
-```
-
-## Scratch allocation
-
-### Policy
-
-Use execution-owned scratch allocation for shared temporary lifetimes.
-
-Generation can require many temporary buffers:
-
-```text
-candidate lists
-prefix-sum buffers
-sort buffers
-temporary masks
-graph construction buffers
-basin, ridge, and drainage staging data
-validation scratch
-diagnostic staging
-```
-
-Many of these buffers share one lifecycle: run, phase, operation group, or scheduler chain.
-
-Candidate infrastructure names include:
-
-```text
-AtlasGenerationMemoryScope
-AtlasScratchAllocator
-AtlasExecutionScratch
-AtlasPhaseScratchScope
-AtlasExecutionScope
-```
-
-These are candidate names, not committed API.
-
-### Required ownership
-
-Scratch allocation belongs to future execution infrastructure.
-
-Expected ownership:
-
-```text
-execution scope
-  owns scratch allocator
-    allocates temporary containers
-  completes dependent jobs
-  rewinds or disposes scratch at the scope boundary
-```
-
-Schedulers may request scratch through execution-owned infrastructure.
-
-Jobs must not own scratch disposal.
-
-### Allowed use
-
-Use rewindable or custom scratch allocation when:
-
-```text
-many temporary allocations share a common lifetime
-allocation and disposal code becomes noisy or error-prone
-temporary data does not escape the owning scope
-execution can guarantee all dependent jobs complete before rewind or dispose
-```
-
-### Disallowed use
-
-Do not allocate the following from execution scratch:
-
-```text
-canonical output fields
-durable artifacts
-caller-returned data
-editor preview objects that outlive generation
-managed-object-captured data
-data whose lifetime is not strictly bounded by the owning scope
-```
-
-## Sparse topology
-
-### Policy
-
-Use unsafe or stream-based builders only during topology construction.
-
-Canonical topology must be frozen before canonical execution, hashing, serialization, or artifact writing.
-
-Sparse and variable-length shapes include:
-
-```text
-Region -> many cells
-Basin  -> many outlets
-Node   -> many edges
-River  -> many segments
-Lake   -> many rim cells
-```
+Use safety-disabling attributes only in infrastructure code with explicit ownership.
 
 Examples include:
 
 ```text
-ridge graphs
-drainage graphs
-basin adjacency
-coastline segment membership
-lake rim cells
-river segment chains
-region member lists
-portal and corridor candidate graphs
+NativeDisableContainerSafetyRestriction
+NativeDisableParallelForRestriction
+NativeDisableUnsafePtrRestriction
 ```
 
-### Preferred final representations
+These attributes require justification.
 
-Prefer frozen layouts such as:
+They must not appear in semantic Runtime layers.
+
+They must not be used to silence design issues.
+
+## Allocation rule
+
+Every native allocation must have one clear owner.
+
+Allowed planned owners include:
 
 ```text
-Offsets: NativeArray<int>
-Counts:  NativeArray<int>
-Values:  NativeArray<T>
+GenerationWorkspace
+OperationScheduler
+specialized execution allocator
+topology builder
+artifact writer
+diagnostic capture owner
 ```
 
-Other valid frozen layouts include:
+Disallowed owners include:
 
 ```text
-fixed-stride arrays for bounded-degree topology
-direct grid-neighbor computation for D4/D8 neighbors
-structure-of-arrays for multi-attribute edges
-dense fields for per-cell labels and receivers
-sorted record arrays for small immutable topology
+ResourceDefinition
+StageContract
+OperationContract
+GenerationCatalog
+GenerationRecipeDefinition
+GenerationRequestDescriptor
+GenerationRequest
+GenerationPlan
+StagePlanNode
+OperationPlanNode
 ```
 
-### Required flow
+Allocation and disposal ownership must be paired.
+
+## Disposal rule
+
+The allocation owner disposes the allocation.
+
+Borrowed data must document that it is borrowed.
+
+Transferred data must document the transfer.
+
+Do not rely on finalizers, editor domain reload, scene unload, or process exit for disposal.
+
+Correct:
 
 ```text
-emit or build mutable topology
--> sort deterministically
--> compact
--> freeze into explicit arrays
--> use frozen layout in canonical jobs
+GenerationWorkspace allocates field storage.
+GenerationWorkspace disposes field storage.
 ```
 
-### Allowed use
-
-Use `UnsafeList<T>`, `UnsafeStream`, or builder-owned unsafe memory when:
+Incorrect:
 
 ```text
-the number of outputs per source item is unknown
-construction needs nested variable-length lists
-exact preallocation would be wasteful or complex
-the structure will be frozen before canonical use
-deterministic ordering is restored before hashing or artifact writing
+Operation job allocates persistent memory and no owner disposes it.
+ResourceDefinition owns a NativeArray<T>.
 ```
 
-### Disallowed use
+## Lifetime rule
 
-Do not keep mutable unsafe topology as canonical state.
+Native memory lifetime must be explicit.
 
-Canonical topology must be ordered, validated, hashable, and serializable.
-
-## Parallel variable emission
-
-### Policy
-
-Use stream-based emission for intermediate variable output. Normalize after emission.
-
-Prefer `NativeStream` before `UnsafeStream`.
-
-Use `UnsafeStream` only when a proven infrastructure constraint requires the unsafe variant.
-
-Examples of variable emission:
+Common planned lifetimes:
 
 ```text
-coastline edge extraction
-river candidate extraction
-basin boundary crossing detection
-validation event collection
-contour generation
-diagnostic sample emission
-mesh primitive staging
+operation scratch lifetime
+stage lifetime
+generation run lifetime
+artifact export lifetime
+external borrowed lifetime
+diagnostic capture lifetime
 ```
 
-### Required flow
+Do not store native pointers or containers beyond their declared lifetime.
+
+Do not store execution lifetime objects in reusable definitions.
+
+## Borrowing rule
+
+Borrowed native data must not be disposed by the borrower.
+
+A borrowed binding must define:
 
 ```text
-parallel emit
--> merge
--> sort by canonical key
--> compact
--> write stable output
+owner
+valid lifetime
+read/write permissions
+thread access permissions
+required alignment
+required length
+shape assumptions
 ```
 
-Canonical keys must be explicit.
+External fields are planned borrowed or caller-owned data unless explicitly transferred.
+
+## Aliasing rule
+
+Aliasing must be explicit.
+
+If two views can reference overlapping memory, document:
+
+```text
+whether reads overlap writes
+whether writes overlap writes
+which jobs may run in parallel
+which dependencies prevent hazards
+which container restrictions are disabled
+```
+
+Do not disable safety checks without proving the aliasing model.
+
+## Thread access rule
+
+Thread access must be explicit and deterministic.
+
+Define:
+
+```text
+single-writer or multi-writer policy
+read-only views
+parallel write partitioning
+dependency requirements
+atomic requirements
+merge order
+tie-breaking
+```
+
+Parallel algorithms must not depend on nondeterministic race order.
+
+## Deterministic ordering rule
+
+Unsafe and native algorithms must preserve deterministic output.
+
+Do not depend on:
+
+```text
+hash-map enumeration order
+thread scheduling order
+pointer address order
+allocation order
+uninitialized memory
+current time
+global random state
+Unity object instance ID
+```
+
+When output order matters, define explicit ordering or a deterministic freeze step.
+
+## Freeze rule
+
+Mutable low-level builders must freeze into deterministic canonical data before becoming accepted output.
+
+Correct:
+
+```text
+mutable topology builder
+  -> deterministic sort
+  -> compact offsets/counts/values arrays
+  -> canonical topology
+```
+
+Incorrect:
+
+```text
+mutable hash map enumeration becomes canonical output
+```
+
+Canonical output must be ordered, validated, hashable, serializable, and lifetime-owned.
+
+## Canonical data rule
+
+Canonical generation data must be:
+
+```text
+deterministically ordered
+validated
+lifetime-owned
+hashable when needed
+serializable when needed
+free of transient builder state
+free of unmanaged pointer identity
+```
+
+Canonical graph state uses arrays of:
+
+```text
+nodes
+edges
+offsets
+counts
+values
+```
+
+Do not use managed object graphs as canonical generation data.
+
+## Dense raster data
+
+Dense raster data uses row-major one-dimensional storage.
+
+Correct:
+
+```text
+index = z * width + x
+```
+
+Use one-dimensional storage as the canonical layout.
+
+Coordinate helpers may exist at API boundaries, but storage remains one-dimensional.
+
+Avoid jagged arrays, multidimensional managed arrays, and per-cell managed objects for canonical runtime data.
+
+## Fixed-degree topology
+
+Fixed-degree topology should use direct computation or fixed-stride arrays.
 
 Examples:
 
 ```text
-cell index
-source region id
-target region id
-edge key
-segment key
-water body id
-river id
-operation-local sequence key
+4-neighbor grid
+8-neighbor grid
+fixed corner list
+fixed edge list
 ```
 
-### Allowed use
+Do not allocate variable lists when the degree is known and fixed.
 
-Use stream-based emission when:
+## Variable topology
+
+Variable one-to-many topology uses compressed sparse layouts after construction.
+
+Canonical representation:
 
 ```text
-each worker emits a variable amount of data
-exact output counts are expensive or awkward to precompute
-emitted output is intermediate
-deterministic merge, sort, or freeze is part of the operation contract
+offsets
+counts
+values
 ```
 
-### Disallowed use
+Mutable builders may use streams, lists, or multi-hash maps during construction.
 
-Do not use raw parallel append order as:
+They must freeze into deterministic arrays before canonical use.
+
+## Connectivity labeling
+
+Connectivity labeling must use deterministic algorithms.
+
+Allowed approaches include:
 
 ```text
-artifact order
-hash order
-canonical record order
-gameplay-visible order
-test-expected order
+union-find with deterministic tie-breaking
+deterministic flood-fill frontiers
+explicitly ordered region-growing
 ```
 
-Parallel emission order is not a domain contract.
+Do not allow thread timing or unordered containers to determine label identity.
 
-## Bulk memory operations
+## Priority propagation
 
-### Policy
+Priority propagation must use deterministic priority structures.
 
-Use direct memory operations only in infrastructure utilities.
-
-Examples:
+Allowed approaches include:
 
 ```text
-clear an entire field
-copy a field into an artifact
-copy a field into a diagnostic snapshot
-compare two field buffers
-hash a contiguous field range
-initialize a buffer with a repeated byte pattern
-move a memory range inside a staging buffer
+deterministic binary heaps
+bucket queues
+radix-style queues
+explicitly ordered frontiers
 ```
 
-Candidate infrastructure names include:
+Tie-breaking must be explicit.
+
+Do not rely on insertion order unless insertion order is explicitly deterministic and tested.
+
+## Spatial lookup
+
+Use chunk buckets before trees.
+
+Trees are reserved for:
 
 ```text
-AtlasMemoryUtility
-AtlasFieldClearUtility
-AtlasFieldCopyUtility
-AtlasFieldCompareUtility
-AtlasFieldHashUtility
-AtlasArtifactFieldWriter
+editor tooling
+rendering
+LOD
+sparse spatial acceleration
+cases where chunk buckets are proven insufficient
 ```
 
-These are candidate names, not committed API.
+Do not introduce tree structures for dense grid workloads without evidence.
 
-### Allowed operations
+## Managed object graph rule
+
+Do not use managed object graphs as canonical generation data.
+
+Incorrect canonical data:
 
 ```text
-clear
-copy
-move
-compare
-hash
-zero-fill
-byte-pattern fill
+class Region
+{
+    List<Region> Neighbors;
+    List<Cell> Cells;
+}
 ```
 
-The infrastructure owner must validate:
+Correct canonical data:
 
 ```text
-pointer validity
-byte length
-element count
-storage format
-field range
-source and destination ownership
-overlap behavior
-job dependencies
-initialization requirements
+NativeArray<int> regionNeighborOffsets
+NativeArray<int> regionNeighborCounts
+NativeArray<int> regionNeighborValues
+NativeArray<int> regionCellOffsets
+NativeArray<int> regionCellCounts
+NativeArray<int> regionCellValues
 ```
 
-Use `MemMove` semantics, not `MemCpy` semantics, when ranges may overlap.
+Managed object graphs may be useful for editor visualization or tests, but not as canonical runtime generation state.
 
-### Allowed use
+## Burst compatibility
 
-Use memory-range operations when:
+Future execution data structures should be Burst-compatible unless there is a documented reason.
+
+Prefer:
 
 ```text
-the operation is format-independent
-no per-element domain logic is required
-the memory range is contiguous
-source and destination ownership is clear
-the operation belongs to workspace reset, artifact writing, hashing, diagnostics, or interop
+unmanaged structs
+native containers
+explicit lengths
+explicit allocators
+math types from Unity.Mathematics
 ```
 
-### Disallowed use
-
-Do not use raw memory operations when:
+Avoid:
 
 ```text
-values need conversion
-values need clamping
-values need semantic validation
-element semantics matter
-layout is not trivially copyable
-byte order or public schema encoding matters
+managed references
+virtual dispatch
+delegates
+LINQ
+exceptions inside jobs
+managed collections
+string operations
+UnityEngine.Object references
 ```
 
-## Artifact writing and hashing
+Burst-compatible code must remain deterministic.
 
-### Policy
+## Job input rule
 
-Artifacts are durable. Their layout and hashes must be based on stable metadata and stable memory ranges.
+Jobs receive native containers and unmanaged values only.
 
-Use compiled artifact layout metadata to write and hash artifacts.
-
-Candidate infrastructure names include:
+Correct planned job inputs:
 
 ```text
-AtlasArtifactBuilder
-AtlasArtifactFieldWriter
-AtlasArtifactHashBuilder
-AtlasArtifactLayout
-AtlasArtifactFieldRecord
+NativeArray<float> elevation
+NativeArray<byte> mask
+int width
+int depth
+uint seed
 ```
 
-These are candidate names, not committed API.
-
-### Required flow
+Incorrect planned job inputs:
 
 ```text
-compiled artifact field list
--> validate field address
--> copy or encode field data
--> update hash in stable field order
--> write artifact metadata
--> seal artifact
+GenerationPlan plan
+ResourceDefinition resource
+FieldDefinition field
+GenerationWorkspace workspace
+OperationScheduler scheduler
+Symbol symbol
+DisplayName displayName
 ```
 
-### Raw memory artifact rule
+Resolve metadata before scheduling jobs.
 
-Raw memory copies are allowed for internal artifact sections only when the artifact schema defines:
+## Interop rule
 
-```text
-field format
-element size
-byte order
-alignment assumptions
-version
-section length
-hash order
-migration policy
-```
+Interop code must be isolated.
 
-Public, cross-version, cross-platform, or presentation payloads must use explicit encoding.
-
-### Allowed use
-
-Use low-level memory access for artifacts when:
+Interop APIs must document:
 
 ```text
-writing dense final fields into internal sections
-writing frozen topology arrays
-hashing stable memory ranges
-copying final records with fixed schema
-serializing binary payload sections whose schema explicitly allows byte-copy encoding
-```
-
-### Disallowed use
-
-Do not write raw memory directly when:
-
-```text
-the artifact requires version migration
-canonical and presentation formats differ
-byte order is unspecified
-the section has a public schema requiring explicit encoding
-the payload must be stable across platforms that may represent data differently
-```
-
-## Diagnostics and operation traces
-
-### Policy
-
-Diagnostics are optional, variable, and often heterogeneous. They do not belong in canonical fields unless explicitly normalized and promoted.
-
-Examples:
-
-```text
-validation events
-rejected candidates
-sampled field values
-operation timing
-stage trace events
-topology debug output
-```
-
-Use typed diagnostic streams or append buffers behind typed writer APIs.
-
-Candidate infrastructure names include:
-
-```text
-AtlasDiagnosticEvent
-AtlasDiagnosticEventStream
-AtlasOperationTraceBuffer
-AtlasValidationEventBuffer
-AtlasDiagnosticPayloadWriter
-```
-
-These are candidate names, not committed API.
-
-### Required API shape
-
-Do not expose raw append buffers to stage or operation code.
-
-Expose typed methods such as:
-
-```text
-WriteValidationError(...)
-WriteRejectedCandidate(...)
-WriteStageMetric(...)
-WriteSample(...)
-```
-
-### Allowed use
-
-Use append buffers or diagnostic streams when:
-
-```text
-diagnostic payloads are variable-size
-event volume is high
-events are collected from jobs
-diagnostics are excluded from canonical output
-a typed writer preserves schema discipline
-```
-
-### Disallowed use
-
-Do not let diagnostics become a schema-less byte dump.
-
-If a diagnostic event matters long-term, define its schema.
-
-## External memory and Unity API bridges
-
-### Policy
-
-Use external-memory wrappers only at package boundaries.
-
-Some APIs expose or require memory Atlas does not own directly:
-
-```text
-native plugin memory
-generated artifact blob views
-mesh data upload paths
-image or texture transfer paths
-editor inspection tools over native buffers
-```
-
-Candidate infrastructure names include:
-
-```text
-AtlasNativeArrayAdapter
-AtlasExternalMemoryView
-AtlasArtifactMemoryView
-AtlasMeshDataBridge
-```
-
-These are candidate names, not committed API.
-
-### Required ownership
-
-External memory wrappers must state ownership explicitly:
-
-```text
-Atlas-owned
-Unity-owned
-native-plugin-owned
-caller-owned
-external-owned
-```
-
-### Allowed use
-
-Use external-memory wrappers when:
-
-```text
-memory is already allocated by another system
-copying is expensive and unnecessary
-lifetime can be proven
-safety handles or access rules can be assigned correctly
-the wrapper is short-lived and boundary-local
-```
-
-### Disallowed use
-
-Do not make external memory the default Atlas field storage model.
-
-If most Atlas fields require external-memory wrapping, the workspace ownership model is wrong.
-
-## Raw unmanaged allocation
-
-### Policy
-
-Direct `UnsafeUtility.Malloc` and `UnsafeUtility.Free` are prohibited except inside reviewed owner types.
-
-Prefer this order:
-
-```text
-standard native containers
-standard native containers allocated through an execution-owned allocator
-RewindableAllocator for run-scoped or phase-scoped scratch
-unsafe collections owned by builders or infrastructure
-raw unmanaged allocation inside a reviewed owner type
-```
-
-### Required owner behavior
-
-Any type that performs raw unmanaged allocation must define:
-
-```text
-allocator used
-byte size
+ownership
+pinning
 alignment
-initialization policy
-disposal policy
-ownership transfer policy
-job dependency policy
-leak detection policy
-debug validation policy
+endianness
+lifetime
+copy versus borrow behavior
+thread access
+error handling
 ```
 
-Raw unmanaged memory is not zero-initialized unless the owner explicitly initializes it.
+Interop pointers must not leak into semantic domain objects.
 
-## Custom native containers
+## Artifact layout rule
 
-### Policy
+Artifact serialization may require explicit binary layouts.
 
-Custom native containers are prohibited until a repeated Atlas invariant cannot be enforced with lower tiers.
+Artifact layout code must be separate from semantic definitions.
 
-Before creating a custom native container, prefer:
+Correct planned boundary:
 
 ```text
-standard native containers
-plain unmanaged views
-field addresses
-validated infrastructure APIs
-compiler-validated binding
-execution-scope lifecycle
-tests
+workspace data
+  -> artifact writer
+  -> serialized artifact
 ```
 
-Candidate future containers include:
+Incorrect boundary:
 
 ```text
-AtlasNativeFieldView<T>
-AtlasNativeBitFieldView
-AtlasNativeRecordArena<T>
-AtlasNativeArtifactBuilder
-AtlasNativeSparseAdjacency<T>
+ResourceDefinition writes binary artifact bytes.
+GenerationPlan owns artifact buffer.
 ```
 
-These are candidates, not a plan.
+## Diagnostics rule
 
-### Approval requirements
+Diagnostics may capture native execution details.
 
-A custom native container requires an architecture decision record or equivalent architecture note that defines:
+Diagnostics must not force semantic objects to depend on execution infrastructure.
+
+Correct planned diagnostics:
 
 ```text
-the invariant being encoded
-why existing native containers are insufficient
-ownership and lifetime
-safety-handle behavior
-disposal behavior
-aliasing behavior
-Burst and job support
-required tests
-migration path from existing infrastructure
+workspace allocation summary
+scheduler timing summary
+captured diagnostic field
+operation validation report
 ```
 
-## Required invariants
-
-Every low-level native type in Atlas must document and enforce these invariants.
-
-### Ownership
-
-The type must state who owns memory.
-
-Valid ownership examples:
+Incorrect current diagnostics:
 
 ```text
-workspace-owned
-execution-scratch-owned
-artifact-owned
-Unity-owned
-native-plugin-owned
-caller-owned
-external-owned
+GenerationPlan stores scheduler timings.
+OperationContract stores debug NativeArray<T>.
 ```
 
-### Lifetime
+## Error handling rule
 
-The type must state when memory is valid.
+Unsafe infrastructure must fail predictably.
 
-Valid lifetime examples:
+Invalid API usage should throw before scheduling jobs.
+
+Expected execution failures should use planned structured execution results or diagnostics.
+
+Examples of invalid API usage:
 
 ```text
-valid until workspace dispose
-valid until execution scope rewind
-valid until artifact builder seal
-valid until dependent job completes
-valid only during adapter scope
+disposed workspace access
+field handle from wrong workspace
+invalid allocation length
+unsupported field layout
+null required metadata
 ```
 
-### Access mode
-
-The type must state its access mode.
-
-Valid access modes:
+Examples of expected execution failures:
 
 ```text
-read-only
-write-only
-read-write
-append-only
-freeze-then-read
-copy-only
-hash-only
+external field missing
+operation convergence failure
+allocation rejected by policy
+diagnostic validation failure
 ```
 
-### Ordering
+## Testing rule
 
-The type must state whether order is stable.
-
-Valid ordering examples:
+Unsafe and low-level infrastructure requires tests for:
 
 ```text
-stable by field index
-stable by cell index
-stable by canonical key
-stable after sort
-stable after freeze
-not stable; diagnostics only
+allocation and disposal
+ownership transfer
+borrowed data lifetime
+deterministic ordering
+freeze output ordering
+parallel safety assumptions
+aliasing assumptions
+invalid handle rejection
+wrong workspace rejection
+disposed access rejection
+boundary sizes
+zero-length cases where allowed
+large workload cases
 ```
 
-### Safety boundary
+Tests must verify deterministic output across repeated runs.
 
-The type must state where unsafe access is allowed.
+## Documentation rule
 
-Valid safety boundaries:
+Future unsafe infrastructure must remain documented as planned until implemented.
+
+Correct:
 
 ```text
-Runtime/Memory only
-Runtime/Execution only
-Runtime/Topology builder only
-Runtime/Artifacts only
-Runtime/Diagnostics only
-Runtime/Interop only
+Unsafe topology builders are planned execution infrastructure.
 ```
 
-Unsafe access must not spread across stage, operation, catalog, recipe, request, or managed-plan code.
-
-## Required tests
-
-Low-level native infrastructure must be covered by tests before production generation code uses it.
-
-Required test categories:
+Incorrect:
 
 ```text
-allocation and disposal tests
-double-dispose behavior tests when applicable
-invalid range tests
-invalid format tests
-overlapping copy tests
-initialization and default-value tests
-deterministic order tests
-deterministic hash tests
-Burst-compiled job tests
-safety-check-enabled editor tests
-leak detection tests
-dispose-after-job-dependency tests
-rewind-after-complete tests
-use-after-rewind negative tests where practical
-artifact round-trip tests where artifact memory is involved
-external-memory ownership tests where external wrapping is involved
-safety-disabled aliasing proof tests where NativeDisable* attributes are used
+Atlas currently stores topology in UnsafeList<T>.
 ```
 
-Performance-motivated unsafe code also requires benchmarks for:
+Do not document unsafe internals as current Runtime behavior before code exists.
+
+## Invalid placements
+
+Do not implement these:
 
 ```text
-target data size
-target allocator mode
-Burst enabled
-safety checks enabled and disabled when relevant
-editor and player when behavior differs materially
-target platform when platform behavior matters
+ResourceDefinition.NativeArray
+ResourceDefinition.FieldHandle
+StageContract.NativeInput
+OperationContract.NativeOutput
+GenerationCatalog.NativeStorage
+GenerationRecipeDefinition.UnsafeBuffers
+GenerationRequestDescriptor.NativeArray
+GenerationRequest.Workspace
+GenerationPlan.JobHandle
+StagePlanNode.ExecuteUnsafe()
+OperationPlanNode.UnsafePtr
 ```
+
+These violate semantic Runtime boundaries.
 
 ## Review checklist
 
-Use this checklist before adding low-level native functionality.
-
-### Design review
+Before adding unsafe or low-level native code, verify:
 
 ```text
-Does this solve a real layout, lifetime, topology, bulk-memory, aliasing, artifact, or interop problem?
-Could a standard Native* container express the same thing clearly?
-Is unsafe code isolated in infrastructure?
-Is ownership explicit?
-Is lifetime explicit?
-Is access mode explicit?
-Is deterministic order explicit?
-Is there a validated API above the unsafe implementation?
-Can the unsafe implementation be replaced without changing authoring contracts or semantic definitions?
+Standard native containers are insufficient.
+The unsafe owner is an execution infrastructure type.
+The allocation owner is explicit.
+The disposal owner is explicit.
+Borrowed versus owned data is documented.
+Thread access is documented.
+Aliasing is documented.
+Safety-disabling attributes are justified.
+Output ordering is deterministic.
+Mutable builders freeze into canonical arrays.
+Canonical data is validated.
+Jobs receive only native containers and unmanaged values.
+Semantic Runtime objects do not expose unsafe details.
+Tests cover lifetime, determinism, aliasing, and invalid access.
 ```
-
-### Job safety review
-
-```text
-Are jobs given resolved numeric views?
-Are owning workspaces excluded from job structs?
-Are managed objects excluded from job structs?
-Are pointer ranges validated before scheduling?
-Are write ranges unique or synchronized?
-Are dependencies chained correctly?
-Is disposal or rewind delayed until dependent jobs complete?
-Are safety-disabling attributes confined to approved infrastructure?
-```
-
-### Determinism review
-
-```text
-Does output order depend on job scheduling?
-Is there a deterministic merge, sort, or freeze step?
-Is artifact order compiler-defined?
-Is hash order stable?
-Are diagnostics excluded from canonical output unless explicitly normalized?
-Does the design avoid current time, frame count, thread timing, and unmanaged memory addresses as generation identity?
-```
-
-### Memory review
-
-```text
-Is allocation size checked?
-Is alignment correct?
-Is initialization explicit?
-Is dispose or rewind guaranteed?
-Is overlapping copy handled correctly?
-Are external ownership rules explicit?
-Are debug checks enabled in editor and development builds?
-```
-
-### API review
-
-```text
-Is the public API semantic rather than pointer-based?
-Are raw pointers hidden from stage and operation code?
-Are contracts free of memory ownership?
-Are operation definitions free of allocator details?
-Are jobs free of managed domain metadata?
-Are unsafe details hidden behind package-owned infrastructure?
-```
-
-## Anti-patterns
-
-### Raw pointer stages
-
-Bad:
-
-```text
-Stage receives void* elevation and byte offsets.
-```
-
-Good:
-
-```text
-Future scheduler prepares validated field views and schedules jobs with resolved native data.
-```
-
-### Unsafe as performance decoration
-
-Bad:
-
-```text
-Use UnsafeList<T> because it sounds faster.
-```
-
-Good:
-
-```text
-Use UnsafeList<T> during topology construction because nested variable-length construction is required, then freeze to deterministic arrays.
-```
-
-### Parallel append as canonical order
-
-Bad:
-
-```text
-Record order follows ParallelWriter append order.
-```
-
-Good:
-
-```text
-Parallel emit -> deterministic sort -> compact -> canonical record order.
-```
-
-### Scratch data escaping scope
-
-Bad:
-
-```text
-Return a NativeArray<T> allocated from generation scratch.
-```
-
-Good:
-
-```text
-Copy durable results into artifact-owned or caller-owned memory before execution scope disposal.
-```
-
-### Schema-less diagnostics
-
-Bad:
-
-```text
-Write arbitrary bytes into an append buffer from stage code.
-```
-
-Good:
-
-```text
-Expose typed diagnostic writer methods with stable event schemas.
-```
-
-### Direct NativeDisable in operation jobs
-
-Bad:
-
-```text
-An operation job disables safety checks directly because the scheduler currently works.
-```
-
-Good:
-
-```text
-The infrastructure view carries the safety exception, documents the invariant, and is covered by aliasing and job-safety tests.
-```
-
-### Custom container too early
-
-Bad:
-
-```text
-Create AtlasNativeEverything before field bindings, workspace layout, and scheduler ownership are stable.
-```
-
-Good:
-
-```text
-Use standard containers, field addresses, and validated infrastructure first. Introduce custom containers only when a stable repeated invariant requires them.
-```
-
-## Documentation rules
-
-Current architecture documents may mention low-level native functionality only as future execution infrastructure.
-
-Do not document unsafe collections as current resource, stage, operation, catalog, recipe, request, or plan behavior.
-
-Do not describe `ResourceDefinition` as storage.
-
-Do not describe `GenerationPlan` as executable job data.
-
-Do not describe stage or operation contracts as field or memory contracts.
-
-Implementation order belongs in `Plans/Implementation Plan.md`, not in this policy document.
 
 ## Summary
 
-Atlas is safe by default and low-level only by necessity.
+Use managed accepted objects for semantic architecture.
 
-Use standard Unity native containers for ordinary execution code.
+Use standard native containers by default for execution.
 
-Use unsafe collections and low-level memory APIs only inside infrastructure that owns memory layout, lifetime, aliasing, topology construction, artifact writing, diagnostics, hashing, or interop.
+Use unsafe and low-level memory only in planned execution infrastructure when there is a documented structural or measured performance reason.
 
-Semantic contracts stay resource-definition-based.
-
-Runnable compilation resolves semantic meaning into executable bindings.
-
-The workspace owns memory.
-
-Schedulers own orchestration.
-
-Jobs receive resolved native views and unmanaged values only.
-
-Unsafe code must make ownership clearer, determinism stronger, or infrastructure measurably better. It must not leak into authoring, definitions, requests, plans, or ordinary generation logic.
-
-```
+Keep unsafe implementation details out of resources, stages, operations, catalogs, recipes, requests, and managed plans.

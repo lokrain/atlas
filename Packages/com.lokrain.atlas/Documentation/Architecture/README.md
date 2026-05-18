@@ -1,202 +1,399 @@
-# Lokrain.Atlas architecture documentation
+# Glossary
 
-This directory contains the architecture documentation for Lokrain.Atlas.
+This glossary defines Lokrain.Atlas architecture terms.
 
-The documentation defines the package model, ownership boundaries, naming rules, dependency rules, error-handling rules, planned execution boundaries, and implementation order.
+Terms in the **Future terms** section describe planned architecture. They are not implemented Runtime behavior unless corresponding Runtime code exists.
 
-The current Runtime architecture is managed architecture. It ends at `GenerationPlan`.
+## Current terms
 
-Future execution architecture is documented separately and must not be treated as implemented Runtime behavior until corresponding Runtime code exists.
+### Accepted object
 
-## Current Runtime scope
+An object that has validated the invariants owned by its own type.
 
-The current Runtime architecture includes:
+An accepted object can still be rejected by a higher-level owner when catalog ownership, graph consistency, dependency order, or descriptor satisfiability is invalid.
 
-- core value objects;
-- generation schemas;
-- semantic resource definitions;
-- stage kinds and operation kinds;
-- stage definitions, stage routes, and stage route steps;
-- operation definitions and operation implementation definitions;
-- stage and operation contracts;
-- generation recipes;
-- immutable generation catalogs;
-- generation run settings;
-- symbolic generation request descriptors;
-- operation implementation override descriptors;
-- request resolution into accepted generation requests;
-- request resolution results and errors;
-- managed generation plan compilation;
-- managed generation plans.
+### Assembly boundary
 
-The current Runtime architecture does not allocate native storage, compile runnable execution metadata, create field handles, schedule jobs, execute Burst jobs, produce artifacts, or integrate with ECS execution.
+A Unity assembly definition boundary.
 
-## Planned execution scope
+Assembly boundaries control which code can reference Runtime APIs, Editor APIs, tests, samples, Unity APIs, Burst, Jobs, Collections, ECS/DOTS, and generation modules.
 
-The following concepts are planned architecture:
+### Authoring adapter
 
-- `FieldDefinition`;
-- `FieldDefinitionSet`;
-- execution profiles;
-- runnable plan compilation;
-- `RunnablePlan`;
-- runnable stages and runnable operations;
-- field bindings;
-- field handles;
-- `GenerationWorkspace`;
-- native storage allocation;
-- scratch memory ownership;
-- operation scheduling;
-- dependency wiring;
-- Burst job execution;
-- unsafe memory infrastructure;
-- generated artifacts;
-- execution diagnostics;
-- ECS execution integration.
+A Unity-facing asset, importer, editor object, or tool that translates authored data into descriptors or accepted definitions.
 
-Future concepts must be documented as planned architecture. They must not be described as current Runtime behavior unless the corresponding Runtime code exists.
+Authoring adapters are not canonical Runtime state.
 
-## Architecture map
+### Builder
 
-```mermaid
-flowchart TD
-    A[GenerationRequestDescriptor<br/>symbolic run input] --> B[GenerationRequestResolver]
-    C[GenerationCatalog<br/>accepted definition inventory] --> B
+A mutable object used to assemble an accepted immutable object.
 
-    B --> D[GenerationRequestResolutionResult]
-    D --> E[GenerationRequest<br/>accepted resolved run input]
-    E --> F[GenerationPlanCompiler]
-    F --> G[GenerationPlan<br/>managed semantic plan]
+`GenerationCatalogBuilder` collects candidate definitions and creates a `GenerationCatalog` after catalog validation succeeds.
 
-    G --> H[RunnablePlanCompiler<br/>planned]
-    I[FieldDefinitionSet<br/>planned] --> H
-    J[Execution profiles<br/>planned] --> H
+### Catalog ownership
 
-    H --> K[RunnablePlan<br/>planned executable metadata]
-    K --> L[GenerationWorkspace<br/>planned native storage owner]
-    L --> M[OperationScheduler<br/>planned execution owner]
-    M --> N[Burst jobs<br/>planned deterministic transforms]
-```
+The relationship between a `GenerationCatalog` and the accepted definition instances it exposes.
 
-## Documentation structure
+Catalog ownership is reference-exact. Two definitions with the same symbol are not interchangeable when only one instance belongs to a catalog.
 
-### Overview
+### Cell
 
-| File | Purpose |
-| --- | --- |
-| `Overview/Atlas Architecture Overview.md` | Introduces the package architecture, major layers, and current/planned boundary. |
-| `Overview/Managed Generation Pipeline.md` | Explains descriptor resolution, accepted requests, and managed plan compilation. |
+A map coordinate with `X` and `Z` components.
 
-### Concepts
+A cell is inside a grid only when validated against that grid.
 
-| File | Purpose |
-| --- | --- |
-| `Concepts/Accepted Domain Object Model.md` | Defines accepted objects, descriptors, result objects, validation boundaries, and construction rules. |
-| `Concepts/Catalog Recipe Request and Plan Model.md` | Explains how catalog inventory, recipes, request descriptors, accepted requests, and plans relate. |
-| `Concepts/Resource Field and Workspace Boundary.md` | Defines the boundary between semantic resources, planned field definitions, and planned native workspace storage. |
+### CellIndex
 
-### Guidelines
+A row-major flattened map cell index.
 
-| File | Purpose |
-| --- | --- |
-| `Guidelines/Architecture Rules.md` | Defines validity, ownership, layering, and boundary rules. |
-| `Guidelines/Naming Guidelines.md` | Defines naming rules for public API, domain concepts, symbols, resources, and generation definitions. |
-| `Guidelines/Dependency Rules.md` | Defines allowed dependency direction between package layers. |
-| `Guidelines/Error Handling Rules.md` | Defines when APIs throw and when they return result objects. |
+A cell index is inside a grid only when validated against that grid.
 
-### Reference
+### Contract
 
-| File | Purpose |
-| --- | --- |
-| `Reference/Glossary.md` | Defines architecture terminology without design rationale or implementation plans. |
+Managed planning metadata that describes semantic resource flow.
 
-### Future
-
-| File | Purpose |
-| --- | --- |
-| `Future/Field Definition and Execution Profiles.md` | Defines the planned storage-facing field model and execution profile boundary. |
-| `Future/Runnable Plan Compilation.md` | Defines the planned compiler from managed plans to executable metadata. |
-| `Future/Scheduler Workspace and Job Ownership.md` | Defines planned ownership of native storage, scheduling, scratch memory, dependencies, and jobs. |
-| `Future/Low-Level Native Memory and Unsafe Collections.md` | Defines planned policy for native containers, unsafe collections, low-level memory APIs, canonical data, and data structure selection. |
-
-### Decisions
-
-| File | Purpose |
-| --- | --- |
-| `Decisions/ResourceDefinition Before FieldDefinition.md` | Records why semantic resources are modeled before storage-facing field definitions. |
-
-### Plans
-
-| File | Purpose |
-| --- | --- |
-| `Plans/Implementation Plan.md` | Defines ordered implementation work. |
-
-## Documentation ownership
-
-Overview documents explain the architecture.
-
-Concept documents teach the model.
-
-Guideline documents define rules.
-
-Reference documents define terms.
-
-Future documents describe planned architecture that is not implemented.
-
-Decision documents record accepted rationale, rejected options, and deferrals.
-
-Plan documents define ordered work.
-
-## Documentation rules
-
-Architecture documents describe the required design in present tense.
-
-Current architecture documents must not describe completed migration work, obsolete names, or previous designs as part of the active model.
-
-Planned concepts must be explicitly marked as planned architecture.
-
-The glossary defines terms only. It does not argue for design choices, duplicate guideline rules, or contain implementation steps.
-
-Naming guidelines stay focused on names. Ownership, validity, dependency, and error-handling rules belong in their dedicated guideline documents.
-
-Implementation plans do not redefine architecture. They reference architecture documents and describe concrete work order.
-
-## Primary Runtime invariants
-
-Accepted domain objects are valid after construction.
-
-Descriptors are symbolic input. They are not accepted requests.
-
-Result objects represent expected boundary failures.
-
-Catalogs own accepted definition objects and validate exact ownership.
-
-Catalog ownership is reference-exact. Symbol equality does not make a definition catalog-owned.
-
-Recipes describe generation templates. They do not represent one generation run.
-
-Requests describe one accepted resolved generation run. They contain accepted definitions and final implementation choices.
-
-Requests contain no unresolved symbols.
-
-Plans are managed semantic data.
-
-Plans contain no native execution state, field handles, job handles, dependency handles, scheduler bindings, or executable job data.
-
-`ResourceDefinition` describes the semantic identity of a generated value.
-
-Stage and operation contracts define semantic resource flow.
-
-Contracts use `ResourceDefinition` inputs and outputs.
+Stage and operation contracts use `ResourceDefinition` inputs and outputs.
 
 Contracts do not define storage.
 
-`FieldDefinition` is planned storage-facing metadata.
+### Definition
 
-Native containers belong to planned workspace execution, not catalogs, recipes, requests, plans, stages, operations, or resources.
+Accepted reusable package inventory.
 
-Schedulers own planned execution control flow, dependency wiring, scratch allocation, and job scheduling.
+Definitions describe reusable domain concepts such as schemas, resources, stages, routes, route steps, operations, implementations, and recipes.
 
-Jobs receive native containers and unmanaged values only.
+Definitions do not represent one generation run.
 
-Jobs must not depend on symbols, catalogs, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.
+### Descriptor
+
+A symbolic input object that describes intent before catalog resolution.
+
+A descriptor validates its own structure. Its symbols may still be unresolved for a specific catalog.
+
+### DisplayName
+
+Validated user-facing text used for editor UI, diagnostics, reports, and documentation.
+
+A display name is metadata. It is not identity and is not used for lookup.
+
+### Error object
+
+A structured object that describes a failure.
+
+Error objects are used inside result objects for expected boundary failures.
+
+### GenerationCatalog
+
+An immutable accepted inventory of generation definitions and contracts.
+
+A generation catalog provides lookup, discovery, ownership validation, and graph validation for accepted definitions.
+
+### GenerationCatalogBuilder
+
+A mutable assembly surface for building a `GenerationCatalog`.
+
+The builder accepts candidate definitions and delegates final catalog invariants to catalog creation.
+
+### Generation module
+
+A package area that owns built-in definitions, contracts, recipes, and descriptor factories for a generation domain.
+
+The current built-in generation module is `Lokrain.Atlas.Generation.Landmass`.
+
+### GenerationPlan
+
+An accepted managed semantic plan for one generation run.
+
+A generation plan contains run settings, the selected recipe, and ordered stage plan nodes.
+
+A generation plan contains no native storage, job handles, scheduler state, field handles, or executable job data.
+
+### GenerationPlanCompiler
+
+The managed compiler that transforms an accepted `GenerationRequest` into a `GenerationPlan`.
+
+### GenerationRecipeDefinition
+
+A reusable accepted generation template.
+
+A generation recipe has a symbol, display name, schema, selected stage routes, and default route-step implementation choices.
+
+### GenerationRequest
+
+Accepted resolved generation intent for one run.
+
+A generation request contains accepted definitions, run settings, and final operation implementation choices.
+
+A generation request contains no unresolved symbols.
+
+### GenerationRequestDescriptor
+
+A symbolic descriptor for generation intent.
+
+A generation request descriptor contains a recipe symbol, run settings, and optional symbolic operation implementation overrides.
+
+### GenerationRequestResolutionError
+
+A structured error describing why a request descriptor cannot be satisfied by a catalog.
+
+### GenerationRequestResolutionResult
+
+A result object containing either an accepted `GenerationRequest` or one or more `GenerationRequestResolutionError` values.
+
+### GenerationRequestResolver
+
+The boundary that converts symbolic generation intent into accepted generation intent.
+
+The resolver uses a `GenerationCatalog` and a `GenerationRequestDescriptor`.
+
+### GenerationRunSettings
+
+Generation-wide settings for one run.
+
+Current run settings contain a `Grid` and a `Seed`.
+
+### GenerationSchemaDefinition
+
+An accepted definition for a generation family.
+
+A schema provides semantic context for resources, stages, operations, recipes, and generation modules.
+
+### Grid
+
+The horizontal map grid for one generation run.
+
+A grid has `Width`, `Depth`, `CellCount`, and `LastIndexValue`.
+
+`Width` is the horizontal X dimension. `Depth` is the horizontal Z dimension.
+
+### Landmass
+
+The current built-in generation module for continental landmass planning definitions.
+
+### OperationContract
+
+A resource-definition-based input/output contract for an operation.
+
+An operation contract is managed planning metadata.
+
+### OperationDefinition
+
+An accepted definition of semantic generation work.
+
+An operation definition belongs to a schema and an operation kind.
+
+### OperationImplementationDefinition
+
+An accepted selectable implementation option for an operation definition.
+
+An operation implementation definition identifies an implementation choice. It does not execute work by itself.
+
+### OperationImplementationOverrideDescriptor
+
+A symbolic descriptor that overrides the selected implementation for one recipe route step.
+
+### OperationKind
+
+A semantic category of operation.
+
+### OperationPlanNode
+
+A compiler-created operation node inside a `StagePlanNode`.
+
+An operation plan node represents one selected route-step operation and its selected implementation metadata.
+
+### Recipe
+
+A reusable generation template.
+
+In Runtime APIs, the concrete recipe type is `GenerationRecipeDefinition`.
+
+### ResourceDefinition
+
+An accepted semantic definition of a generated value.
+
+Stage and operation contracts use resource definitions to declare required inputs and produced outputs.
+
+A resource definition does not describe storage layout.
+
+### Result object
+
+An object that represents the outcome of a boundary where failure is expected.
+
+Result objects expose structured errors for normal negative outcomes.
+
+### Runtime
+
+Player-safe package code under `Runtime/`.
+
+Current managed domain and planning Runtime code does not depend on `UnityEngine` or `UnityEditor`.
+
+### Seed
+
+The deterministic root seed for one generation run.
+
+A zero seed is valid.
+
+### StageContract
+
+A resource-definition-based input/output contract for a stage.
+
+A stage contract is managed planning metadata.
+
+### StageDefinition
+
+An accepted definition of a generation stage.
+
+A stage definition belongs to a schema and has a stage kind, symbol, and display name.
+
+### StageKind
+
+A semantic category of generation stage.
+
+### StagePlanNode
+
+A compiler-created stage node inside a `GenerationPlan`.
+
+A stage plan node represents one selected stage, its selected route, its stage contract, and its ordered operation plan nodes.
+
+### StageRouteChoice
+
+An accepted recipe choice binding a stage to the route and contract selected for that stage.
+
+### StageRouteDefinition
+
+An accepted ordered route for satisfying a stage.
+
+A stage route owns an ordered list of route-step definitions.
+
+### StageRouteStepDefinition
+
+An accepted operation occurrence inside a stage route.
+
+A route step has its own stable symbol so the same operation definition can appear multiple times with distinct per-occurrence identity.
+
+### StageRouteStepImplementationChoice
+
+An accepted choice binding a route-step occurrence to the selected operation definition, operation contract, and operation implementation definition for that occurrence.
+
+### Symbol
+
+A stable machine-facing token.
+
+A symbol is identity text for lookup, catalog membership, descriptor resolution, and artifact compatibility.
+
+## Future terms
+
+### Artifact
+
+A planned captured generation output intended for tooling, diagnostics, persistence, preview, export, or consumer use.
+
+### Canonical field
+
+A planned durable generated field that represents authoritative generated map truth for a resource.
+
+### Diagnostic field
+
+A planned validation, debug, or tooling field.
+
+Diagnostic field capture depends on execution profile policy.
+
+### Execution profile
+
+A planned named configuration for selecting storage representation, capture behavior, scheduler binding, or implementation-specific execution policy.
+
+### External field
+
+A planned caller-provided, importer-provided, or tooling-provided field bound into a generation run.
+
+### FieldDefinition
+
+A planned storage-facing definition for a resource.
+
+A field definition describes how a semantic resource is represented for execution.
+
+### FieldDefinitionSet
+
+A planned accepted collection of field definitions used by runnable plan compilation.
+
+### Field handle
+
+A planned execution-time handle used to address workspace-owned field storage.
+
+### Field shape
+
+The planned spatial or structural shape of a field.
+
+Examples include cell-grid fields, scalar fields, sparse fields, and payload-specific shapes.
+
+### Field value kind
+
+The planned stored value category of a field.
+
+Examples include scalar values, indexed values, masks, vectors, ranges, and payload-specific values.
+
+### GenerationWorkspace
+
+The planned native storage owner for one generation run.
+
+A workspace owns allocation, access, and disposal of generated fields and execution-owned temporary storage.
+
+### Job
+
+A planned deterministic Burst-compatible transform over resolved native data.
+
+Jobs receive native containers and unmanaged values.
+
+### Native storage
+
+Planned allocated native data for one generation run.
+
+Native storage is owned by the execution workspace.
+
+### Operation scratch
+
+Planned private scheduler-owned native temporary storage.
+
+Operation scratch is not canonical generated data.
+
+### OperationScheduler
+
+The planned execution controller for one runnable operation.
+
+An operation scheduler owns operation execution control flow, dependency wiring, scratch allocation, job scheduling, repeated chains, termination policy, and failure policy.
+
+### Runnable operation
+
+A planned executable operation node created from managed planning metadata.
+
+A runnable operation contains execution metadata and field bindings needed by the scheduler.
+
+### Runnable plan
+
+Planned executable metadata compiled from a `GenerationPlan`.
+
+A runnable plan bridges managed semantic planning and native execution.
+
+### RunnablePlanCompiler
+
+The planned compiler that transforms a managed `GenerationPlan`, field definitions, and execution profiles into a `RunnablePlan`.
+
+### Runnable stage
+
+A planned executable stage node created from managed planning metadata.
+
+A runnable stage groups runnable operations for execution.
+
+### Scheduler binding
+
+A planned binding between runnable metadata, workspace storage, and operation scheduler execution.
+
+### Temporary field
+
+A planned intermediate field used during execution.
+
+A temporary field is not part of the canonical generated output unless explicitly captured by policy.
+
+### Workspace allocation
+
+A planned allocation made by `GenerationWorkspace` for canonical fields, temporary fields, external fields, diagnostic fields, or scratch storage.

@@ -1,270 +1,67 @@
 # Catalog, recipe, request, and plan model
 
-The managed generation model separates reusable package inventory from one generation run.
+This article explains how Lokrain.Atlas moves from reusable generation definitions to one accepted managed generation plan.
 
-The model has four main layers:
+Current Runtime architecture ends at `GenerationPlan`.
+
+Runnable execution, native storage, scheduler ownership, jobs, artifacts, and ECS integration are planned architecture and are not part of the current model.
+
+## Model summary
+
+Lokrain.Atlas separates reusable inventory from per-run intent.
+
+Reusable inventory is stored in a `GenerationCatalog`.
+
+A `GenerationRecipeDefinition` selects reusable routes, contracts, and default implementation choices.
+
+A `GenerationRequestDescriptor` describes caller intent with symbols.
+
+A `GenerationRequestResolver` resolves the descriptor against a catalog.
+
+A `GenerationRequest` is accepted resolved intent for one run.
+
+A `GenerationPlanCompiler` compiles the request into a managed `GenerationPlan`.
 
 ```text
 GenerationCatalog
-        |
-        v
-GenerationRecipeDefinition
-        |
-        v
-GenerationRequestDescriptor
-        |
-        v
-GenerationRequest
-        |
-        v
-GenerationPlan
-````
+  + GenerationRequestDescriptor
+    -> GenerationRequestResolver
+    -> GenerationRequestResolutionResult
+    -> GenerationRequest
+    -> GenerationPlanCompiler
+    -> GenerationPlan
+```
 
-Each layer has a different job.
+## GenerationCatalog
 
-| Layer              | Purpose                                          |
-| ------------------ | ------------------------------------------------ |
-| Catalog            | Accepted package inventory and lookup.           |
-| Recipe             | Reusable generation template.                    |
-| Request descriptor | Symbolic caller intent for one run.              |
-| Request            | Accepted resolved generation intent for one run. |
-| Plan               | Managed semantic operation order for one run.    |
+`GenerationCatalog` is immutable accepted inventory.
 
-Do not collapse these layers.
+It owns accepted definition instances and validates graph consistency.
 
-## Catalog
+A catalog contains reusable definitions and contracts:
 
-`GenerationCatalog` is the immutable accepted inventory of available generation definitions.
-
-It owns accepted definitions for:
-
-```text id="vexyew"
+```text
 GenerationSchemaDefinition
 ResourceDefinition
+StageKind
 StageDefinition
 StageRouteDefinition
 StageRouteStepDefinition
 StageContract
+OperationKind
 OperationDefinition
 OperationContract
 OperationImplementationDefinition
 GenerationRecipeDefinition
+StageRouteChoice
+StageRouteStepImplementationChoice
 ```
 
-The catalog provides symbol lookup and validates graph consistency.
+A catalog does not represent one generation run.
 
-The catalog is not a request, not a recipe, not a plan, and not an execution context.
+A catalog does not contain:
 
-## Catalog ownership
-
-A catalog owns the accepted definition instances it exposes.
-
-Catalog-owned objects must reference definitions owned by the same catalog. Cross-catalog object reuse is invalid.
-
-Correct model:
-
-```text id="h9nydj"
-catalog A
-  schema A
-  resource A
-  stage A
-  operation A
-  recipe A
-```
-
-Invalid model:
-
-```text id="4y7uoq"
-catalog A
-  recipe A
-    references stage from catalog B
-    references resource from catalog B
-    references operation implementation from catalog B
-```
-
-Catalog ownership is stricter than symbol equality.
-
-Two definitions with the same symbol are not interchangeable when they belong to different catalog instances.
-
-## Catalog validation
-
-The catalog validates consistency that cannot be owned by individual definitions.
-
-Catalog-level validation includes:
-
-```text id="yak742"
-unique symbols within each definition category
-schema ownership consistency
-resource ownership consistency
-stage ownership consistency
-route and route-step consistency
-operation and implementation compatibility
-contract resource ownership
-recipe stage-route consistency
-recipe route-step implementation consistency
-cross-catalog object reuse
-```
-
-Definition constructors validate local invariants.
-
-The catalog validates object graph invariants.
-
-## Catalog builder
-
-`GenerationCatalogBuilder` is the mutable assembly surface for building a catalog.
-
-The builder may collect definitions over multiple calls.
-
-The accepted catalog is created only after catalog-level validation succeeds.
-
-Correct responsibility split:
-
-```text id="xup29t"
-GenerationCatalogBuilder -> collect candidate definitions
-GenerationCatalog        -> immutable accepted inventory
-```
-
-The builder must not be treated as the catalog.
-
-The catalog must not expose builder-owned mutable state.
-
-## Schema
-
-`GenerationSchemaDefinition` defines a generation family.
-
-A schema provides semantic context for resources, stages, operations, implementations, and recipes.
-
-Definitions that belong to a generation family reference a schema.
-
-A schema is not a recipe and not a run.
-
-## Resource
-
-`ResourceDefinition` defines the semantic identity of a generated value.
-
-Resources are used by stage and operation contracts.
-
-A resource answers:
-
-```text id="hsohx8"
-what generated value is required or produced
-```
-
-A resource does not answer:
-
-```text id="nbrb6s"
-how the value is stored
-which native container owns it
-which scheduler writes it
-which job reads it
-which artifact captures it
-```
-
-Storage and execution details belong to future field/workspace architecture.
-
-## Stage
-
-`StageDefinition` defines a semantic generation phase.
-
-A stage belongs to a schema and has a `StageKind`.
-
-A stage is not a route, not an operation, not a scheduler, and not a job.
-
-A stage can have one or more routes.
-
-## Stage route
-
-`StageRouteDefinition` defines one ordered way to satisfy a stage.
-
-A route owns ordered route steps.
-
-A route belongs to one stage.
-
-A route is selected by a recipe.
-
-## Stage route step
-
-`StageRouteStepDefinition` defines one operation occurrence inside a route.
-
-A route step references an `OperationDefinition`.
-
-The route step has its own symbol because occurrence identity matters.
-
-This allows the same operation definition to appear multiple times in one route while preserving independent implementation choices.
-
-Correct model:
-
-```text id="gnmxbn"
-route
-  step A -> operation X
-  step B -> operation X
-```
-
-`step A` and `step B` are different route-step occurrences even when they use the same operation definition.
-
-## Operation
-
-`OperationDefinition` defines semantic generation work.
-
-An operation belongs to a schema and has an `OperationKind`.
-
-An operation is not an implementation and not executable code.
-
-An operation can have one or more implementation definitions.
-
-## Operation implementation
-
-`OperationImplementationDefinition` defines a selectable implementation option for an operation.
-
-It identifies a choice, not executable job code.
-
-Current implementation definitions are managed metadata used by recipe selection, request override resolution, and plan compilation.
-
-Future execution architecture may bind an implementation definition to scheduler bindings and runnable operations.
-
-## Contracts
-
-`StageContract` and `OperationContract` declare semantic resource flow.
-
-They use `ResourceDefinition` inputs and outputs.
-
-Correct model:
-
-```text id="kwldpz"
-StageContract
-  RequiredInputs  -> ResourceDefinition list
-  ProducedOutputs -> ResourceDefinition list
-
-OperationContract
-  RequiredInputs  -> ResourceDefinition list
-  ProducedOutputs -> ResourceDefinition list
-```
-
-Contracts must not use raw symbol lists for resource flow.
-
-Contracts must not own field definitions, native containers, scheduler bindings, or job dependencies.
-
-## Recipe
-
-`GenerationRecipeDefinition` is a reusable generation template.
-
-A recipe contains:
-
-```text id="evch9i"
-Symbol
-DisplayName
-GenerationSchemaDefinition
-StageRouteChoice list
-StageRouteStepImplementationChoice list
-```
-
-A recipe selects which route satisfies each stage and which default implementation satisfies each selected route step.
-
-A recipe does not represent one generation run.
-
-A recipe must not contain:
-
-```text id="uqmsoi"
+```text
 Grid
 Seed
 GenerationRunSettings
@@ -272,19 +69,99 @@ GenerationRequestDescriptor
 GenerationRequest
 GenerationPlan
 native storage
-scheduler state
+field handles
 job handles
+scheduler state
 ```
 
-The same recipe can be used by many requests with different run settings and implementation overrides.
+## Catalog ownership
 
-## Stage route choice
+Catalog ownership is reference-exact.
 
-`StageRouteChoice` binds a stage to the route selected for that stage.
+A definition belongs to a catalog only when that exact instance is owned by the catalog.
 
-It contains:
+Symbol-equivalent definitions are not interchangeable.
 
-```text id="tzf9pi"
+Correct:
+
+```text
+Catalog owns ResourceDefinition instance A.
+
+OperationContract.RequiredInputs contains instance A.
+```
+
+Incorrect:
+
+```text
+Catalog owns ResourceDefinition instance A.
+
+OperationContract.RequiredInputs contains ResourceDefinition instance B.
+
+A.Symbol == B.Symbol.
+```
+
+Instance B is not catalog-owned.
+
+## GenerationCatalogBuilder
+
+`GenerationCatalogBuilder` is mutable assembly state.
+
+Use it to collect candidate definitions.
+
+Call `Build` to create an immutable validated `GenerationCatalog`.
+
+```text
+GenerationCatalogBuilder
+  AddGenerationSchemaDefinition(...)
+  AddResourceDefinition(...)
+  AddStageDefinition(...)
+  AddOperationDefinition(...)
+  AddGenerationRecipeDefinition(...)
+  Build()
+```
+
+The builder is not accepted inventory.
+
+The catalog is accepted inventory.
+
+Mutating a builder after building a catalog must not mutate the catalog.
+
+## GenerationRecipeDefinition
+
+`GenerationRecipeDefinition` is a reusable generation template.
+
+A recipe selects:
+
+```text
+generation schema
+stage route choices
+default route-step implementation choices
+```
+
+A recipe does not describe one generation run.
+
+A recipe does not contain:
+
+```text
+Grid
+Seed
+GenerationRunSettings
+GenerationRequestDescriptor
+GenerationRequest
+GenerationPlan
+native storage
+job scheduling
+```
+
+The same recipe can be used for many runs.
+
+## StageRouteChoice
+
+`StageRouteChoice` selects the route and stage contract used for one stage in a recipe.
+
+It binds:
+
+```text
 StageDefinition
 StageRouteDefinition
 StageContract
@@ -292,497 +169,396 @@ StageContract
 
 The selected route must belong to the selected stage.
 
-The stage contract describes the semantic resources required and produced by that stage.
+The selected contract must belong to the selected stage.
 
-## Route-step implementation choice
+## StageRouteStepImplementationChoice
 
-`StageRouteStepImplementationChoice` binds a route-step occurrence to the selected implementation for that occurrence.
+`StageRouteStepImplementationChoice` selects the operation, contract, and implementation for one route-step occurrence.
 
-It contains:
+It binds:
 
-```text id="iivxir"
+```text
 StageRouteStepDefinition
 OperationDefinition
 OperationContract
 OperationImplementationDefinition
 ```
 
-The selected implementation must belong to the operation used by the route step.
+The route step identifies the operation definition by symbol.
 
-The operation contract describes the semantic resources required and produced by that operation.
+The selected operation contract must belong to the selected operation definition.
 
-## Recipe defaults
+The selected implementation definition must belong to the selected operation definition.
 
-A recipe owns default implementation choices for its selected route steps.
+## Route-step occurrence identity
 
-A request may override those defaults through `OperationImplementationOverrideDescriptor`.
+Route steps have their own symbols.
 
-Overrides are per route-step occurrence, not per operation definition.
+Implementation choices and implementation overrides target route-step symbols, not operation symbols.
 
-Correct override target:
+This allows the same operation definition to appear multiple times in one route.
 
-```text id="udibzx"
-StageRouteStepDefinition.Symbol
+Correct:
+
+```text
+RouteStep A -> Operation X -> Implementation Fast
+RouteStep B -> Operation X -> Implementation Accurate
 ```
 
-Incorrect override target:
+Incorrect:
 
-```text id="yzqv21"
-OperationDefinition.Symbol
-OperationKind.Symbol
-OperationImplementationDefinition.Symbol only
+```text
+Operation X -> Implementation Fast
 ```
 
-Targeting the route-step occurrence is required because the same operation definition may appear multiple times in one route.
+The incorrect model cannot distinguish repeated operation occurrences.
 
-## Request descriptor
+## Resource flow
 
-`GenerationRequestDescriptor` is symbolic caller intent for one generation run.
+Stage and operation contracts use `ResourceDefinition`.
+
+Contracts describe semantic resource flow.
+
+Contracts do not describe storage.
+
+Example operation flow:
+
+```text
+EvaluateContinentSuitability
+  produces ContinentSuitability
+
+FormContinentCandidate
+  requires ContinentSuitability
+  produces ContinentCandidate
+
+ExtractMainContinent
+  requires ContinentCandidate
+  produces MainContinent
+```
+
+A selected route is valid only when each operation’s required inputs are available before the operation runs and the stage’s produced outputs are available after the route completes.
+
+## GenerationRequestDescriptor
+
+`GenerationRequestDescriptor` is symbolic caller intent.
 
 It contains:
 
-```text id="z73m2g"
+```text
 GenerationRecipeDefinitionSymbol
 GenerationRunSettings
 OperationImplementationOverrideDescriptor list
 ```
 
-The descriptor validates its own structure.
+A descriptor can be structurally valid before it is resolved against a catalog.
 
-The descriptor does not prove that the requested recipe or override symbols exist in a catalog.
+A descriptor may reference symbols that are not present in a specific catalog.
 
 A descriptor is not an accepted request.
 
-## Operation implementation override descriptor
+## OperationImplementationOverrideDescriptor
 
-`OperationImplementationOverrideDescriptor` is a symbolic override.
+`OperationImplementationOverrideDescriptor` is a symbolic override for one selected route step.
 
 It contains:
 
-```text id="3itsdn"
+```text
 StageRouteStepDefinitionSymbol
 OperationImplementationDefinitionSymbol
 ```
 
-The override says:
+The override target is a route-step symbol.
 
-```text id="l0ms18"
-for this selected route-step occurrence, use this implementation
-```
+The override value is an operation-implementation symbol.
 
-It does not directly contain accepted route-step or implementation objects.
+The resolver validates whether the override can be applied to the selected recipe and catalog.
 
-Resolution converts the symbolic override into an accepted `StageRouteStepImplementationChoice`.
+## GenerationRequestResolver
 
-## Run settings
+`GenerationRequestResolver` resolves symbolic caller intent into accepted run intent.
 
-`GenerationRunSettings` contains per-run deterministic settings.
+It uses:
 
-Current settings include:
-
-```text id="y66y87"
-Grid
-Seed
-```
-
-Run settings belong to the request descriptor and accepted request.
-
-Run settings do not belong to the catalog or recipe.
-
-## Request resolution
-
-`GenerationRequestResolver` converts a descriptor into an accepted request by using a catalog.
-
-Input:
-
-```text id="8byzue"
+```text
 GenerationCatalog
 GenerationRequestDescriptor
 ```
 
-Output:
+It produces:
 
-```text id="1112kn"
+```text
 GenerationRequestResolutionResult
 ```
 
-The resolver validates that:
+The resolver owns descriptor satisfiability.
 
-```text id="6asgly"
-the requested recipe exists in the catalog
-the selected recipe is catalog-owned
-override route-step symbols exist in the selected recipe
+It checks:
+
+```text
+the recipe symbol exists in the catalog
+override route-step symbols are selected by the recipe
 override implementation symbols exist in the catalog
-override implementations belong to the operation used by the targeted route step
-the final implementation choice set is complete
+override implementations belong to the operation required by the target route step
+final implementation choices are valid for the recipe
 ```
 
-The resolver owns catalog satisfiability.
+Resolver failures are expected boundary failures.
 
-The plan compiler should not repeat normal descriptor resolution.
+They are returned as structured resolution errors, not thrown as exceptions.
 
-## Resolution result
+## GenerationRequestResolutionResult
 
-`GenerationRequestResolutionResult` represents either success or expected resolution failure.
+`GenerationRequestResolutionResult` represents request-resolution output.
 
-Success contains:
+On success:
 
-```text id="iaq0cv"
-GenerationRequest
+```text
+Succeeded == true
+Failed == false
+GenerationRequest != null
+Errors is empty
 ```
 
-Failure contains:
+On failure:
 
-```text id="len019"
-GenerationRequestResolutionError list
+```text
+Succeeded == false
+Failed == true
+GenerationRequest == null
+Errors is not empty
 ```
 
-Expected resolution failures use structured errors instead of exceptions.
+Resolution errors use stable error-code symbols.
 
-Examples:
+## GenerationRequest
 
-```text id="skijhh"
-missing recipe symbol
-missing override target route-step symbol
-missing implementation symbol
-implementation incompatible with targeted route-step operation
-duplicate override target
-```
-
-Invalid API usage still throws.
-
-Examples:
-
-```text id="p70x0y"
-null catalog
-null descriptor
-invalid constructor arguments
-```
-
-## Accepted request
-
-`GenerationRequest` is resolved generation intent for one run.
+`GenerationRequest` is accepted resolved generation intent for one run.
 
 It contains:
 
-```text id="c7c4rj"
+```text
 GenerationRecipeDefinition
 GenerationRunSettings
 StageRouteStepImplementationChoice list
 ```
 
-An accepted request has no unresolved symbols.
+A request contains accepted definitions.
 
-It contains the final implementation choices after applying recipe defaults and descriptor overrides.
+A request contains final implementation choices.
 
-A request is not a plan. It does not define ordered execution nodes beyond the selected recipe and final choices.
+A request contains no unresolved symbols.
 
-A request must not contain:
+A request is still managed semantic input. It does not allocate native storage or execute work.
 
-```text id="e0ldf6"
-native containers
-field definitions
-field handles
-scheduler bindings
-job handles
-dependency handles
-Burst job data
+## GenerationRunSettings
+
+`GenerationRunSettings` contains run-specific settings.
+
+Current run settings contain:
+
+```text
+Grid
+Seed
 ```
 
-## Plan compiler
+Run settings belong to descriptors, requests, and plans.
 
-`GenerationPlanCompiler` converts an accepted request into a managed plan.
+Run settings do not belong to reusable definitions or recipes.
 
-Input:
+Correct:
 
-```text id="4uzx3f"
-GenerationRequest
+```text
+GenerationRequestDescriptor -> GenerationRunSettings
+GenerationRequest -> GenerationRunSettings
+GenerationPlan -> GenerationRunSettings
 ```
 
-Output:
+Incorrect:
 
-```text id="h2dl6v"
-GenerationPlan
+```text
+GenerationRecipeDefinition -> GenerationRunSettings
+StageDefinition -> Grid
+OperationDefinition -> Seed
 ```
 
-The compiler expands the accepted recipe choices into ordered stage and operation plan nodes.
+## GenerationPlanCompiler
 
-The compiler consumes accepted objects. It does not resolve descriptor symbols through the catalog during normal compilation.
+`GenerationPlanCompiler` converts an accepted `GenerationRequest` into a managed `GenerationPlan`.
 
-## Generation plan
+The compiler owns managed plan construction.
 
-`GenerationPlan` is managed semantic generation work for one run.
+It creates:
+
+```text
+StagePlanNode
+OperationPlanNode
+```
+
+It preserves route-step operation order.
+
+It orders stage plan nodes by semantic dependencies.
+
+Independent stages use recipe order as the stable tie-breaker.
+
+The compiler does not resolve descriptor symbols. Resolution already happened before request construction.
+
+The compiler does not allocate native storage or schedule jobs.
+
+## GenerationPlan
+
+`GenerationPlan` is accepted managed semantic planning output.
 
 It contains:
 
-```text id="vkx5px"
+```text
 GenerationRecipeDefinition
+GenerationSchemaDefinition
 GenerationRunSettings
 StagePlanNode list
 ```
 
-The plan preserves explicit ordering.
+A plan contains accepted definitions and semantic order.
 
-A plan is still managed metadata. It is not a runnable plan and not executable job data.
+A plan contains no unresolved symbols.
 
-## Stage plan node
+A plan contains no executable job data.
 
-`StagePlanNode` represents one selected stage in the managed plan.
+A plan does not contain:
+
+```text
+FieldDefinition
+RunnablePlan
+GenerationWorkspace
+OperationScheduler
+NativeArray<T>
+JobHandle
+Entity
+UnityEngine.Object
+```
+
+A generation plan is not a runnable plan.
+
+## StagePlanNode
+
+`StagePlanNode` represents one selected stage in a managed plan.
 
 It contains:
 
-```text id="cwmtw0"
+```text
 StageDefinition
 StageRouteDefinition
 StageContract
 OperationPlanNode list
 ```
 
-The stage plan node preserves the selected route and ordered operations for the stage.
+A stage plan node is compiler-created semantic data.
 
-## Operation plan node
+It does not execute the stage.
 
-`OperationPlanNode` represents one selected route-step operation in the managed plan.
+## OperationPlanNode
+
+`OperationPlanNode` represents one selected operation occurrence in a managed plan.
 
 It contains:
 
-```text id="li7cdr"
+```text
 StageRouteStepDefinition
 OperationDefinition
 OperationContract
 OperationImplementationDefinition
 ```
 
-The operation plan node preserves the route-step occurrence, operation, contract, and selected implementation.
+An operation plan node is compiler-created semantic data.
 
-An operation plan node is not a scheduler and not a job.
+It does not execute the operation.
 
-## Full managed flow
+## End-to-end flow
 
-```text id="ocyzm9"
-GenerationCatalog
-  owns definitions and recipes
+The current managed flow is:
 
-GenerationRecipeDefinition
-  selects stage routes and default route-step implementations
+```text
+1. Build or obtain a GenerationCatalog.
+2. Create a GenerationRequestDescriptor.
+3. Resolve the descriptor with GenerationRequestResolver.
+4. Inspect GenerationRequestResolutionResult.
+5. Use the accepted GenerationRequest on success.
+6. Compile the request with GenerationPlanCompiler.
+7. Use the GenerationPlan as managed semantic planning output.
+```
 
-GenerationRequestDescriptor
-  names recipe symbol and override symbols
+Example:
 
-GenerationRequestResolver
-  resolves descriptor through catalog
+```text
+GenerationCatalog catalog =
+  LandmassGenerationCatalog.CreateCatalog();
 
-GenerationRequest
-  contains accepted recipe, settings, and final implementation choices
+GenerationRequestDescriptor descriptor =
+  LandmassGenerationRequests.CreatePrimaryContinentalLandmass(grid, seed);
 
-GenerationPlanCompiler
-  expands request into ordered managed plan nodes
+GenerationRequestResolutionResult result =
+  resolver.Resolve(catalog, descriptor);
 
+GenerationRequest request =
+  result.GenerationRequest;
+
+GenerationPlan plan =
+  compiler.Compile(request);
+```
+
+## Failure boundaries
+
+Invalid API usage throws.
+
+Expected descriptor-resolution failure returns a result object.
+
+Catalog construction failure throws.
+
+Examples:
+
+| Scenario | Boundary |
+| --- | --- |
+| Null required constructor argument | Exception |
+| Invalid symbol text in `Create` | Exception |
+| Unknown recipe symbol during resolution | Failed result |
+| Unknown override implementation symbol | Failed result |
+| Invalid catalog graph | Exception |
+| Invalid final request choices | Exception |
+
+## Current and planned boundary
+
+Current architecture stops here:
+
+```text
 GenerationPlan
-  contains semantic managed work for one run
 ```
 
-## Current execution boundary
+Planned execution starts after this point:
 
-The managed model ends at `GenerationPlan`.
-
-The following concepts are outside the current implemented managed model:
-
-```text id="xfzrxh"
-FieldDefinition
-ExecutionProfile
-RunnablePlanCompiler
-RunnablePlan
-RunnableOperation
-SchedulerBinding
-GenerationWorkspace
-FieldHandle
-OperationScheduler
-NativeArray<T>
-JobHandle
-Burst jobs
+```text
+GenerationPlan
+  -> RunnablePlanCompiler
+  -> RunnablePlan
+  -> GenerationWorkspace
+  -> OperationScheduler
+  -> Jobs
 ```
 
-Do not add these concepts to catalog, recipe, request, or plan objects as current state.
+Do not add planned execution responsibilities to current catalog, recipe, request, or plan objects.
 
-## Correct dependencies
+## Summary
 
-Correct dependency direction:
+`GenerationCatalog` owns reusable accepted inventory.
 
-```text id="9xa7p8"
-core values
-  -> definitions
-  -> catalog
-  -> request descriptor
-  -> resolver
-  -> request
-  -> plan compiler
-  -> plan
-```
+`GenerationRecipeDefinition` defines reusable generation templates.
 
-Definitions may reference core values.
+`GenerationRequestDescriptor` describes symbolic caller intent.
 
-Catalogs may reference definitions.
+`GenerationRequestResolver` resolves descriptors against catalogs.
 
-Descriptors may reference symbols and run settings.
+`GenerationRequest` represents accepted run intent.
 
-Resolvers may reference catalogs and descriptors.
+`GenerationPlanCompiler` creates managed semantic plans.
 
-Requests may reference accepted recipe choices and run settings.
+`GenerationPlan` is the current Runtime endpoint.
 
-Plans may reference accepted request data.
-
-Lower layers must not reference higher layers.
-
-## Incorrect dependencies
-
-Do not introduce these dependencies:
-
-```text id="2jbp7y"
-ResourceDefinition -> GenerationCatalog
-StageContract -> FieldDefinition
-OperationContract -> NativeArray<T>
-GenerationRecipeDefinition -> GenerationRunSettings
-GenerationCatalog -> GenerationRequest
-GenerationRequestDescriptor -> GenerationCatalog
-GenerationRequest -> GenerationPlan
-GenerationPlan -> RunnablePlan
-GenerationPlan -> JobHandle
-OperationPlanNode -> NativeContainer
-Job -> Symbol
-Job -> GenerationCatalog
-```
-
-Each dependency crosses an ownership boundary incorrectly.
-
-## Object identity summary
-
-| Object                              | Identity                         |
-| ----------------------------------- | -------------------------------- |
-| `Symbol`                            | Text value.                      |
-| `DisplayName`                       | Text value, presentation only.   |
-| `GenerationSchemaDefinition`        | Symbol.                          |
-| `ResourceDefinition`                | Symbol.                          |
-| `StageDefinition`                   | Symbol.                          |
-| `StageRouteDefinition`              | Symbol.                          |
-| `StageRouteStepDefinition`          | Symbol.                          |
-| `OperationDefinition`               | Symbol.                          |
-| `OperationImplementationDefinition` | Symbol.                          |
-| `GenerationRecipeDefinition`        | Symbol.                          |
-| `GenerationRequestDescriptor`       | Structural symbolic intent.      |
-| `GenerationRequest`                 | Accepted run intent.             |
-| `GenerationPlan`                    | Accepted managed plan structure. |
-
-Display names must not define identity.
-
-Unity object identity must not define package-domain identity.
-
-## Ordering summary
-
-Ordering is explicit where order affects generation semantics.
-
-Ordered objects include:
-
-```text id="4wme71"
-route steps
-stage route choices
-route-step implementation choices
-stage plan nodes
-operation plan nodes
-resolution errors
-```
-
-Unordered lookup data must not leak nondeterministic enumeration order into plans.
-
-When an unordered collection is transformed into ordered output, the ordering rule must be explicit and stable.
-
-## Resource-flow summary
-
-Resource flow is semantic in the current model.
-
-```text id="xas4dy"
-ResourceDefinition
-  -> StageContract
-  -> OperationContract
-  -> GenerationPlan
-```
-
-The current model says which semantic values are required or produced.
-
-The future execution model will decide how those resources map to storage-facing field definitions, native containers, scheduler bindings, and jobs.
-
-## Design checklist
-
-Use this checklist when adding or changing catalog, recipe, request, or plan code.
-
-The change belongs to `GenerationCatalog` when it affects:
-
-```text id="iv2p0f"
-accepted inventory
-definition lookup
-symbol uniqueness
-catalog ownership
-definition graph consistency
-```
-
-The change belongs to `GenerationRecipeDefinition` when it affects:
-
-```text id="mgk8p7"
-reusable generation templates
-selected stage routes
-default route-step implementation choices
-recipe metadata
-```
-
-The change belongs to `GenerationRequestDescriptor` when it affects:
-
-```text id="0co2s9"
-symbolic caller intent
-selected recipe symbol
-per-run settings
-implementation override symbols
-```
-
-The change belongs to `GenerationRequestResolver` when it affects:
-
-```text id="r93q0z"
-descriptor satisfiability
-catalog symbol lookup
-override target resolution
-implementation compatibility
-resolution errors
-```
-
-The change belongs to `GenerationRequest` when it affects:
-
-```text id="zq1h89"
-accepted resolved run intent
-final implementation choices
-run settings after resolution
-```
-
-The change belongs to `GenerationPlanCompiler` or `GenerationPlan` when it affects:
-
-```text id="0x8hw4"
-managed semantic ordering
-stage plan nodes
-operation plan nodes
-plan construction from accepted requests
-```
-
-The change does not belong to this model when it affects:
-
-```text id="kz99zn"
-native allocation
-field handles
-scheduler bindings
-job dependencies
-Burst job structs
-ECS execution systems
-artifact capture
-workspace disposal
-```
-
-Those belong to future execution architecture.
-
-```
+Execution is planned after `GenerationPlan`.

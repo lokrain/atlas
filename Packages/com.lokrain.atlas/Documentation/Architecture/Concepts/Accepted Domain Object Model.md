@@ -1,31 +1,30 @@
 # Accepted domain object model
 
-Lokrain.Atlas uses accepted domain objects to keep validation, ownership, and generation semantics explicit.
+This article explains the accepted domain object model used by Lokrain.Atlas.
 
-An accepted object has already validated the invariants it owns. Downstream code may rely on those invariants without repeating the same checks.
+An accepted domain object is an object that has validated the invariants owned by its own type before callers can observe it.
 
-Accepted objects are not necessarily globally valid in every context. A catalog can still reject an individually valid definition when it violates catalog ownership, uniqueness, schema membership, or graph consistency.
+## Model summary
 
-## Object categories
+Lokrain.Atlas uses explicit domain objects instead of loose dictionaries, primitive strings, mutable bags, or Unity object identity.
 
-Atlas Runtime uses these domain object categories:
+The model separates:
 
-| Category | Purpose |
-| --- | --- |
-| Core value object | Validated reusable value with package-owned semantics. |
-| Definition | Accepted reusable package inventory. |
-| Descriptor | Symbolic caller intent before catalog resolution. |
-| Result object | Structured success/failure result for an expected boundary failure. |
-| Request | Accepted resolved intent for one generation run. |
-| Plan | Accepted managed semantic plan for one generation run. |
-| Builder | Mutable assembly surface that creates an accepted immutable object. |
-| Module surface | Static package surface that exposes built-in definitions and factories. |
+```text
+primitive caller input
+  -> accepted values
+  -> accepted definitions
+  -> accepted catalogs
+  -> symbolic descriptors
+  -> accepted requests
+  -> managed plans
+```
 
-These categories are intentionally separate. Do not collapse them into one generic model type.
+Each step has a specific owner and validation boundary.
 
-## Accepted object rule
+## Accepted object
 
-A non-null accepted reference object must be valid for the invariants owned by its type.
+An accepted object is valid for the rules owned by its own type.
 
 Examples:
 
@@ -33,309 +32,258 @@ Examples:
 Symbol
 DisplayName
 Grid
-GenerationSchemaDefinition
+Seed
 ResourceDefinition
-StageDefinition
 StageContract
-OperationDefinition
 OperationContract
 GenerationRecipeDefinition
-GenerationRunSettings
 GenerationRequest
 GenerationPlan
-````
-
-The object’s constructor or factory owns this guarantee.
-
-A caller should not need to ask whether a constructed `ResourceDefinition` has a null symbol, whether a constructed `GenerationRunSettings` has a null grid, or whether a constructed `StageContract` contains null resources.
-
-Those checks belong at construction.
-
-## Struct default rule
-
-Value-type defaults must be intentionally valid or intentionally inaccessible.
-
-Current map value structs use valid defaults:
-
-```text
-default(Cell)      -> Cell(0, 0)
-default(CellIndex) -> CellIndex(0)
-default(Seed)      -> Seed(0)
 ```
 
-`Cell` and `CellIndex` values are grid-relative. They are valid inside a specific grid only after grid validation.
+A non-null accepted object should not require callers to ask whether the object is locally valid.
 
-A `Cell` is not proof that the coordinate belongs to every possible grid. A `CellIndex` is not proof that the index belongs to every possible grid.
+Correct:
 
-Grid membership is owned by `Grid`.
+```text
+Symbol symbol = Symbol.Create("lokrain.atlas.world");
+Grid grid = new(256, 256);
+GenerationRunSettings settings = new(grid, new Seed(123UL));
+```
 
-## Core value objects
+Incorrect:
 
-Core value objects define package-level primitives and their local invariants.
+```text
+Symbol symbol = new();
+symbol.Value = "lokrain.atlas.world";
+symbol.ValidateLater();
+```
+
+## Local validation
+
+Each type validates only the invariants it owns.
+
+Examples:
+
+| Type | Owns |
+| --- | --- |
+| `Symbol` | Symbol syntax and normalized identity text. |
+| `DisplayName` | User-facing text validity. |
+| `Grid` | Width, depth, cell count, and index boundaries. |
+| `Seed` | Stable seed value and seed parsing. |
+| `ResourceDefinition` | Resource symbol, display name, and schema references are locally valid. |
+| `StageContract` | Stage contract inputs and outputs are locally valid. |
+| `OperationContract` | Operation contract inputs and outputs are locally valid. |
+| `GenerationRequest` | Final selected implementation choices are accepted and complete. |
+| `GenerationPlan` | Managed plan nodes are accepted semantic plan data. |
+
+Higher-level invariants stay with higher-level owners.
+
+Examples:
+
+| Invariant | Owner |
+| --- | --- |
+| Catalog ownership | `GenerationCatalog` |
+| Cross-definition graph consistency | `GenerationCatalog` |
+| Descriptor satisfiability | `GenerationRequestResolver` |
+| Managed stage ordering | `GenerationPlanCompiler` |
+| Native allocation | Planned `GenerationWorkspace` |
+| Job scheduling | Planned `OperationScheduler` |
+
+## Constructors and factories
+
+Use constructors when all required inputs are already accepted objects or simple values with direct range validation.
+
+Use factories when primitive input requires parsing, normalization, or validation.
 
 Examples:
 
 ```text
-Symbol
-DisplayName
-Grid
-Cell
-CellIndex
-Seed
+new Grid(width, depth)
+new ResourceDefinition(symbol, displayName, schema)
+Symbol.Create(value)
+DisplayName.Create(value)
+Seed.Parse(value)
 ```
 
-Core value objects must not depend on catalog, recipes, request resolution, planning, Unity objects, native containers, schedulers, or jobs.
+Use `TryCreate` or `TryParse` for non-throwing validation paths.
 
-Core value objects should be small and semantically precise. They should exist when the package owns meaning, validation, formatting, deterministic behavior, or conversion rules.
-
-Do not wrap primitive values only to rename them.
-
-## Symbol
-
-`Symbol` is stable machine-facing identity.
-
-A symbol is used for lookup, catalog identity, descriptor resolution, tests, tooling, logs, and artifact compatibility.
-
-A symbol is not a display name, Unity object name, file path, runtime numeric ID, native handle, or scheduler binding.
-
-Objects with symbol-based identity should compare by symbol.
-
-## DisplayName
-
-`DisplayName` is validated user-facing text.
-
-A display name is metadata for humans. It is not identity and must not be used for lookup, deterministic generation, catalog resolution, or artifact compatibility.
-
-Objects may expose both `Symbol` and `DisplayName`. The symbol owns identity. The display name owns presentation.
-
-## Grid-owned coordinates and indices
-
-`Grid` owns coordinate and flattened-index validation.
-
-`Cell` and `CellIndex` are created by `Grid` after bounds validation.
-
-Correct ownership:
+Examples:
 
 ```text
-Grid -> validates coordinates
-Grid -> creates Cell
-Grid -> validates flattened index
-Grid -> creates CellIndex
+Symbol.TryCreate(value, out Symbol? symbol)
+DisplayName.TryCreate(value, out DisplayName? displayName)
+Seed.TryParse(value, out Seed seed)
 ```
-
-Incorrect ownership:
-
-```text
-Cell -> validates against all grids
-CellIndex -> knows a grid
-operation -> hand-rolls grid bounds
-job -> receives unresolved grid coordinates from a descriptor
-```
-
-Grid conversion and bounds logic belongs in `Grid`.
 
 ## Definitions
 
-Definitions describe accepted reusable package inventory.
+Definitions describe reusable package inventory.
 
-Examples:
+Definitions do not represent one generation run.
+
+Current definition objects include:
 
 ```text
 GenerationSchemaDefinition
 ResourceDefinition
+StageKind
 StageDefinition
 StageRouteDefinition
 StageRouteStepDefinition
-StageContract
+OperationKind
 OperationDefinition
-OperationContract
 OperationImplementationDefinition
 GenerationRecipeDefinition
 ```
 
-Definitions are managed metadata. They are not one generation run and not execution state.
-
-Definitions must not own:
-
-```text
-GenerationRunSettings
-GenerationRequestDescriptor
-GenerationRequest
-GenerationPlan
-NativeArray<T>
-NativeList<T>
-JobHandle
-scheduler state
-workspace allocation
-```
-
-A definition can be individually valid while still not accepted into a catalog. Catalog acceptance is a higher-level boundary.
-
-## Definition identity
-
-Definitions that expose a symbol use that symbol as their stable identity.
+Definitions may reference other accepted definitions when the relationship is part of reusable inventory.
 
 Examples:
 
 ```text
-GenerationSchemaDefinition.Symbol
-ResourceDefinition.Symbol
-StageDefinition.Symbol
-StageRouteDefinition.Symbol
-StageRouteStepDefinition.Symbol
-OperationDefinition.Symbol
-OperationImplementationDefinition.Symbol
-GenerationRecipeDefinition.Symbol
+StageDefinition references GenerationSchemaDefinition.
+OperationDefinition references GenerationSchemaDefinition and OperationKind.
+StageRouteDefinition references StageDefinition.
+OperationImplementationDefinition references OperationDefinition.
+GenerationRecipeDefinition references selected route and implementation choices.
 ```
 
-Kind objects also expose symbol identity:
+Definitions must not contain run-specific state.
+
+Incorrect:
 
 ```text
-StageKind.Symbol
-OperationKind.Symbol
+StageDefinition contains Grid.
+OperationDefinition contains Seed.
+GenerationRecipeDefinition contains GenerationRunSettings.
+ResourceDefinition contains FieldHandle.
 ```
 
-Identity must not be based on display name, object allocation order, collection position, or Unity asset identity.
+## Contracts
 
-## Catalog-dependent validity
+Contracts describe semantic resource flow.
 
-Some validity cannot be proven by a definition constructor.
-
-Catalog-dependent validity includes:
+Current contract objects are:
 
 ```text
-definition symbol uniqueness within the catalog
-schema ownership consistency
-route ownership consistency
-route-step membership
-operation implementation compatibility
-contract resource ownership
-recipe graph consistency
-cross-catalog object reuse
+StageContract
+OperationContract
 ```
 
-`GenerationCatalog` owns these checks.
+Contracts use `ResourceDefinition` for required inputs and produced outputs.
 
-Do not push catalog graph validation into low-level definitions.
+Correct:
 
-## Descriptor objects
+```text
+OperationContract
+  RequiredInputs: ContinentSuitability
+  ProducedOutputs: ContinentCandidate
+```
 
-Descriptors are valid symbolic input objects.
+Incorrect:
 
-Examples:
+```text
+OperationContract
+  RequiredInputSymbols
+  ProducedOutputSymbols
+  NativeArray<float>
+  FieldHandle
+```
+
+Contracts do not define storage layout.
+
+## Catalogs
+
+`GenerationCatalog` is accepted immutable inventory.
+
+It validates definition ownership and graph consistency across the definitions it exposes.
+
+Catalog ownership is reference-exact.
+
+A symbol-equivalent definition is not catalog-owned unless it is the exact instance owned by the catalog.
+
+Correct:
+
+```text
+Catalog owns ResourceDefinition instance A.
+OperationContract references ResourceDefinition instance A.
+```
+
+Incorrect:
+
+```text
+Catalog owns ResourceDefinition instance A.
+OperationContract references ResourceDefinition instance B.
+A.Symbol == B.Symbol.
+```
+
+Instance B is not catalog-owned.
+
+## Descriptors
+
+Descriptors represent symbolic caller intent before catalog resolution.
+
+Current descriptor objects include:
 
 ```text
 GenerationRequestDescriptor
 OperationImplementationOverrideDescriptor
 ```
 
-A descriptor validates its own structure. It does not prove that its symbols exist in a catalog.
+Descriptors may contain unresolved symbols.
 
-A descriptor may contain:
+Descriptors validate their own structure, not whether their symbols exist in a specific catalog.
 
-```text
-Symbol
-GenerationRunSettings
-other descriptor objects
-```
-
-A descriptor must not contain:
+Correct:
 
 ```text
-GenerationRecipeDefinition
-StageRouteStepDefinition
-OperationImplementationDefinition
-GenerationPlan
-native containers
-field handles
-job handles
+GenerationRequestDescriptor
+  GenerationRecipeDefinitionSymbol
+  GenerationRunSettings
+  OperationImplementationOverrideDescriptor list
 ```
 
-Descriptors are the correct boundary for user-authored symbolic intent, editor tooling input, serialized request intent, and tests that exercise resolution failure.
-
-## Descriptor validity
-
-Descriptor validity means:
+Incorrect:
 
 ```text
-required descriptor values are present
-symbols are syntactically valid
-settings are accepted
-descriptor collections contain no null entries
-descriptor collections do not violate local uniqueness rules
+GenerationRequestDescriptor
+  GenerationRecipeDefinition
+  StageRouteStepDefinition
+  OperationImplementationDefinition
 ```
 
-Descriptor validity does not mean:
-
-```text
-the recipe symbol exists
-the override target exists in the selected recipe
-the implementation symbol exists
-the implementation can execute the target operation
-the catalog can satisfy the request
-```
-
-Catalog satisfiability belongs to request resolution.
+A descriptor is not an accepted request.
 
 ## Result objects
 
-Result objects represent expected failure at a domain boundary.
+Result objects represent expected boundary outcomes.
 
-Current example:
+Current result objects include:
 
 ```text
 GenerationRequestResolutionResult
-```
-
-A result object contains either a successful accepted value or structured errors.
-
-Resolution result success contains:
-
-```text
-GenerationRequest
-```
-
-Resolution result failure contains:
-
-```text
-GenerationRequestResolutionError list
-```
-
-A result object must not contain both success data and errors.
-
-A failed result must contain at least one error.
-
-## Structured errors
-
-Structured errors describe expected domain failure.
-
-Current example:
-
-```text
 GenerationRequestResolutionError
 ```
 
-A resolution error contains:
+Request resolution can fail because symbolic caller intent cannot be satisfied by a catalog.
+
+Those failures are expected boundary outcomes and are represented as result errors.
+
+Examples:
 
 ```text
-Code
-Message
-SubjectSymbol
+unknown recipe symbol
+override route step not selected by recipe
+unknown implementation symbol
+implementation operation mismatch
 ```
 
-The code is stable machine-facing identity.
+## Accepted requests
 
-The message is human-facing diagnostic text.
+`GenerationRequest` is accepted resolved generation intent for one run.
 
-The subject symbol identifies the primary related descriptor or catalog symbol when one exists.
-
-Do not parse diagnostic messages in tests or tooling. Use error codes and subject symbols.
-
-## Request objects
-
-`GenerationRequest` is accepted resolved intent for one generation run.
-
-A request contains accepted definitions and final choices:
+A request contains:
 
 ```text
 GenerationRecipeDefinition
@@ -343,45 +291,97 @@ GenerationRunSettings
 StageRouteStepImplementationChoice list
 ```
 
+A request contains accepted definitions and final implementation choices.
+
 A request contains no unresolved symbols.
 
-A request is not a descriptor and not a plan.
+A request does not execute work.
 
-A request must not contain native storage, field definitions, scheduler bindings, job handles, dependency handles, or Burst job data.
+## Managed plans
 
-## Plan objects
-
-`GenerationPlan` is accepted managed semantic data for one generation run.
+`GenerationPlan` is accepted managed semantic planning output.
 
 A plan contains:
 
 ```text
 GenerationRecipeDefinition
+GenerationSchemaDefinition
 GenerationRunSettings
 StagePlanNode list
 ```
 
-Stage and operation plan nodes contain accepted definitions and contracts selected for the run.
+A plan is not executable job data.
 
-A plan is managed planning output. It is not executable runtime state.
-
-A plan must not contain:
+A plan does not contain:
 
 ```text
-NativeArray<T>
-NativeList<T>
-NativeHashMap<TKey, TValue>
 FieldDefinition
-FieldHandle
-SchedulerBinding
+RunnablePlan
+GenerationWorkspace
+OperationScheduler
+NativeArray<T>
 JobHandle
-ECS entity references
-Burst function pointers
+Entity
+UnityEngine.Object
 ```
 
-## Builder objects
+Current Runtime architecture ends at `GenerationPlan`.
 
-A builder is mutable by design.
+## Plan nodes
+
+Plan nodes are compiler-created accepted domain objects.
+
+`StagePlanNode` represents one selected stage in a managed plan.
+
+`OperationPlanNode` represents one selected operation occurrence in a managed plan.
+
+Plan nodes describe semantic order and selected metadata. They do not execute work.
+
+## Identity
+
+Symbols are stable machine-facing identity.
+
+Display names are user-facing metadata.
+
+Definitions normally use symbol-based equality.
+
+Examples:
+
+```text
+ResourceDefinition equality uses Symbol.
+StageDefinition equality uses Symbol.
+OperationDefinition equality uses Symbol.
+GenerationRecipeDefinition equality uses Symbol.
+```
+
+Do not use display names for equality, lookup, deterministic identity, or artifact compatibility.
+
+## Immutability
+
+Accepted domain objects should be immutable.
+
+Constructors and factories that accept collections must snapshot the input.
+
+Accepted objects should expose read-only views.
+
+Correct:
+
+```text
+copy input collection
+validate copied values
+store private collection
+expose IReadOnlyList<T>
+```
+
+Incorrect:
+
+```text
+store caller-owned List<T>
+expose mutable List<T>
+allow caller mutation after construction
+```
+
+Mutable objects must have explicit mutable ownership.
 
 Current example:
 
@@ -389,344 +389,56 @@ Current example:
 GenerationCatalogBuilder
 ```
 
-A builder collects candidate objects and creates an accepted immutable object.
+## Error boundaries
 
-The builder is not the accepted object. Its internal mutable state must not leak as catalog state.
+Invalid API usage throws exceptions.
 
-Correct ownership:
-
-```text
-GenerationCatalogBuilder -> mutable assembly
-GenerationCatalog        -> accepted immutable inventory
-```
-
-A builder may accept repeated calls in authoring order, but final catalog construction must validate uniqueness, ownership, and consistency.
-
-## Module surfaces
-
-A generation module surface exposes built-in definitions and request helpers.
-
-Current example:
-
-```text
-Lokrain.Atlas.Generation.Landmass
-```
-
-Module surfaces may expose:
-
-```text
-built-in schemas
-resource definitions
-stage kinds
-stage definitions
-stage contracts
-operation kinds
-operation definitions
-operation contracts
-operation implementations
-routes
-route steps
-recipes
-catalog factories
-request descriptor factories
-```
-
-A module surface must not bypass the accepted object model.
-
-A helper may reduce boilerplate, but it must still produce descriptors, definitions, catalogs, requests, or plans through the same domain boundaries as handwritten code.
-
-## Construction rules
-
-Constructors and factories must validate all invariants owned by the constructed type.
-
-They should:
-
-```text
-reject null required values
-copy enumerable input before storing it
-reject null entries in copied collections
-reject duplicates when uniqueness is required
-normalize values when the type owns normalization
-store read-only collection views
-throw precise argument exceptions for invalid API usage
-```
-
-They should not:
-
-```text
-store caller-owned mutable collections directly
-defer local invariant validation to later systems
-perform catalog lookup unless they are catalog/resolver APIs
-allocate native containers
-schedule jobs
-read Unity scene state
-use display names as identity
-```
-
-## Collection ownership
-
-Accepted objects that expose collections must own their collection snapshots.
-
-Correct pattern:
-
-```text
-copy input
-validate copied values
-store private array or read-only collection
-expose IReadOnlyList<T>
-```
-
-Incorrect pattern:
-
-```text
-store incoming List<T>
-expose mutable List<T>
-trust caller-owned arrays
-allow null collection entries
-allow duplicate semantic entries when uniqueness is required
-```
-
-Collection order is part of the object contract only when the domain says order matters.
-
-Examples where order matters:
-
-```text
-route steps
-stage choices
-operation plan nodes
-stage plan nodes
-resolution errors
-```
-
-Examples where lookup uniqueness matters:
-
-```text
-catalog definitions by symbol
-resource definitions by symbol
-operation implementations by symbol
-override descriptors by target route-step symbol
-```
-
-## Equality rules
-
-Equality must match domain identity.
-
-Use symbol equality for symbol-identified definitions.
-
-Use structural equality for small value objects and plan/request objects where all owned values define the identity.
-
-Use sequence equality when ordered collections are part of identity.
-
-Do not use reference equality as public semantic equality unless object identity is the intended domain meaning.
-
-Do not use display name, Unity object ID, asset path, or allocation order as equality identity.
-
-## Exception boundary
-
-Throw exceptions for invalid API usage and violated local invariants.
+Expected descriptor-resolution failure returns a result object.
 
 Examples:
 
-```text
-null required argument
-invalid symbol text
-invalid display name text
-invalid grid dimensions
-out-of-range grid coordinate
-duplicate constructor entries where uniqueness is required
-null entry in constructor collection
-attempting to create an impossible success/failure result shape
-```
+| Scenario | Boundary |
+| --- | --- |
+| Null required argument | Exception |
+| Invalid symbol text in `Create` | Exception |
+| Invalid grid dimension | Exception |
+| Invalid catalog inventory | Exception |
+| Unknown recipe symbol during resolution | Failed result |
+| Unknown override implementation symbol | Failed result |
 
-Exceptions are correct when the caller passed invalid data to an API that requires accepted data.
+## Current and future boundary
 
-## Result boundary
+Accepted domain objects in current Runtime are managed semantic objects.
 
-Return result objects for expected domain failure at a satisfiability boundary.
+They do not allocate native storage, schedule jobs, own field handles, or integrate with ECS execution.
 
-Current example:
+Future execution concepts include:
 
 ```text
-GenerationRequestResolver.Resolve(...)
+FieldDefinition
+RunnablePlan
+GenerationWorkspace
+OperationScheduler
+native storage
+Burst jobs
+artifacts
+ECS integration
 ```
 
-Expected resolution failures include:
-
-```text
-requested recipe symbol is not found
-override route-step symbol is not found in the selected recipe
-implementation symbol is not found
-implementation does not belong to the operation used by the targeted route step
-descriptor cannot be satisfied by the selected catalog
-```
-
-These are not invalid API usage. They are normal negative outcomes for symbolic input.
-
-## Ownership boundary
-
-Every accepted object has a clear owner.
-
-| Object            | Owner                                                                 |
-| ----------------- | --------------------------------------------------------------------- |
-| Core value object | The value itself owns local validation.                               |
-| Definition        | Its constructor owns local invariants; catalog owns graph acceptance. |
-| Descriptor        | Descriptor constructor or factory owns local symbolic shape.          |
-| Resolution result | Resolver owns creation of success/failure results.                    |
-| Request           | Resolver owns normal creation from catalog-satisfied input.           |
-| Plan              | Plan compiler owns normal creation from accepted request.             |
-| Native storage    | Future workspace.                                                     |
-| Job scheduling    | Future scheduler.                                                     |
-
-Do not make lower-level objects reach upward into owners.
-
-Examples:
-
-```text
-ResourceDefinition must not inspect GenerationCatalog.
-StageContract must not allocate field storage.
-GenerationRequestDescriptor must not resolve recipe symbols.
-GenerationPlan must not schedule jobs.
-Job must not inspect GenerationPlan.
-```
-
-## Accepted graph rule
-
-Accepted object graphs should flow in one direction:
-
-```text
-core values
-    -> definitions
-    -> catalog
-    -> descriptor resolution
-    -> request
-    -> plan
-    -> future runnable metadata
-    -> future workspace and scheduler execution
-```
-
-A lower layer must not depend on a higher layer.
-
-A higher layer may contain accepted lower-layer objects when that is its purpose.
-
-## Resource contract objects
-
-`StageContract` and `OperationContract` use `ResourceDefinition` objects.
-
-They represent semantic resource requirements and production.
-
-They do not represent storage layout, field allocation, scheduler binding, or job dependencies.
-
-Correct contract model:
-
-```text
-StageContract.RequiredInputs  -> ResourceDefinition list
-StageContract.ProducedOutputs -> ResourceDefinition list
-
-OperationContract.RequiredInputs  -> ResourceDefinition list
-OperationContract.ProducedOutputs -> ResourceDefinition list
-```
-
-Incorrect contract model:
-
-```text
-contract owns raw resource symbol lists
-contract owns field definitions
-contract owns NativeArray<T>
-contract owns scheduler bindings
-contract owns job dependency handles
-```
-
-## Unity boundary
-
-Accepted domain objects are package domain objects.
-
-They should not become Unity object wrappers.
-
-Current Runtime managed domain objects must remain independent from:
-
-```text
-UnityEngine.Object
-ScriptableObject
-MonoBehaviour
-GameObject
-UnityEditor
-ECS World
-ECS System
-NativeContainer allocation
-Job scheduling
-```
-
-Unity-facing APIs may adapt data into accepted domain objects. They must not replace the accepted model.
-
-## Determinism boundary
-
-Accepted domain objects may participate in deterministic generation semantics only through stable domain values.
-
-Stable deterministic values include:
-
-```text
-Symbol
-Grid
-Seed
-GenerationRunSettings
-accepted recipe choices
-accepted implementation choices
-GenerationRequest
-GenerationPlan ordering
-```
-
-Do not base deterministic behavior on:
-
-```text
-DisplayName
-Unity object instance ID
-Unity asset path
-managed object allocation order
-dictionary enumeration order
-process-local string hash codes
-current time
-editor selection state
-scene hierarchy order
-```
-
-## Design checklist
-
-A new type should be an accepted domain object when all of these are true:
-
-```text
-the package owns its meaning
-the package owns its invariants
-downstream systems should trust constructed instances
-the type improves correctness more than it adds ceremony
-the type has stable naming and clear ownership
-```
-
-A new type should not be added when it only:
-
-```text
-renames a primitive without adding domain meaning
-wraps a Unity concept without owning an invariant
-duplicates an existing accepted boundary
-mixes descriptor and accepted object responsibilities
-mixes planning and execution responsibilities
-```
+These concepts start after the current managed plan boundary.
 
 ## Summary
 
-Accepted domain objects keep Atlas boundaries explicit.
+Accepted domain objects make invalid local state unrepresentable after construction.
 
-Descriptors express symbolic intent.
+Definitions describe reusable inventory.
 
-Definitions describe accepted reusable inventory.
+Catalogs validate accepted definition graphs.
 
-Catalogs accept and own definition graphs.
+Descriptors express symbolic caller intent.
 
-Resolvers convert symbolic descriptors into accepted requests.
+Resolvers produce accepted requests.
 
-Plans describe managed semantic work.
+Plan compilers produce accepted managed plans.
 
-Future execution systems own runnable metadata, native storage, scheduling, and jobs.
-
-Each object should validate what it owns, expose only accepted state, and avoid reaching across boundaries it does not own.
-
-```
+Execution architecture is planned after `GenerationPlan`.

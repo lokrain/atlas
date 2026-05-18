@@ -1,521 +1,523 @@
 # ResourceDefinition before FieldDefinition
 
-This document records the decision to model `ResourceDefinition` before introducing `FieldDefinition`.
-
-`ResourceDefinition` is current implemented Runtime architecture.
-
-`FieldDefinition` is future execution architecture.
+This decision record explains why Lokrain.Atlas models semantic resources before storage-facing fields.
 
 ## Decision
 
-Atlas models semantic generated values with `ResourceDefinition` before modeling storage-facing execution fields with `FieldDefinition`.
+Lokrain.Atlas defines `ResourceDefinition` as current Runtime architecture before introducing `FieldDefinition`.
 
-Stage and operation contracts use `ResourceDefinition` for required inputs and produced outputs.
+`ResourceDefinition` is semantic metadata.
 
-`FieldDefinition` must not be introduced into current stage or operation contracts.
+`FieldDefinition` is planned storage-facing metadata.
 
-The required boundary is:
+Current contracts use `ResourceDefinition` for required inputs and produced outputs.
 
-```text
-ResourceDefinition
-        |
-        v
-FieldDefinition
-        |
-        v
-GenerationWorkspace allocation
-````
-
-A resource defines what generated value exists.
-
-A field definition defines how that value is represented for execution.
-
-A workspace allocation owns the native storage for one run.
+Future runnable compilation may bind resources to field definitions.
 
 ## Status
 
 Accepted.
 
+`ResourceDefinition` is implemented.
+
+`FieldDefinition` is planned architecture.
+
+Current Runtime architecture ends at `GenerationPlan`.
+
 ## Context
 
-The current Runtime architecture supports managed generation planning.
-
-The managed pipeline is:
+Generation architecture needs two separate concepts:
 
 ```text
-GenerationRequestDescriptor
-        +
-GenerationCatalog
-        |
-        v
-GenerationRequestResolver
-        |
-        v
-GenerationRequest
-        |
-        v
-GenerationPlanCompiler
-        |
-        v
-GenerationPlan
+what generated value exists
+how that value is represented for execution
 ```
 
-This pipeline needs to reason about semantic data flow.
+These are not the same responsibility.
 
-It must know which generated values are required and produced by stages and operations.
+A semantic resource is stable across execution profiles, storage layouts, diagnostic policies, and implementation choices.
 
-It does not need to know native storage layout, allocation policy, scheduler binding, job dependencies, or artifact capture behavior.
+A field representation may vary by execution profile, platform, memory policy, diagnostic mode, or implementation strategy.
+
+Examples:
+
+```text
+BaseElevation
+ContinentSuitability
+ContinentCandidate
+MainContinent
+ContinentalLandmassArea
+```
+
+These names describe semantic generated values.
+
+They do not require one fixed storage layout.
 
 ## Problem
 
-Stage and operation contracts need stable resource identity.
+If storage-facing fields are introduced before semantic resources, contracts become coupled to execution details too early.
 
-The architecture must express facts such as:
-
-```text
-operation A requires Height
-operation A produces Land
-
-operation B requires Land
-operation B produces Coast
-```
-
-These are semantic planning facts.
-
-They should be valid before execution storage is designed.
-
-If contracts use raw symbols, the catalog cannot validate resource ownership strongly enough.
-
-If contracts use field definitions too early, managed planning becomes coupled to storage and execution design.
-
-## Required separation
-
-The architecture must separate these questions:
-
-| Question                                                  | Owner                        |
-| --------------------------------------------------------- | ---------------------------- |
-| What semantic generated value is required or produced?    | `ResourceDefinition`         |
-| How is that value represented for execution?              | Future `FieldDefinition`     |
-| Which native container stores it for one run?             | Future `GenerationWorkspace` |
-| Which operation schedules the jobs that read or write it? | Future `OperationScheduler`  |
-| Which job transforms the data?                            | Future job structs           |
-
-A current managed plan needs the first answer only.
-
-Future execution needs all answers, but at later boundaries.
-
-## ResourceDefinition responsibility
-
-`ResourceDefinition` owns semantic identity for generated values.
-
-It should contain package-owned metadata such as:
+Invalid model:
 
 ```text
-Symbol
-DisplayName
-GenerationSchemaDefinition
+OperationContract
+  RequiredInputs: FieldDefinition
+  ProducedOutputs: FieldDefinition
 ```
 
-It must not contain:
+This makes operation and stage contracts depend on storage representation.
+
+It also forces current managed planning to know concepts that belong to planned execution:
+
+```text
+field shape
+field value kind
+workspace allocation
+field handles
+native containers
+scheduler bindings
+artifact capture
+diagnostic capture
+```
+
+That violates the current Runtime boundary.
+
+## Chosen model
+
+Use `ResourceDefinition` for semantic identity.
+
+Use resource definitions in contracts.
+
+```text
+StageContract
+  RequiredInputs: IReadOnlyList<ResourceDefinition>
+  ProducedOutputs: IReadOnlyList<ResourceDefinition>
+
+OperationContract
+  RequiredInputs: IReadOnlyList<ResourceDefinition>
+  ProducedOutputs: IReadOnlyList<ResourceDefinition>
+```
+
+Keep field definitions planned for storage-facing execution metadata.
+
+Planned model:
+
+```text
+GenerationPlan
+  + FieldDefinitionSet
+  + ExecutionProfile
+    -> RunnablePlanCompiler
+    -> RunnablePlan
+    -> GenerationWorkspace
+```
+
+## Why this is correct
+
+Semantic generation planning must be valid before execution storage exists.
+
+A recipe should be able to say:
+
+```text
+EvaluateContinentSuitability produces ContinentSuitability.
+FormContinentCandidate requires ContinentSuitability and produces ContinentCandidate.
+```
+
+That statement is true regardless of whether the future execution representation is:
+
+```text
+dense cell-grid field
+bit mask
+compressed sparse structure
+temporary native buffer
+external field binding
+diagnostic capture field
+```
+
+The semantic dependency does not change when storage changes.
+
+## ResourceDefinition responsibilities
+
+`ResourceDefinition` owns:
+
+```text
+stable resource symbol
+display name
+generation schema
+semantic generated-value identity
+contract resource-flow identity
+catalog ownership participation
+```
+
+`ResourceDefinition` does not own:
+
+```text
+field shape
+field value kind
+native container type
+allocation policy
+field handle
+workspace storage
+scheduler binding
+job dependency
+artifact payload
+diagnostic capture
+```
+
+## FieldDefinition responsibilities
+
+Planned `FieldDefinition` owns storage-facing metadata.
+
+A field definition may describe:
+
+```text
+resource mapping
+field shape
+field value kind
+storage role
+capture policy
+external binding policy
+diagnostic role
+execution profile compatibility
+```
+
+A field definition must not replace resource identity.
+
+A field definition must not allocate storage.
+
+Actual allocation belongs to planned `GenerationWorkspace`.
+
+## Catalog impact
+
+`GenerationCatalog` owns resource definitions as current accepted inventory.
+
+Catalog validation can verify:
+
+```text
+resource symbol uniqueness
+resource schema ownership
+contract resource ownership
+stage resource flow
+operation resource flow
+recipe graph consistency
+cross-catalog resource reference rejection
+```
+
+Catalog validation does not need field definitions to validate semantic resource flow.
+
+This keeps catalog validation independent from execution policy.
+
+## Recipe impact
+
+Recipes select semantic generation flow.
+
+A recipe should not depend on a specific storage layout.
+
+Correct:
+
+```text
+GenerationRecipeDefinition
+  selects stage routes
+  selects stage contracts
+  selects operation contracts
+  selects default implementation choices
+```
+
+Incorrect:
+
+```text
+GenerationRecipeDefinition
+  selects field handles
+  selects native containers
+  selects workspace allocation layout
+```
+
+Storage choices belong after managed plan compilation.
+
+## Request impact
+
+Requests represent one accepted resolved run.
+
+A request contains:
+
+```text
+GenerationRecipeDefinition
+GenerationRunSettings
+final StageRouteStepImplementationChoice list
+```
+
+A request does not contain:
 
 ```text
 FieldDefinition
-NativeArray<T>
-NativeList<T>
 FieldHandle
-SchedulerBinding
-JobHandle
+NativeArray<T>
+GenerationWorkspace
 OperationScheduler
-artifact output path
-Unity object identity
 ```
 
-A resource definition is catalog-owned metadata.
+This keeps request resolution focused on symbolic intent and accepted definitions.
 
-It is not storage and not executable state.
+## Plan impact
 
-## FieldDefinition responsibility
+`GenerationPlan` is managed semantic output.
 
-`FieldDefinition` is planned future metadata.
+It can carry resource-definition-based contracts through stage and operation plan nodes.
 
-It will describe storage-facing representation for a resource.
+It must not contain field handles or native storage.
 
-It may eventually contain or reference:
+Correct:
 
 ```text
-ResourceDefinition
-FieldLifetime
-FieldShape
-ValueKind
-ExecutionProfile
-StoragePolicy
-CapturePolicy
+GenerationPlan
+  StagePlanNode
+    OperationPlanNode
+      OperationContract
+        ResourceDefinition inputs and outputs
 ```
 
-It must not allocate memory.
-
-It must not schedule jobs.
-
-It must not replace `ResourceDefinition` as semantic identity.
-
-## Workspace responsibility
-
-`GenerationWorkspace` is planned future execution state.
-
-It will allocate and own native containers for one generation run.
-
-The workspace may allocate storage based on:
+Incorrect:
 
 ```text
-RunnablePlan
-FieldDefinition
-ExecutionProfile
-Grid
-external input bindings
-artifact capture requirements
+GenerationPlan
+  OperationPlanNode
+    FieldHandle inputs and outputs
 ```
 
-The workspace must not resolve request symbols, select recipes, or compile managed plans.
+Field binding belongs to planned runnable compilation.
 
-## Consequences
+## Execution impact
 
-`StageContract` and `OperationContract` use `ResourceDefinition`.
+Future execution can bind semantic resources to storage representations after the managed plan is valid.
 
-Correct current contract model:
+Planned flow:
 
 ```text
-StageContract
-  RequiredInputs  -> ResourceDefinition list
-  ProducedOutputs -> ResourceDefinition list
-
-OperationContract
-  RequiredInputs  -> ResourceDefinition list
-  ProducedOutputs -> ResourceDefinition list
+GenerationPlan
+  -> RunnablePlanCompiler
+     uses FieldDefinitionSet
+     uses ExecutionProfile
+  -> RunnablePlan
+  -> GenerationWorkspace
+  -> OperationScheduler
+  -> Jobs
 ```
 
-Incorrect current contract models:
+This allows different execution profiles to use different storage policy without changing the semantic recipe.
 
-```text
-StageContract
-  RequiredInputSymbols
-  ProducedOutputSymbols
+## Alternatives considered
 
-OperationContract
-  RequiredFields
-  ProducedFields
+### Use raw symbols in contracts
 
-OperationContract
-  NativeInputs
-  NativeOutputs
-```
+Rejected.
 
-The current contract layer stays semantic.
+Raw symbol lists do not carry accepted object ownership.
 
-Future runnable compilation will bridge semantic resources to execution fields.
+They make contract validation weaker and push semantic validation later.
 
-## Catalog validation consequence
-
-Because contracts use `ResourceDefinition`, the catalog can validate exact resource ownership.
-
-The catalog can reject:
-
-```text
-operation contract from catalog A
-  references resource definition from catalog B
-```
-
-This is stronger than symbol-based validation.
-
-Symbol equality alone is not enough because two catalog instances may contain equivalent-looking definitions with different ownership.
-
-## Request resolution consequence
-
-Request resolution remains about symbolic request satisfiability.
-
-The resolver resolves:
-
-```text
-recipe symbol
-route-step override symbol
-implementation symbol
-```
-
-It does not resolve field definitions, native storage, scheduler bindings, or job dependencies.
-
-Missing field definitions are not request-resolution errors.
-
-They belong to future runnable plan compilation.
-
-## Plan compilation consequence
-
-`GenerationPlanCompiler` consumes an accepted `GenerationRequest`.
-
-It compiles a managed semantic plan that carries resource-definition-based contracts.
-
-It does not bind resources to fields.
-
-It does not allocate storage.
-
-It does not schedule jobs.
-
-It does not choose scheduler bindings.
-
-## Future runnable compilation consequence
-
-Future `RunnablePlanCompiler` will bridge current semantic planning and future execution metadata.
-
-Expected future binding:
-
-```text
-ResourceDefinition -> FieldDefinition
-OperationImplementationDefinition -> SchedulerBinding
-OperationPlanNode -> RunnableOperation
-```
-
-The runnable compiler will validate that the selected execution configuration can represent and execute the managed plan.
-
-Examples of future runnable compilation failures:
-
-```text
-missing field definition for resource
-field definition incompatible with execution profile
-missing scheduler binding for selected implementation
-scheduler binding incompatible with field value kind
-external input binding missing
-```
-
-These failures are not catalog construction errors and not request-resolution errors.
-
-## Rejected option: raw resource symbols in contracts
-
-Contracts could use raw symbols:
+Invalid model:
 
 ```text
 RequiredInputSymbols
 ProducedOutputSymbols
 ```
 
-This option is rejected.
+Contracts now use `ResourceDefinition` directly.
 
-Raw symbols are too weak for accepted contract metadata.
+### Use FieldDefinition in contracts
 
-Problems:
+Rejected.
 
-```text
-catalog ownership cannot be validated by object identity
-contracts remain detached from accepted resource definitions
-resource metadata is unavailable to plans
-typos become harder to localize
-future resource-to-field binding has weaker inputs
-tests can pass with symbol strings that do not belong to the catalog graph
-```
+It couples semantic contracts to storage-facing execution metadata.
 
-Symbols remain valid for descriptors and lookup.
+It also introduces future execution dependencies into current Runtime planning.
 
-Accepted contracts should use accepted resources.
+### Make ResourceDefinition own FieldDefinition
 
-## Rejected option: FieldDefinition in current contracts
+Rejected.
 
-Contracts could reference `FieldDefinition` directly.
+A resource can have different field representations under different execution profiles.
 
-This option is rejected for current architecture.
+A resource is semantic identity, not a storage owner.
 
-Problems:
+Invalid model:
 
 ```text
-managed planning becomes coupled to storage design
-field lifetime leaks into semantic contracts
-execution profile policy leaks into catalog definitions
-native representation decisions become prerequisites for resource planning
-contract tests must change when storage representation changes
-future scheduler constraints pollute current stage/operation definitions
+ResourceDefinition.FieldDefinition
 ```
 
-`FieldDefinition` belongs after semantic planning, not before it.
+### Make GenerationPlan own field handles
 
-## Rejected option: ResourceDefinition owns FieldDefinition
+Rejected.
 
-A resource could directly own one field definition.
+`GenerationPlan` is managed semantic data.
 
-This option is rejected.
+Field handles belong to planned workspace execution.
 
-Problems:
+Invalid model:
 
 ```text
-one semantic resource may require multiple representations
-storage representation may vary by execution profile
-debug and production profiles may capture different fields
-external input fields may use different ownership policy
-payload fields may be derived from canonical resources
-resource identity would change when storage policy changes
+GenerationPlan.FieldHandles
 ```
 
-A resource should remain stable even when execution representation changes.
+### Delay ResourceDefinition until FieldDefinition exists
 
-## Rejected option: GenerationPlan stores field handles
+Rejected.
 
-A managed plan could store future field handles.
+Current catalog, recipe, request, and plan architecture needs semantic resource flow now.
 
-This option is rejected.
+Waiting for field definitions would block valid managed planning and force contracts to use raw symbols or storage concepts.
 
-Problems:
+## Consequences
+
+This decision creates a stable semantic layer before execution architecture.
+
+Benefits:
 
 ```text
-field handles are per-workspace execution state
-managed plans should be reusable semantic data
-workspace allocation has not happened during managed plan compilation
-field handle identity is not semantic identity
-plan tests would depend on execution allocation order
+contracts are storage-independent
+catalog validation can validate resource ownership now
+recipes remain reusable across execution profiles
+requests remain accepted semantic run intent
+plans remain managed semantic output
+future field definitions can evolve without changing semantic contracts
 ```
 
-Field handles belong to future workspace execution.
-
-## Rejected option: OperationImplementationDefinition owns scheduler code
-
-An operation implementation definition could directly own executable scheduler or job code.
-
-This option is rejected for current managed metadata.
-
-Problems:
+Trade-offs:
 
 ```text
-operation implementation metadata becomes execution code
-Runtime planning becomes coupled to Jobs/Burst assemblies
-scheduler/profile compatibility cannot be selected independently
-tests for recipe and request logic require execution infrastructure
-future execution backends become harder to swap
+future runnable compilation must bind resources to fields explicitly
+future execution profiles must validate field coverage
+tests must distinguish resource identity from field representation
+documentation must clearly mark fields as planned
 ```
 
-Current operation implementation definitions identify selectable implementation choices.
+The trade-offs are intentional.
 
-Future scheduler bindings map those choices to executable schedulers.
+## Rules
 
-## Accepted current model
+Use `ResourceDefinition` for current semantic resource flow.
 
-The accepted current model is:
+Do not reintroduce raw resource symbol lists in contracts.
+
+Do not add `FieldDefinition` to current contracts.
+
+Do not add field handles to current managed plans.
+
+Do not add native storage to resources, contracts, recipes, requests, or plans.
+
+Add field definitions only as planned storage-facing metadata after current Runtime planning remains stable.
+
+## Correct examples
+
+Current semantic contract:
+
+```text
+OperationContract
+  OperationDefinition: FormContinentCandidate
+  RequiredInputs:
+    ContinentSuitability
+  ProducedOutputs:
+    ContinentCandidate
+```
+
+Planned field binding:
+
+```text
+ResourceDefinition ContinentSuitability
+  -> FieldDefinition ContinentSuitabilityField
+  -> workspace field allocation
+```
+
+Planned runnable operation:
+
+```text
+RunnableOperation FormContinentCandidate
+  input field binding: ContinentSuitabilityField
+  output field binding: ContinentCandidateField
+```
+
+## Incorrect examples
+
+Do not model current contracts like this:
+
+```text
+OperationContract
+  RequiredInputSymbols:
+    lokrain.atlas.landmass.resource.continent_suitability
+```
+
+Do not model resources like this:
 
 ```text
 ResourceDefinition
-  semantic generated value
-
-StageContract / OperationContract
-  resource-definition-based semantic flow
-
-GenerationCatalog
-  validates exact resource ownership
-
-GenerationRequest
-  accepted resolved run intent
-
-GenerationPlan
-  managed semantic plan with resource contracts
+  FieldDefinition
+  NativeArray<T>
+  FieldHandle
 ```
 
-This model is complete for current managed planning.
-
-## Accepted future model
-
-The accepted future model is:
+Do not model plans like this:
 
 ```text
 GenerationPlan
-        +
+  RunnableOperation
+  FieldHandle
+  JobHandle
+```
+
+## Implementation guidance
+
+Current implementation should remain focused on:
+
+```text
+ResourceDefinition
+StageContract
+OperationContract
+GenerationCatalog
+GenerationRecipeDefinition
+GenerationRequest
+GenerationPlan
+```
+
+Future implementation should proceed in this order:
+
+```text
+FieldDefinition
 FieldDefinitionSet
-        +
 ExecutionProfile
-        +
-SchedulerBindingCatalog
-        |
-        v
 RunnablePlanCompiler
-        |
-        v
 RunnablePlan
-        |
-        v
 GenerationWorkspace
-        |
-        v
 OperationScheduler
-        |
-        v
 Jobs
 ```
 
-Future execution will bind semantic resources to storage-facing fields without changing current resource identity.
+Do not skip directly from `GenerationPlan` to native execution without explicit runnable metadata and workspace ownership.
 
-## Invariants
+## Validation checklist
 
-The decision requires these invariants:
-
-```text
-ResourceDefinition is semantic identity.
-StageContract and OperationContract use ResourceDefinition.
-Catalog validates contract resource ownership.
-GenerationPlan remains managed semantic data.
-FieldDefinition remains future storage-facing metadata.
-GenerationWorkspace owns future native storage.
-Schedulers own future job orchestration.
-Jobs receive native containers and unmanaged values only.
-```
-
-## Impact on documentation
-
-Current architecture documents must describe `ResourceDefinition` as implemented current architecture.
-
-Future documents may describe `FieldDefinition` only as planned architecture.
-
-Documentation must not describe field definitions as current contract members.
-
-Documentation must not describe resources as native storage.
-
-Documentation must not describe managed plans as executable job data.
-
-## Impact on tests
-
-Current tests should verify:
+Before changing resource or field architecture, verify:
 
 ```text
-ResourceDefinition local validation
-catalog resource ownership
-catalog resource lookup
-stage contracts use resource definitions
-operation contracts use resource definitions
-plans preserve resource-definition-based contracts
-landmass module exposes LandmassResourceDefinitions
-old symbolic resource contract names are absent from Runtime/Test code
-```
-
-Future tests should verify resource-to-field binding only when future field and runnable compilation code exists.
-
-## Review checklist
-
-Before changing this decision, verify:
-
-```text
-The change does not weaken catalog ownership validation.
-The change does not make contracts raw-symbol based.
-The change does not make current contracts field-based.
-The change does not put native storage into managed plans.
-The change does not make resources execution-profile dependent.
-The change does not make jobs aware of resources or symbols.
-The change preserves a clear future bridge from resources to fields.
+Contracts still use ResourceDefinition.
+Catalog ownership remains reference-exact.
+Resources do not contain storage metadata.
+Recipes do not contain execution policy.
+Requests do not contain field handles.
+Plans do not contain native storage.
+FieldDefinition remains planned until implemented.
+RunnablePlanCompiler owns resource-to-field binding.
+GenerationWorkspace owns native allocation.
+OperationScheduler owns job scheduling.
 ```
 
 ## Summary
 
-`ResourceDefinition` comes before `FieldDefinition` because managed planning needs semantic generated-value identity before execution storage exists.
+`ResourceDefinition` comes before `FieldDefinition` because semantic resource flow must be valid before storage representation exists.
 
-Resources define what values are required and produced.
+Resources define what generated values are.
 
-Fields will define how those values are represented for execution.
+Fields define how those values are represented for execution.
 
-Workspaces will allocate native storage.
+Current Runtime owns resources.
 
-Schedulers will schedule jobs.
-
-Jobs will transform native data.
-
-Keeping these boundaries separate makes the current managed architecture complete while leaving room for future execution design.
-
-```
+Future execution owns fields, workspaces, schedulers, and jobs.

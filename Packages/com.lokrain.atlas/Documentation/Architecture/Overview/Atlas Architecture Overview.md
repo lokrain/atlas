@@ -1,83 +1,108 @@
 # Atlas architecture overview
 
-Lokrain.Atlas is a Unity package for deterministic world-generation architecture.
+Lokrain.Atlas is a managed Unity package for deterministic world-generation architecture.
 
-The package is organized around a strict separation between:
+The current Runtime model defines validated domain objects, reusable generation inventory, catalog validation, request resolution, and managed plan compilation.
 
-- authored symbolic intent;
-- accepted managed domain objects;
-- catalog-owned definitions;
-- request resolution;
-- managed plan compilation;
-- future executable plan metadata;
-- future native workspace storage;
-- future schedulers and jobs.
+Current Runtime architecture ends at `GenerationPlan`.
 
-The current Runtime implements the managed architecture up to `GenerationPlan`. Execution concepts such as field definitions, runnable plans, workspaces, schedulers, and Burst jobs are planned architecture and are not implemented Runtime behavior.
+Execution after `GenerationPlan` is planned architecture.
 
-## Architecture goals
+## Architecture summary
 
-The architecture is designed to preserve these properties:
-
-- deterministic generation inputs;
-- stable machine-facing symbols;
-- validated accepted domain objects;
-- clear ownership boundaries;
-- immutable catalog snapshots;
-- explicit request resolution;
-- managed plans without execution state;
-- future Burst-compatible execution boundaries;
-- no hidden coupling between authoring, planning, storage, and scheduling.
-
-Atlas avoids treating Unity assets, editor objects, native containers, jobs, or ECS systems as canonical domain state.
-
-Unity-facing objects may adapt user-authored data into Atlas descriptors or definitions. They do not replace the package domain model.
-
-## Current architecture
-
-The implemented architecture is a managed planning pipeline.
+Lokrain.Atlas separates generation into these boundaries:
 
 ```text
-GenerationRequestDescriptor
-        +
+Reusable definitions
+  -> Catalog validation
+  -> Symbolic request descriptors
+  -> Request resolution
+  -> Accepted generation requests
+  -> Managed plan compilation
+  -> Managed generation plans
+  -> Planned runnable execution
+```
+
+Each boundary owns a different responsibility.
+
+| Boundary | Responsibility |
+| --- | --- |
+| Definitions | Describe reusable generation inventory. |
+| Catalog | Own and validate accepted definition graphs. |
+| Descriptor | Represent symbolic caller intent. |
+| Resolver | Convert symbolic intent into accepted run intent. |
+| Request | Represent one accepted resolved generation run. |
+| Plan compiler | Compile accepted run intent into a managed semantic plan. |
+| Plan | Represent current managed semantic generation order. |
+| Future execution | Compile runnable metadata, allocate storage, schedule jobs, and capture outputs. |
+
+## Current Runtime scope
+
+Current Runtime includes:
+
+```text
+Core values
+Generation schemas
+Semantic resource definitions
+Stage kinds and operation kinds
+Stage definitions, routes, route steps, and contracts
+Operation definitions, contracts, and implementation definitions
+Generation recipes
+Generation catalogs
+Generation run settings
+Generation request descriptors
+Operation implementation override descriptors
+Generation request resolution
+Generation requests
+Generation plan compilation
+Generation plans
+Stage plan nodes
+Operation plan nodes
+```
+
+Current Runtime does not include:
+
+```text
+FieldDefinition
+RunnablePlan
+GenerationWorkspace
+OperationScheduler
+native storage allocation
+job scheduling
+Burst execution
+artifact capture
+ECS execution integration
+```
+
+## Primary flow
+
+The current managed flow is:
+
+```text
 GenerationCatalog
-        |
-        v
-GenerationRequestResolver
-        |
-        v
-GenerationRequestResolutionResult
-        |
-        v
-GenerationRequest
-        |
-        v
-GenerationPlanCompiler
-        |
-        v
-GenerationPlan
-````
+  + GenerationRequestDescriptor
+    -> GenerationRequestResolver
+    -> GenerationRequestResolutionResult
+    -> GenerationRequest
+    -> GenerationPlanCompiler
+    -> GenerationPlan
+```
 
-The current architecture answers these questions:
+The catalog provides accepted reusable inventory.
 
-| Question                                                                                    | Current owner                     |
-| ------------------------------------------------------------------------------------------- | --------------------------------- |
-| What stable values and identifiers exist?                                                   | Core value objects                |
-| What schemas, resources, stages, operations, implementations, recipes, and contracts exist? | Definitions and catalog           |
-| Which recipe and implementation overrides did the caller request?                           | Request descriptor                |
-| Can the symbolic request be satisfied by this catalog?                                      | Request resolver                  |
-| What accepted generation run should be planned?                                             | Generation request                |
-| What ordered managed generation plan should run?                                            | Plan compiler and generation plan |
+The descriptor provides symbolic caller intent.
 
-The current architecture does not execute generation work.
+The resolver produces either an accepted request or structured resolution errors.
 
-## Primary layers
+The compiler produces a managed semantic plan.
 
-### Core
+The plan is the current Runtime endpoint.
 
-Core contains reusable value objects and low-level invariants.
+## Core values
 
-Examples:
+Core values represent validated primitive domain data.
+
+Current core values include:
 
 ```text
 Symbol
@@ -88,162 +113,349 @@ CellIndex
 Seed
 ```
 
-Core types are independent of catalog, planning, Unity objects, execution, jobs, and native containers.
-
-### Definitions
-
-Definitions describe accepted reusable package inventory.
+A core value owns its own local invariants.
 
 Examples:
 
 ```text
+Symbol validates stable machine-facing identity text.
+DisplayName validates user-facing metadata text.
+Grid validates width, depth, cell count, and coordinate/index conversion.
+Seed represents deterministic generation input.
+```
+
+Core values do not know catalogs, recipes, requests, plans, Unity objects, native storage, or jobs.
+
+## Definitions
+
+Definitions describe reusable package inventory.
+
+Current definition types include:
+
+```text
 GenerationSchemaDefinition
 ResourceDefinition
+StageKind
 StageDefinition
 StageRouteDefinition
 StageRouteStepDefinition
-StageContract
+OperationKind
 OperationDefinition
-OperationContract
 OperationImplementationDefinition
 GenerationRecipeDefinition
 ```
 
-Definitions are metadata. They do not represent one generation run and do not own execution state.
+Definitions do not represent one generation run.
 
-### Catalog
+Definitions must not contain run-specific settings, native storage, job handles, scheduler state, or Unity object identity.
 
-`GenerationCatalog` is an immutable accepted inventory of definitions.
+## Resources
 
-The catalog owns the accepted definitions it exposes. Catalog-owned graphs must reference definitions from the same catalog instance. Cross-catalog object reuse is invalid.
+`ResourceDefinition` describes the semantic identity of a generated value.
 
-The catalog provides lookup and validates graph consistency. It does not resolve request descriptors, compile plans, allocate storage, or execute jobs.
+Resources are used by stage and operation contracts to describe semantic resource flow.
 
-### Request descriptor
+Examples:
 
-`GenerationRequestDescriptor` is symbolic input.
+```text
+ContinentSuitability
+ContinentCandidate
+MainContinent
+ContinentalLandmassArea
+BaseElevation
+```
 
-It contains the selected recipe symbol, run settings, and optional implementation override descriptors.
+A resource is not storage.
 
-A descriptor is structurally valid after construction, but it is not catalog-resolved. Its symbols may or may not exist in a specific catalog.
+A resource definition does not describe field shape, native container layout, allocation, scheduling, or artifact capture.
 
-### Request resolver
+Storage-facing metadata is planned as `FieldDefinition`.
 
-`GenerationRequestResolver` converts symbolic intent into accepted resolved intent.
+## Contracts
 
-It resolves descriptor symbols through a catalog and returns a `GenerationRequestResolutionResult`.
+Contracts describe semantic input/output flow.
 
-Expected catalog-satisfiability failures are returned as structured resolution errors. Invalid API usage throws exceptions.
+Current contract types are:
 
-### Generation request
+```text
+StageContract
+OperationContract
+```
+
+Contracts use `ResourceDefinition` inputs and outputs.
+
+Correct:
+
+```text
+OperationContract
+  requires ContinentSuitability
+  produces ContinentCandidate
+```
+
+Incorrect:
+
+```text
+OperationContract
+  requires NativeArray<float>
+  produces FieldHandle
+```
+
+Contracts are managed planning metadata, not storage or execution metadata.
+
+## Stages and operations
+
+A stage is a coarse generation phase.
+
+An operation is a semantic work unit inside a stage route.
+
+A stage route defines ordered operation occurrences for satisfying a stage.
+
+A route step is an operation occurrence and has its own symbol.
+
+This allows the same operation definition to appear multiple times in a route while still allowing per-occurrence implementation choices.
+
+```text
+StageDefinition
+  -> StageRouteDefinition
+    -> StageRouteStepDefinition
+      -> OperationDefinition symbol
+```
+
+The route step stores an operation-definition symbol. The accepted operation binding is established later through recipe choices, catalog validation, request resolution, and planning.
+
+## Implementations
+
+`OperationImplementationDefinition` describes a selectable implementation for an operation definition.
+
+An implementation definition identifies an implementation option. It does not execute work by itself.
+
+Execution is planned after managed plan compilation.
+
+Correct:
+
+```text
+OperationImplementationDefinition
+  OperationDefinition: ExtractMainContinent
+  Symbol: lokrain.atlas.landmass.implementation.extract_main_continent.default
+```
+
+Incorrect:
+
+```text
+OperationImplementationDefinition owns NativeArray<T>.
+OperationImplementationDefinition schedules JobHandle.
+```
+
+## Catalogs
+
+`GenerationCatalog` is immutable accepted inventory.
+
+It owns accepted definition instances and validates graph consistency.
+
+Catalog ownership is reference-exact.
+
+A definition belongs to a catalog only when that exact object instance is owned by the catalog.
+
+Symbol-equivalent definitions are not interchangeable.
+
+The catalog validates:
+
+```text
+definition uniqueness
+schema consistency
+resource ownership
+stage ownership
+route ownership
+route-step consistency
+operation ownership
+implementation compatibility
+contract resource ownership
+recipe graph consistency
+cross-catalog reference rejection
+```
+
+The catalog does not represent one generation run.
+
+## Recipes
+
+`GenerationRecipeDefinition` is a reusable generation template.
+
+A recipe selects:
+
+```text
+generation schema
+stage route choices
+default route-step implementation choices
+```
+
+A recipe does not contain:
+
+```text
+Grid
+Seed
+GenerationRunSettings
+GenerationRequestDescriptor
+GenerationRequest
+GenerationPlan
+native storage
+job scheduling
+```
+
+The same recipe can be used for many runs.
+
+## Descriptors
+
+Descriptors represent symbolic caller intent.
+
+Current descriptor types include:
+
+```text
+GenerationRequestDescriptor
+OperationImplementationOverrideDescriptor
+```
+
+A request descriptor contains:
+
+```text
+recipe symbol
+run settings
+implementation override descriptors
+```
+
+Descriptors may contain symbols that are valid text but unresolved for a specific catalog.
+
+A descriptor is not an accepted request.
+
+## Request resolution
+
+`GenerationRequestResolver` converts symbolic caller intent into accepted run intent.
+
+It uses:
+
+```text
+GenerationCatalog
+GenerationRequestDescriptor
+```
+
+It returns:
+
+```text
+GenerationRequestResolutionResult
+```
+
+Resolution can fail when the descriptor cannot be satisfied by the catalog.
+
+Expected resolution failures are returned as structured errors.
+
+Examples:
+
+```text
+unknown recipe symbol
+route step override not selected by recipe
+unknown implementation symbol
+implementation operation mismatch
+```
+
+Resolver failures are not catalog construction failures.
+
+## Requests
 
 `GenerationRequest` is accepted resolved generation intent for one run.
 
-It contains the selected recipe, run settings, and final implementation choices.
-
-A request contains accepted definitions, not unresolved symbols.
-
-### Plan compiler
-
-`GenerationPlanCompiler` converts an accepted request into a managed semantic plan.
-
-The compiler does not resolve symbols through the catalog during normal plan compilation. Resolution is already complete before a request reaches the compiler.
-
-### Generation plan
-
-`GenerationPlan` is accepted managed semantic data for one generation run.
-
-It contains the selected recipe, run settings, ordered stage plan nodes, and ordered operation plan nodes.
-
-A generation plan is not executable job data. It contains no native storage, field handles, job handles, dependency handles, scheduler bindings, or Burst function pointers.
-
-## Resource model
-
-`ResourceDefinition` represents the semantic identity of a generated value.
-
-Stage and operation contracts declare required inputs and produced outputs as resource definitions.
-
-A resource answers:
+A request contains:
 
 ```text
-What value is required or produced?
+GenerationRecipeDefinition
+GenerationRunSettings
+final StageRouteStepImplementationChoice list
 ```
 
-A resource does not answer:
+A request contains accepted definitions.
+
+A request contains no unresolved symbols.
+
+A request does not allocate storage or execute work.
+
+## Managed plans
+
+`GenerationPlanCompiler` compiles an accepted `GenerationRequest` into a `GenerationPlan`.
+
+A generation plan contains:
 
 ```text
-How is the value stored?
-Which native container owns it?
-Which scheduler writes it?
-Which job reads it?
-Which artifact captures it?
+GenerationRecipeDefinition
+GenerationSchemaDefinition
+GenerationRunSettings
+StagePlanNode list
 ```
 
-Those are future execution concerns.
-
-## Future execution architecture
-
-The planned execution architecture begins after managed plan compilation.
+A stage plan node contains:
 
 ```text
-GenerationPlan
-        |
-        v
-RunnablePlanCompiler
-        |
-        v
-RunnablePlan
-        |
-        v
-GenerationWorkspace
-        |
-        v
-OperationScheduler
-        |
-        v
-Burst jobs
+StageDefinition
+StageRouteDefinition
+StageContract
+OperationPlanNode list
 ```
 
-Future execution architecture introduces these planned concepts:
+An operation plan node contains:
+
+```text
+StageRouteStepDefinition
+OperationDefinition
+OperationContract
+OperationImplementationDefinition
+```
+
+A generation plan is managed semantic data.
+
+It is not executable job data.
+
+## Planned execution architecture
+
+Execution architecture starts after `GenerationPlan`.
+
+Planned execution concepts include:
 
 ```text
 FieldDefinition
+FieldDefinitionSet
 ExecutionProfile
 RunnablePlanCompiler
 RunnablePlan
 RunnableStage
 RunnableOperation
-SchedulerBinding
+FieldHandle
 GenerationWorkspace
 OperationScheduler
-FieldHandle
 OperationScratch
+native storage
+Burst jobs
+artifacts
+execution diagnostics
+ECS integration
 ```
 
-These concepts are not part of the current implemented Runtime unless code exists for them.
+The planned flow is:
 
-## Future execution boundary
+```text
+GenerationPlan
+  + FieldDefinitionSet
+  + ExecutionProfile
+    -> RunnablePlanCompiler
+    -> RunnablePlan
+    -> GenerationWorkspace
+    -> OperationScheduler
+    -> Jobs
+```
 
-The future execution model must preserve this boundary:
-
-| Layer                  | Owns                                              | Must not own                                                      |
-| ---------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
-| Managed plan           | Semantic ordered generation work                  | Native storage, job handles, scheduler bindings                   |
-| Runnable plan compiler | Binding semantic resources to executable metadata | Native allocation, job scheduling                                 |
-| Runnable plan          | Execution metadata                                | Native storage lifetime, running jobs                             |
-| Workspace              | Native storage allocation and disposal            | Catalog lookup, recipe selection, semantic planning               |
-| Scheduler              | Operation control flow and job scheduling         | Catalog resolution, symbolic lookup                               |
-| Job                    | Deterministic transform over native data          | Symbols, catalog, recipes, requests, plans, resources, schedulers |
-
-Jobs must receive only native containers and unmanaged values.
-
-Jobs must not inspect symbols, catalogs, schemas, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.
+Future execution concepts must not be modeled as current Runtime behavior until corresponding Runtime code exists.
 
 ## Unity boundary
 
-Atlas Runtime domain objects are package domain objects, not Unity scene objects.
+Current managed Runtime domain and planning objects are not Unity object wrappers.
 
-Runtime managed planning code should stay independent from:
+They must not depend on:
 
 ```text
 UnityEngine.Object
@@ -253,110 +465,139 @@ GameObject
 UnityEditor
 ECS World
 ECS System
-NativeContainer allocation
-Job scheduling
+Entity
+NativeArray<T>
+JobHandle
 ```
 
-Unity-facing code may exist as adapters around the domain model.
+Unity-facing adapters may translate Unity-authored data into Atlas descriptors or accepted definitions.
 
-Examples:
+Unity object identity must not define package-domain identity.
 
-| Unity-facing object | Correct role                                                   |
-| ------------------- | -------------------------------------------------------------- |
-| ScriptableObject    | Authoring adapter for definitions or descriptors               |
-| Editor window       | Tooling surface for validation and inspection                  |
-| Importer            | Translation from external data into descriptors or definitions |
-| ECS system          | Future execution integration, not catalog ownership            |
-| MonoBehaviour       | Integration adapter, not canonical generation state            |
+Correct:
 
-The package domain model remains the source of truth.
+```text
+ScriptableObject authoring asset -> GenerationRequestDescriptor
+Editor window -> displays GenerationCatalog
+Importer -> creates accepted definitions
+```
 
-## Determinism boundary
+Incorrect:
+
+```text
+ScriptableObject is the canonical recipe.
+GameObject name is the Symbol.
+MonoBehaviour owns GenerationCatalog identity.
+```
+
+## Determinism
 
 Deterministic generation depends on stable accepted inputs.
 
-Current deterministic input concepts include:
+Stable inputs include:
 
 ```text
 Symbol
 Grid
 Seed
 GenerationRunSettings
-GenerationRecipeDefinition
-StageRouteChoice
-StageRouteStepImplementationChoice
+accepted recipe choices
+accepted implementation choices
 GenerationRequest
-GenerationPlan
+GenerationPlan ordering
 ```
 
-Display names, Unity object names, asset paths, editor selection state, managed object identity, dictionary enumeration order, and process-local hash codes must not define deterministic generation semantics.
+Do not use these as deterministic identity:
 
-## Ownership boundary
+```text
+DisplayName
+Unity object instance ID
+Unity asset path
+managed object reference identity
+process-local string hash code
+current time
+global random state
+editor selection state
+```
 
-Ownership is explicit.
+Symbols are identity.
 
-The catalog owns accepted definitions.
+Display names are metadata.
 
-The request owns one resolved run intent.
+## Error boundaries
 
-The plan owns one managed semantic plan.
-
-Future workspace execution owns native storage.
-
-Future schedulers own execution control flow.
-
-Future jobs own only their local deterministic transform logic.
-
-No layer should reach backward to reinterpret an earlier symbolic boundary or reach forward to allocate another layer’s execution state.
-
-## Error-handling boundary
-
-Atlas separates invalid API usage from expected domain failure.
-
-Invalid API usage throws exceptions.
+Lokrain.Atlas uses exceptions for invalid API usage and result objects for expected boundary failures.
 
 Examples:
 
+| Scenario | Boundary |
+| --- | --- |
+| Null required argument | Exception |
+| Invalid symbol text | Exception |
+| Invalid grid dimension | Exception |
+| Invalid catalog inventory | Exception |
+| Unknown recipe symbol during request resolution | Failed result |
+| Unknown implementation override symbol | Failed result |
+
+Catalog construction failures throw.
+
+Descriptor resolution failures return `GenerationRequestResolutionResult`.
+
+## Built-in landmass module
+
+The current built-in generation module is landmass.
+
+It provides built-in definitions for:
+
 ```text
-null arguments
-duplicate entries in constructor inputs
-out-of-range grid coordinates
-invalid symbols
-invalid display names
+world generation schema
+landmass resources
+landmass stage kind
+landmass stage definition
+landmass stage route
+landmass route steps
+landmass stage contract
+landmass operation kinds
+landmass operation definitions
+landmass operation contracts
+landmass operation implementations
+landmass generation recipe
+landmass request factory
+landmass catalog factory
 ```
 
-Expected catalog-satisfiability failure uses result objects.
+The landmass module follows the same Runtime boundaries as custom generation modules.
 
-Examples:
+## Architecture principles
 
-```text
-missing recipe symbol
-missing implementation override target
-override implementation not compatible with selected route step
-```
+Use accepted domain objects instead of primitive bags.
 
-Execution failure policy is future architecture and belongs to scheduler/workspace design.
+Use symbols for stable identity.
 
-## Documentation map
+Use display names only as user-facing metadata.
 
-Use the architecture documentation by purpose:
+Use resource definitions for semantic resource flow.
 
-| Purpose                        | Location      |
-| ------------------------------ | ------------- |
-| System overview                | `Overview/`   |
-| Domain model explanation       | `Concepts/`   |
-| Required rules                 | `Guidelines/` |
-| Term definitions               | `Reference/`  |
-| Planned execution architecture | `Future/`     |
-| Recorded design decisions      | `Decisions/`  |
-| Ordered implementation work    | `Plans/`      |
+Use catalogs for accepted inventory and graph validation.
 
-Current architecture documents describe how the package must work now.
+Use descriptors for symbolic caller intent.
 
-Future documents describe planned architecture only.
+Use resolvers for catalog-dependent symbolic resolution.
 
-Decision documents may explain rejected options.
+Use requests for accepted resolved run intent.
 
-Plan documents describe work order and must not redefine the architecture.
+Use plan compilers for managed semantic plans.
 
-```
+Keep current managed Runtime separate from planned execution.
+
+Keep Unity adapters outside canonical Runtime domain identity.
+
+## Summary
+
+Lokrain.Atlas current Runtime architecture is managed and semantic.
+
+It defines accepted values, definitions, catalogs, descriptors, requests, and managed plans.
+
+It does not execute generation jobs.
+
+Execution is planned after `GenerationPlan` through runnable compilation, workspace ownership, scheduler control, and jobs.

@@ -1,14 +1,12 @@
 # Dependency rules
 
-This document defines dependency direction for Lokrain.Atlas architecture.
+This document defines dependency direction rules for Lokrain.Atlas.
 
-Dependencies must preserve ownership boundaries. A lower layer must not reference a higher layer to complete its own meaning.
+Dependencies must preserve architectural ownership. Lower layers define stable domain concepts. Higher layers compose, resolve, compile, execute, adapt, or test those concepts.
 
-## Primary rule
+## Dependency direction
 
-Dependencies flow from lower-level domain concepts toward higher-level orchestration.
-
-Allowed direction:
+Allowed dependency direction:
 
 ```text
 Core
@@ -18,69 +16,36 @@ Core
   -> Operations
   -> Catalog
   -> Recipes
-  -> Requests
-  -> Plans
+  -> Planning
   -> Future execution
   -> Unity adapters
   -> Editor tooling
   -> Tests
-````
-
-A higher layer may reference lower-layer accepted objects.
-
-A lower layer must not reference higher-layer orchestration objects.
-
-## Current Runtime boundary
-
-Current Runtime managed architecture ends at `GenerationPlan`.
-
-Current Runtime managed planning code may depend on:
-
-```text
-System
-System.Collections.Generic
-System.Linq where appropriate
-Lokrain.Atlas.Core
-Lokrain.Atlas.Schemas
-Lokrain.Atlas.Resources
-Lokrain.Atlas.Stages
-Lokrain.Atlas.Operations
-Lokrain.Atlas.Catalog
-Lokrain.Atlas.Recipes
-Lokrain.Atlas.Requests
-Lokrain.Atlas.Plans
-Lokrain.Atlas.Generation.*
 ```
 
-Current Runtime managed planning code must not depend on:
+A layer may reference layers above it in this diagram only through tests or explicitly separated adapter code.
+
+## Core
+
+Core contains general package-owned value objects and map primitives.
+
+Examples:
 
 ```text
-UnityEditor
-UnityEngine.Object ownership
-MonoBehaviour
-ScriptableObject as canonical domain state
-GameObject
-Scene
-ECS World
-ECS System
-Unity.Collections native allocation
-Unity.Jobs scheduling
-Unity.Burst execution
-JobHandle ownership
+Symbol
+DisplayName
+Grid
+Cell
+CellIndex
+Seed
 ```
-
-Unity-facing integration belongs in explicit adapter layers, not in core managed domain objects.
-
-## Core dependencies
-
-Core is the lowest package domain layer.
 
 Core may depend on:
 
 ```text
 System
+System.Collections.Generic
 System.Globalization
-System.Text
 ```
 
 Core must not depend on:
@@ -92,35 +57,29 @@ Stages
 Operations
 Catalog
 Recipes
-Requests
-Plans
-Generation modules
+Planning
 UnityEngine
 UnityEditor
-Unity.Collections
-Unity.Jobs
-Unity.Burst
-ECS/DOTS
+Burst
+Jobs
+Collections
+ECS
 ```
 
-Examples of Core types:
+Core types must not know generation schemas, catalogs, recipes, requests, plans, or execution infrastructure.
+
+## Schemas
+
+Schemas define generation families.
+
+Examples:
 
 ```text
-Symbol
-DisplayName
-Grid
-Cell
-CellIndex
-Seed
+GenerationSchemaDefinition
+BuiltInGenerationSchemas
 ```
 
-Core types must remain reusable, deterministic, and independent from generation workflow.
-
-## Schema dependencies
-
-Schemas define generation-family identity.
-
-Schema definitions may depend on:
+Schemas may depend on:
 
 ```text
 Core
@@ -134,49 +93,63 @@ Stages
 Operations
 Catalog
 Recipes
-Requests
-Plans
-Generation modules
+Planning
+UnityEngine
+UnityEditor
 Future execution
-Unity adapters
-Editor tooling
 ```
 
-A schema does not know which resources, stages, operations, or recipes exist.
+A schema is a low-level definition used by higher-level definitions.
 
-## Resource dependencies
+## Resources
 
 Resources define semantic generated values.
 
-`ResourceDefinition` may depend on:
+Examples:
+
+```text
+ResourceDefinition
+```
+
+Resources may depend on:
 
 ```text
 Core
 Schemas
 ```
 
-`ResourceDefinition` must not depend on:
+Resources must not depend on:
 
 ```text
 Stages
 Operations
 Catalog
 Recipes
-Requests
-Plans
+Planning
 FieldDefinition
 GenerationWorkspace
 OperationScheduler
-NativeArray<T>
-JobHandle
-Unity objects
+UnityEngine
+UnityEditor
 ```
 
-A resource identifies a generated value. It does not know who requires it, who produces it, how it is stored, or who schedules work for it.
+`ResourceDefinition` must not know storage layout, native containers, field handles, schedulers, jobs, artifacts, or Unity objects.
 
-## Stage dependencies
+## Stages
 
-Stage definitions may depend on:
+Stages define stage categories, stage definitions, stage routes, route steps, and stage contracts.
+
+Examples:
+
+```text
+StageKind
+StageDefinition
+StageRouteDefinition
+StageRouteStepDefinition
+StageContract
+```
+
+Stages may depend on:
 
 ```text
 Core
@@ -184,331 +157,157 @@ Schemas
 Resources
 ```
 
-Stage contracts may depend on:
+Stages must not depend on:
 
 ```text
-ResourceDefinition
-```
-
-Stage definitions and contracts must not depend on:
-
-```text
+Operations
 Catalog
 Recipes
-Requests
-Plans
-Operations as execution dependencies
-FieldDefinition
-GenerationWorkspace
-OperationScheduler
-JobHandle
-Native containers
-Unity adapters
-```
-
-A stage can describe semantic phase metadata and resource flow. It must not know request resolution, plan compilation, storage, or scheduling.
-
-## Operation dependencies
-
-Operation definitions may depend on:
-
-```text
-Core
-Schemas
-Resources
-```
-
-Operation contracts may depend on:
-
-```text
-ResourceDefinition
-```
-
-Operation implementation definitions may depend on:
-
-```text
-Core
-Schemas
-Operations
-```
-
-Current operation implementation definitions are metadata. They must not depend on:
-
-```text
-Unity.Jobs
-Unity.Burst
-Native containers
-OperationScheduler
-RunnableOperation
-GenerationWorkspace
-JobHandle
-```
-
-A future execution binding layer may map operation implementation definitions to schedulers. The definition itself should remain managed metadata.
-
-## Catalog dependencies
-
-`GenerationCatalog` may depend on:
-
-```text
-Core
-Schemas
-Resources
-Stages
-Operations
-Recipes
-```
-
-The catalog owns accepted definition inventory and validates graph consistency.
-
-The catalog must not depend on:
-
-```text
-Requests
-Plans
+Planning
 Future execution
-Unity adapters
-Editor tooling
-Native containers
-Jobs
-Schedulers
+UnityEngine
+UnityEditor
 ```
 
-Invalid dependencies:
+Exception: `StageRouteStepDefinition` may contain an operation-definition symbol because route steps are symbolic authored occurrences. It must not reference `OperationDefinition`.
+
+Correct:
 
 ```text
-GenerationCatalog -> GenerationRequestDescriptor
-GenerationCatalog -> GenerationRequest
-GenerationCatalog -> GenerationPlan
-GenerationCatalog -> GenerationWorkspace
-GenerationCatalog -> OperationScheduler
+StageRouteStepDefinition.OperationDefinitionSymbol
 ```
 
-The catalog provides lookup. It does not resolve one request or execute generation.
+Incorrect:
 
-## Recipe dependencies
+```text
+StageRouteStepDefinition.OperationDefinition
+```
+
+## Operations
+
+Operations define operation categories, operation definitions, operation contracts, and operation implementations.
+
+Examples:
+
+```text
+OperationKind
+OperationDefinition
+OperationContract
+OperationImplementationDefinition
+```
+
+Operations may depend on:
+
+```text
+Core
+Schemas
+Resources
+```
+
+Operations must not depend on:
+
+```text
+Stages
+Catalog
+Recipes
+Planning
+Future execution
+UnityEngine
+UnityEditor
+```
+
+Operation contracts use `ResourceDefinition`, not field definitions or native storage.
+
+## Catalog
+
+Catalog code owns accepted definition inventory and graph validation.
+
+Examples:
+
+```text
+GenerationCatalog
+GenerationCatalogBuilder
+```
+
+Catalog may depend on:
+
+```text
+Core
+Schemas
+Resources
+Stages
+Operations
+Recipes
+```
+
+Catalog must not depend on:
+
+```text
+Planning
+Future execution
+UnityEngine
+UnityEditor
+```
+
+Catalog validation may inspect definitions, contracts, routes, and recipes.
+
+Catalog must not resolve generation request descriptors, compile plans, allocate native storage, or schedule jobs.
+
+## Recipes
+
+Recipes define reusable generation templates and selected route or implementation choices.
+
+Examples:
+
+```text
+GenerationRecipeDefinition
+StageRouteChoice
+StageRouteStepImplementationChoice
+```
 
 Recipes may depend on:
 
 ```text
 Core
 Schemas
+Resources
 Stages
 Operations
-Resources through contracts
-```
-
-Recipe definitions may contain accepted choices:
-
-```text
-StageRouteChoice
-StageRouteStepImplementationChoice
 ```
 
 Recipes must not depend on:
 
 ```text
-Requests
-Plans
+Catalog
+Planning
 Future execution
-Unity adapters
-Native storage
-Schedulers
-Jobs
+UnityEngine
+UnityEditor
 ```
 
-Invalid dependencies:
+Recipes must be valid reusable templates independent of a specific catalog instance. Catalog ownership validation belongs to `GenerationCatalog`.
+
+## Planning
+
+Planning resolves descriptors and compiles managed semantic plans.
+
+Examples:
 
 ```text
-GenerationRecipeDefinition -> GenerationRunSettings
-GenerationRecipeDefinition -> GenerationRequestDescriptor
-GenerationRecipeDefinition -> GenerationRequest
-GenerationRecipeDefinition -> GenerationPlan
-GenerationRecipeDefinition -> NativeArray<T>
-```
-
-A recipe is reusable inventory, not one run.
-
-## Request descriptor dependencies
-
-Request descriptors may depend on:
-
-```text
-Core
-Requests
 GenerationRunSettings
-```
-
-A request descriptor may contain symbols and run settings.
-
-A request descriptor must not depend on:
-
-```text
-Catalog
-GenerationRecipeDefinition
-StageRouteStepDefinition
-OperationImplementationDefinition
+GenerationRequestDescriptor
+OperationImplementationOverrideDescriptor
+GenerationRequestResolver
+GenerationRequestResolutionResult
+GenerationRequestResolutionError
 GenerationRequest
+GenerationPlanCompiler
 GenerationPlan
-Future execution
-Native containers
-Jobs
-Unity scene objects
+StagePlanNode
+OperationPlanNode
 ```
 
-Invalid dependencies:
-
-```text
-GenerationRequestDescriptor -> GenerationCatalog
-GenerationRequestDescriptor -> GenerationRecipeDefinition
-OperationImplementationOverrideDescriptor -> StageRouteStepDefinition
-OperationImplementationOverrideDescriptor -> OperationImplementationDefinition
-```
-
-Descriptors are symbolic. They must not contain accepted catalog-owned definitions.
-
-## Resolver dependencies
-
-`GenerationRequestResolver` may depend on:
-
-```text
-Catalog
-Recipes
-Requests
-Stages
-Operations
-Core
-```
-
-The resolver bridges symbolic descriptors to accepted request objects.
-
-The resolver may reference catalog-owned definitions because resolution is its boundary.
-
-The resolver must not depend on:
-
-```text
-Plans
-Future execution
-Native containers
-Schedulers
-Jobs
-Unity adapters
-Editor tooling
-```
-
-Invalid dependencies:
-
-```text
-GenerationRequestResolver -> GenerationPlanCompiler
-GenerationRequestResolver -> GenerationPlan
-GenerationRequestResolver -> GenerationWorkspace
-GenerationRequestResolver -> OperationScheduler
-```
-
-The resolver creates accepted requests. It does not compile plans.
-
-## Request dependencies
-
-`GenerationRequest` may depend on:
-
-```text
-Recipes
-Requests
-Core
-Stages
-Operations
-```
-
-It may contain accepted recipe, run settings, and final implementation choices.
-
-`GenerationRequest` must not depend on:
-
-```text
-GenerationRequestDescriptor
-GenerationRequestResolver
-GenerationCatalog
-Plans
-Future execution
-Native containers
-Schedulers
-Jobs
-Unity adapters
-```
-
-Invalid dependencies:
-
-```text
-GenerationRequest -> GenerationRequestDescriptor
-GenerationRequest -> GenerationCatalog
-GenerationRequest -> GenerationPlan
-GenerationRequest -> NativeArray<T>
-GenerationRequest -> JobHandle
-```
-
-A request is accepted resolved intent. It does not carry unresolved input or execution state.
-
-## Plan dependencies
-
-`GenerationPlanCompiler` may depend on:
-
-```text
-Requests
-Recipes
-Stages
-Operations
-Plans
-Core
-```
-
-`GenerationPlan` and plan nodes may depend on:
-
-```text
-Requests
-Recipes
-Stages
-Operations
-Core
-```
-
-Plan types must not depend on:
-
-```text
-Catalog for normal compilation
-GenerationRequestDescriptor
-GenerationRequestResolver
-Future execution
-Unity.Collections
-Unity.Jobs
-Unity.Burst
-ECS systems
-Unity adapters
-```
-
-Invalid dependencies:
-
-```text
-GenerationPlan -> GenerationCatalog
-GenerationPlan -> GenerationRequestDescriptor
-GenerationPlan -> FieldDefinition
-GenerationPlan -> RunnablePlan
-GenerationPlan -> GenerationWorkspace
-GenerationPlan -> JobHandle
-OperationPlanNode -> NativeArray<T>
-```
-
-A managed plan is semantic planning data, not executable runtime state.
-
-## Generation module dependencies
-
-Generation modules may depend on the managed domain layers needed to expose built-in definitions and helpers.
-
-Example module:
-
-```text
-Lokrain.Atlas.Generation.Landmass
-```
-
-A generation module may depend on:
+Planning may depend on:
 
 ```text
 Core
@@ -518,418 +317,311 @@ Stages
 Operations
 Catalog
 Recipes
-Requests
-Plans when it exposes plan-related helpers
 ```
 
-A generation module must not bypass architecture boundaries.
+Planning must not depend on:
+
+```text
+Future execution
+UnityEngine
+UnityEditor
+Burst
+Jobs
+Collections
+ECS
+```
+
+Planning may use catalog lookup and accepted definitions.
+
+Planning must not allocate native storage, schedule jobs, bind field handles, or capture artifacts.
+
+## Generation modules
+
+Generation modules provide built-in generation definitions, contracts, routes, operations, recipes, request factories, and catalog helpers.
+
+Example:
+
+```text
+Lokrain.Atlas.Generation.Landmass
+```
+
+Generation modules may depend on:
+
+```text
+Core
+Schemas
+Resources
+Stages
+Operations
+Catalog
+Recipes
+Planning
+```
 
 Generation modules must not depend on:
 
 ```text
-UnityEditor in Runtime code
-Unity scene state
-Native execution systems unless the module is explicitly an execution assembly
-Tests
-Samples
+UnityEngine
+UnityEditor
+Future execution
+native storage
+job scheduling
 ```
 
-Correct module surfaces:
+Generation module definition files must remain managed definition inventory.
+
+Correct:
 
 ```text
 LandmassResourceDefinitions
 LandmassStageDefinitions
 LandmassOperationDefinitions
-LandmassRecipeDefinitions
-LandmassCatalogs
-LandmassRequestDescriptors
+LandmassGenerationRecipes
+LandmassGenerationRequests
+LandmassGenerationCatalog
 ```
 
-Incorrect module dependencies:
+Incorrect:
 
 ```text
-LandmassResourceDefinitions -> GenerationWorkspace
-LandmassRecipeDefinitions -> GenerationRunSettings defaults hidden in recipe state
-LandmassRequestDescriptors -> Unity scene lookup
-LandmassCatalogs -> Editor asset database
+LandmassNativeBuffers
+LandmassJobScheduler
+LandmassEcsSystem
+LandmassScriptableRecipe
 ```
 
-## Future execution dependencies
+## Future execution
 
-Future execution code starts after `GenerationPlan`.
+Future execution compiles runnable metadata, owns native storage, schedules jobs, and captures execution output.
 
-Future runnable compilation may depend on:
-
-```text
-Plans
-Resources
-Operations
-Future field definitions
-Future scheduler bindings
-```
-
-Future workspace code may depend on:
+Planned examples:
 
 ```text
-Future field definitions
-Future runnable plan metadata
-Unity.Collections
-Unity.Jobs where needed for handles and safety
-```
-
-Future scheduler code may depend on:
-
-```text
-Future runnable operations
-Future workspace access
-Unity.Collections
-Unity.Jobs
-Unity.Burst-compatible job types
-```
-
-Future jobs may depend on:
-
-```text
-Unity.Collections
-Unity.Jobs
-Unity.Burst-compatible unmanaged data
-Unity.Mathematics when needed
-```
-
-Future jobs must not depend on:
-
-```text
-Core.Symbol
-DisplayName
-GenerationCatalog
-GenerationRecipeDefinition
-GenerationRequestDescriptor
-GenerationRequest
-GenerationPlan
-ResourceDefinition
-FieldDefinition as managed metadata
+FieldDefinition
+FieldDefinitionSet
+ExecutionProfile
+RunnablePlanCompiler
+RunnablePlan
 GenerationWorkspace
 OperationScheduler
-UnityEngine.Object
-UnityEditor
 ```
 
-Schedulers resolve execution metadata before scheduling jobs. Jobs receive native containers and unmanaged parameters only.
+Future execution may depend on:
 
-## Unity adapter dependencies
+```text
+Core
+Schemas
+Resources
+Stages
+Operations
+Catalog
+Recipes
+Planning
+Unity.Collections
+Unity.Jobs
+Unity.Burst
+Unity.Mathematics
+ECS integration packages when isolated in execution/integration layers
+```
+
+Future execution must not push dependencies back into current managed Runtime layers.
+
+Incorrect:
+
+```text
+ResourceDefinition depends on FieldDefinition.
+GenerationPlan depends on RunnablePlan.
+OperationContract depends on NativeArray<T>.
+GenerationRecipeDefinition depends on OperationScheduler.
+```
+
+## Unity adapters
+
+Unity adapters translate Unity-authored data into Atlas domain objects or display Atlas domain objects through Unity tooling.
 
 Unity adapters may depend on:
 
 ```text
+Runtime domain layers
 UnityEngine
-UnityEditor when inside Editor assemblies
-Atlas Runtime domain objects
+UnityEditor when editor-only
 ```
 
-Unity adapters include:
+Unity adapters must not become canonical domain state.
+
+Correct:
 
 ```text
-ScriptableObject authoring assets
-Editor windows
-importers
-inspectors
-MonoBehaviour integration shims
-ECS integration systems
+ScriptableObject authoring asset creates GenerationRequestDescriptor.
+Editor window displays GenerationCatalog.
+Importer creates accepted definitions from external data.
 ```
 
-Unity adapters may translate Unity-authored data into Atlas descriptors or definitions.
-
-Unity adapters must not become canonical Runtime domain state.
-
-Correct dependency:
+Incorrect:
 
 ```text
-Unity authoring asset -> Atlas descriptor or definition input
+ScriptableObject is the canonical GenerationRecipeDefinition.
+GameObject name is the domain Symbol.
+MonoBehaviour owns GenerationCatalog identity.
 ```
 
-Incorrect dependency:
+## Editor tooling
+
+Editor tooling is editor-only.
+
+Editor tooling may depend on:
 
 ```text
-Atlas ResourceDefinition -> ScriptableObject
-Atlas GenerationCatalog -> AssetDatabase
-Atlas GenerationRequest -> MonoBehaviour
-Atlas GenerationPlan -> GameObject
-```
-
-## Editor dependencies
-
-Editor code may depend on:
-
-```text
+Runtime
+UnityEngine
 UnityEditor
-UnityEngine
-Atlas Runtime
-Editor-only validation and tooling
 ```
 
-Runtime code must not depend on Editor code.
+Editor tooling must not be referenced by Runtime assemblies.
 
-Editor code may create, inspect, validate, and serialize authoring data. It must not define core Runtime semantics.
-
-Invalid dependency:
+Correct:
 
 ```text
+Editor assembly references Runtime assembly.
+```
+
+Incorrect:
+
+```text
+Runtime assembly references Editor assembly.
+Runtime domain object references UnityEditor.
+```
+
+## Tests
+
+Tests may depend on the code under test.
+
+Runtime tests may depend on:
+
+```text
+Runtime assemblies
+NUnit
+Unity test framework
+```
+
+Tests may create invalid candidate graphs to verify rejection.
+
+Tests must not define architecture by depending on implementation details that are intentionally private.
+
+## Forbidden reverse dependencies
+
+Do not introduce these dependencies:
+
+```text
+Core -> Schemas
+Core -> Planning
+Resources -> Catalog
+Resources -> Planning
+Stages -> Operations
+Operations -> Stages
+Definitions -> GenerationRunSettings
+Definitions -> GenerationRequest
+Definitions -> GenerationPlan
+Catalog -> Planning
+Recipes -> Catalog
+Planning -> Future execution
 Runtime -> Editor
-Runtime -> UnityEditor
+Current Runtime -> UnityEngine object identity
+Current Runtime -> UnityEditor
+Current Runtime -> ECS execution
+Current Runtime -> job scheduling
 ```
 
-## Test dependencies
+## Symbolic boundary exceptions
 
-Test assemblies may depend on the Runtime assembly under test.
+A lower layer may store a `Symbol` for a higher-layer definition when the relationship is intentionally unresolved.
 
-Tests may depend on test frameworks.
-
-Runtime assemblies must not depend on tests.
-
-Invalid dependency:
+Current approved example:
 
 ```text
-Runtime -> Tests
-Generation module Runtime -> Tests
+StageRouteStepDefinition.OperationDefinitionSymbol
 ```
 
-Tests may reference internal members only through an intentional assembly-level friend relationship if the project explicitly accepts that policy. Public API behavior should be tested through public API where practical.
+This exception is allowed because a route step is authored route metadata and operation binding happens later through recipe choices, catalog validation, and planning.
 
-## Sample dependencies
+Do not replace this with a direct `OperationDefinition` dependency.
 
-Samples may depend on Runtime and Unity-facing adapters.
+Do not add new symbolic boundary exceptions without documenting the ownership reason.
 
-Runtime must not depend on samples.
+## Dependency versus ownership
 
-Samples must not define canonical architecture semantics.
-
-Invalid dependency:
-
-```text
-Runtime -> Samples
-Architecture docs -> sample-only behavior as required architecture
-```
-
-## Assembly naming dependency rule
-
-Assembly names should preserve dependency direction and classification.
-
-Runtime assemblies should not end in `.Editor` or `.Tests`.
-
-Editor assemblies must end with:
-
-```text
-.Editor
-```
-
-Test assemblies must end with:
-
-```text
-.Tests
-```
-
-When both editor and tests exist, `.Editor` comes before `.Tests` in the assembly name.
+A reference does not always mean ownership.
 
 Examples:
 
 ```text
-Lokrain.Atlas
-Lokrain.Atlas.Editor
-Lokrain.Atlas.Tests
-Lokrain.Atlas.Generation.Landmass
-Lokrain.Atlas.Generation.Landmass.Editor
-Lokrain.Atlas.Generation.Landmass.Tests
+StageDefinition references GenerationSchemaDefinition.
+OperationDefinition references OperationKind.
+StageContract references ResourceDefinition.
+GenerationRecipeDefinition references StageRouteChoice.
+GenerationPlan references accepted definitions.
 ```
 
-Do not place `.Editor` or `.Tests` before the final domain segment unless the assembly’s classification is actually editor/test.
+Ownership depends on the layer.
 
-## Namespace dependency rule
+Catalog ownership is established by `GenerationCatalog`.
 
-Namespaces should reflect architecture areas.
+Run ownership is established by `GenerationRequest` and `GenerationPlan`.
 
-Allowed current managed namespace direction:
+Native storage ownership is planned for `GenerationWorkspace`.
 
-```text
-Lokrain.Atlas.Core
-Lokrain.Atlas.Schemas
-Lokrain.Atlas.Resources
-Lokrain.Atlas.Stages
-Lokrain.Atlas.Operations
-Lokrain.Atlas.Catalog
-Lokrain.Atlas.Recipes
-Lokrain.Atlas.Requests
-Lokrain.Atlas.Plans
-Lokrain.Atlas.Generation.*
-```
+## Assembly rules
 
-Avoid namespace references that imply backward dependencies.
+Assembly definitions should enforce dependency direction.
 
-Invalid examples:
+Runtime assemblies must not reference editor assemblies.
 
-```text
-Lokrain.Atlas.Core referencing Lokrain.Atlas.Catalog
-Lokrain.Atlas.Resources referencing Lokrain.Atlas.Plans
-Lokrain.Atlas.Recipes referencing Lokrain.Atlas.Requests
-Lokrain.Atlas.Plans referencing Lokrain.Atlas.Execution
-```
+Editor assemblies may reference runtime assemblies.
 
-## Type-reference rule
+Test assemblies may reference runtime assemblies and test framework assemblies.
 
-A type should reference the most precise lower-layer domain concept it needs.
+Future execution assemblies should be isolated from current semantic Runtime assemblies when native storage, Burst, Jobs, Collections, or ECS dependencies are introduced.
+
+## Documentation dependency rules
+
+Documentation must also preserve dependency direction.
+
+Current architecture docs must not describe future execution as current Runtime dependency.
+
+Future docs may reference current Runtime objects as inputs.
+
+Current Runtime docs may reference future concepts only as future boundaries.
 
 Correct:
 
 ```text
-OperationContract -> ResourceDefinition
-GenerationRequestDescriptor -> Symbol
-GenerationPlanCompiler -> GenerationRequest
+GenerationPlan is current managed semantic output.
+RunnablePlanCompiler is planned future execution bridge.
 ```
 
 Incorrect:
 
 ```text
-OperationContract -> Symbol for resource flow
-GenerationRequestDescriptor -> GenerationRecipeDefinition
-GenerationPlanCompiler -> GenerationRequestDescriptor
+GenerationPlan owns field handles.
+OperationContract maps directly to NativeArray<T>.
+ResourceDefinition stores FieldDefinition.
 ```
 
-Use accepted definitions where accepted definitions are required.
-
-Use symbols where symbolic input is required.
-
-Do not use raw strings where `Symbol` is required.
-
-## No upward callback rule
-
-Lower layers must not call upward through interfaces to avoid direct references.
-
-This is invalid even when the compile-time dependency looks abstract.
-
-Incorrect:
-
-```text
-ResourceDefinition accepts IResourceCatalogLookup
-StageContract accepts IFieldAllocator
-OperationDefinition accepts IOperationScheduler
-GenerationPlan accepts IJobScheduler
-```
-
-Interfaces do not fix an ownership violation when the lower layer still depends on a higher-layer responsibility.
-
-Use a higher-layer service to consume lower-layer objects instead.
-
-## No service-locator rule
-
-Do not use global service location to bypass dependencies.
-
-Invalid:
-
-```text
-AtlasServices.Catalog
-AtlasServices.CurrentWorkspace
-AtlasServices.JobScheduler
-Unity scene lookup from domain objects
-static mutable current request
-```
-
-Domain objects must receive required accepted data explicitly through constructors, factories, or method parameters.
-
-## No hidden Unity dependency rule
-
-Runtime domain objects must not read Unity global state.
-
-Invalid:
-
-```text
-Application.isPlaying inside domain objects
-Time.frameCount for deterministic generation
-Random.state for seed derivation
-SceneManager lookup for request input
-AssetDatabase for catalog lookup
-Resources.Load for definitions
-```
-
-Unity state belongs in adapters. Adapters translate Unity state into explicit Atlas domain inputs.
-
-## No hidden execution dependency rule
-
-Managed planning objects must not contain execution-specific hidden state.
-
-Invalid fields or properties in current planning objects:
-
-```text
-NativeArray<T>
-NativeList<T>
-NativeHashMap<TKey, TValue>
-JobHandle
-Entity
-World
-SystemHandle
-FieldHandle
-SchedulerBinding
-Burst function pointer
-```
-
-If execution needs metadata, introduce it in future execution layers after `GenerationPlan`.
-
-## Extension dependency rule
-
-External or future modules must follow the same direction as built-in modules.
-
-A module may add new accepted definitions and descriptors.
-
-A module must not require lower core layers to know about the module.
-
-Correct:
-
-```text
-Lokrain.Atlas.Generation.Landmass -> Lokrain.Atlas.Resources
-```
-
-Incorrect:
-
-```text
-Lokrain.Atlas.Resources -> Lokrain.Atlas.Generation.Landmass
-```
-
-The package core must not depend on a specific generation module.
-
-## Dependency review checklist
+## Checklist
 
 Before accepting a dependency, verify:
 
 ```text
-The dependency points from a higher layer to a lower layer.
-The referenced type owns the concept being used.
-The dependency does not make a reusable definition aware of one run.
-The dependency does not make current managed planning aware of future execution state.
-The dependency does not make Runtime code depend on Editor code.
-The dependency does not make domain objects depend on Unity scene or asset state.
-The dependency does not use an interface to hide an ownership violation.
-The dependency does not introduce global service lookup.
-The dependency does not make jobs aware of managed domain metadata.
-```
-
-## Summary
-
-Dependency direction protects the architecture.
-
-Core knows nothing about generation workflow.
-
-Definitions know nothing about requests or plans.
-
-Catalogs know definitions, not runs.
-
-Descriptors know symbols, not accepted catalog objects.
-
-Resolvers bridge descriptors and catalogs.
-
-Requests contain accepted resolved intent.
-
-Plans contain managed semantic ordering.
-
-Future execution starts after plans.
-
-Unity, Editor, tests, and samples are adapters or validation surfaces, not sources of domain truth.
-
+The dependency points in the allowed direction.
+The lower layer does not depend on the higher layer.
+Definitions do not depend on run-specific objects.
+Contracts do not depend on storage or execution objects.
+Catalog does not depend on planning.
+Recipes do not depend on catalog.
+Planning does not depend on future execution.
+Runtime does not depend on editor code.
+Current managed Runtime does not depend on native execution infrastructure.
+Unity object identity does not enter domain identity.
+A symbolic boundary exception is documented and intentional.
+Assembly references enforce the same direction as the architecture.
 ```

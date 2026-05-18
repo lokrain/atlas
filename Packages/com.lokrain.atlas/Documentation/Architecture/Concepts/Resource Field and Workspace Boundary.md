@@ -1,29 +1,42 @@
 # Resource, field, and workspace boundary
 
-Lokrain.Atlas separates semantic generated values from future storage and execution ownership.
+This article explains the boundary between semantic resources, planned storage-facing fields, and planned execution workspace ownership.
+
+Current Runtime architecture implements `ResourceDefinition`.
+
+`FieldDefinition`, `RunnablePlan`, `GenerationWorkspace`, `OperationScheduler`, native storage, jobs, artifacts, and ECS execution integration are planned architecture.
+
+## Boundary summary
 
 The boundary is:
 
 ```text
-ResourceDefinition -> FieldDefinition -> GenerationWorkspace
-     current             future               future
-````
+ResourceDefinition
+  -> FieldDefinition          planned
+  -> RunnablePlanCompiler     planned
+  -> RunnablePlan             planned
+  -> GenerationWorkspace      planned
+  -> OperationScheduler       planned
+  -> Jobs                     planned
+```
 
-`ResourceDefinition` is implemented Runtime architecture.
+Current Runtime stops before `FieldDefinition`.
 
-`FieldDefinition` and `GenerationWorkspace` are planned execution architecture and are not implemented Runtime behavior unless corresponding code exists.
+## Responsibility summary
 
-## Boundary summary
-
-| Concept               | Status  | Owns                                                                  | Does not own                                                               |
-| --------------------- | ------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `ResourceDefinition`  | Current | Semantic identity of a generated value.                               | Storage layout, native allocation, field handles, scheduler binding, jobs. |
-| `FieldDefinition`     | Future  | Storage-facing metadata for representing a resource during execution. | Native allocation, job scheduling, generated data.                         |
-| `GenerationWorkspace` | Future  | Native storage allocation, access, and disposal for one run.          | Semantic planning, catalog lookup, recipe selection.                       |
+| Concept | Status | Responsibility |
+| --- | --- | --- |
+| `ResourceDefinition` | Current | Semantic identity of a generated value. |
+| `FieldDefinition` | Planned | Storage-facing metadata for representing a resource during execution. |
+| `RunnablePlanCompiler` | Planned | Binds managed plan metadata to execution metadata. |
+| `RunnablePlan` | Planned | Immutable executable metadata. |
+| `GenerationWorkspace` | Planned | Native storage allocation, access, lifetime, and disposal for one run. |
+| `OperationScheduler` | Planned | Execution control flow, dependency wiring, scratch allocation, and job scheduling. |
+| Jobs | Planned | Deterministic transforms over native containers and unmanaged values. |
 
 ## ResourceDefinition
 
-`ResourceDefinition` defines the semantic identity of a generated value.
+`ResourceDefinition` describes the semantic identity of a generated value.
 
 A resource answers:
 
@@ -34,688 +47,588 @@ What generated value is required or produced?
 Examples from the landmass module:
 
 ```text
-Height
-Land
-Ocean
-Coast
-ContinentalRegion
+ContinentSuitability
+ContinentCandidate
+MainContinent
+ContinentalLandmassArea
+BaseElevation
 ```
 
-A resource definition belongs to a schema and is owned by a catalog.
+A resource definition is managed metadata.
 
-A resource definition is managed metadata. It is not executable data.
+A resource definition belongs to a generation schema.
+
+A resource definition is owned by a catalog when that exact instance is registered in the catalog.
+
+A resource definition is not storage.
 
 ## Resource identity
 
 A resource definition has stable symbol identity.
 
-The symbol identifies the semantic value across catalog lookup, contracts, plans, diagnostics, tests, and future artifact compatibility.
+The symbol identifies the semantic value for:
 
-A resource symbol must not be replaced by:
-
-```text id="5485vq"
-display name
-Unity object name
-Unity asset path
-native container handle
-field handle
-runtime numeric ID
-scheduler binding ID
+```text
+catalog lookup
+contract resource flow
+recipe validation
+request validation
+plan metadata
+artifact compatibility
+tooling
 ```
 
-Display names may describe a resource for humans. They must not define resource identity.
+The display name is user-facing metadata.
 
-## Resource ownership
+Do not use display names as identity.
 
-A catalog owns the resource definitions it exposes.
-
-Contracts and recipes in a catalog-owned graph must reference resource definitions owned by the same catalog.
-
-Symbol equality is not enough to satisfy ownership. A resource definition from one catalog must not be reused inside another catalog-owned object graph.
-
-Correct model:
-
-```text id="rl4gl7"
-catalog A
-  resource A.Height
-  operation contract A
-    required input: resource A.Height
-```
-
-Invalid model:
-
-```text id="m8o17d"
-catalog A
-  operation contract A
-    required input: resource B.Height
-```
-
-Cross-catalog resource reuse is invalid even when symbols match.
-
-## Resource contracts
+## Resource flow
 
 Stage and operation contracts use `ResourceDefinition`.
 
-Current contract model:
+Correct:
 
-```text id="3u97oh"
-StageContract
-  RequiredInputs  -> IReadOnlyList<ResourceDefinition>
-  ProducedOutputs -> IReadOnlyList<ResourceDefinition>
-
+```text
 OperationContract
-  RequiredInputs  -> IReadOnlyList<ResourceDefinition>
-  ProducedOutputs -> IReadOnlyList<ResourceDefinition>
+  RequiredInputs
+    ContinentSuitability
+  ProducedOutputs
+    ContinentCandidate
 ```
 
-Contracts describe semantic data flow.
+Incorrect:
 
-They do not describe storage, memory layout, field lifetime, scheduler binding, or job dependencies.
-
-## Stage resource flow
-
-A stage contract describes resources required and produced by a stage.
-
-A stage contract answers:
-
-```text id="90g2js"
-What semantic resources must exist before this stage?
-What semantic resources does this stage produce?
+```text
+OperationContract
+  RequiredInputSymbols
+    lokrain.atlas.landmass.resource.continent_suitability
+  ProducedOutputSymbols
+    lokrain.atlas.landmass.resource.continent_candidate
 ```
 
-A stage contract does not answer:
+Contracts use accepted resource definitions, not raw symbol lists.
 
-```text id="hmtqdq"
-Which operation writes the native container?
-Which field lifetime is used?
-Which scheduler executes the work?
-Which jobs are scheduled?
+Symbols are used for lookup and descriptor resolution. Resource flow uses accepted definitions.
+
+## ResourceDefinition does not own storage
+
+`ResourceDefinition` must not contain:
+
+```text
+FieldDefinition
+FieldHandle
+NativeArray<T>
+NativeList<T>
+NativeHashMap<TKey, TValue>
+BlobAssetReference<T>
+JobHandle
+Entity
+scheduler binding
+storage layout
+allocation policy
+artifact buffer
 ```
 
-## Operation resource flow
+A resource definition is reusable semantic inventory.
 
-An operation contract describes resources required and produced by an operation.
-
-An operation contract answers:
-
-```text id="x86ndv"
-What semantic resources must this operation read?
-What semantic resources does this operation write?
-```
-
-An operation contract does not answer:
-
-```text id="k37u58"
-Which NativeArray<T> stores the data?
-Which field handle addresses the data?
-Which scheduler implementation executes the operation?
-Which JobHandle represents dependencies?
-```
-
-## Resource flow in managed plans
-
-`GenerationPlan` carries semantic resource flow through stage and operation contracts.
-
-A plan can say:
-
-```text id="51otri"
-operation A requires Height
-operation A produces Land
-operation B requires Land
-operation B produces Coast
-```
-
-A plan cannot say:
-
-```text id="arveox"
-Height is stored in NativeArray<float>
-Land is stored in NativeArray<byte>
-operation A uses Scheduler X
-operation B depends on JobHandle Y
-Coast has workspace field handle Z
-```
-
-Those are future execution concerns.
+It must not contain execution state for one run.
 
 ## FieldDefinition
 
-`FieldDefinition` is planned architecture.
+`FieldDefinition` is planned storage-facing metadata.
 
-A field definition describes how a semantic resource is represented for execution.
+A field definition will describe how a semantic resource is represented for execution.
 
-A field definition may define:
+A field definition answers:
 
-```text id="i9ejlk"
-resource binding
-field lifetime
-field shape
-value kind
-execution profile
-capture behavior
-storage requirements
+```text
+How is this generated value represented for execution?
 ```
 
-A field definition still does not allocate memory.
+A field definition may describe planned metadata such as:
 
-It is metadata used by future runnable plan compilation and workspace allocation.
+```text
+resource identity
+field shape
+field value kind
+execution profile
+capture policy
+storage requirements
+external binding policy
+diagnostic role
+```
+
+A field definition must not allocate native storage.
+
+A field definition must not schedule jobs.
+
+A field definition must not replace `ResourceDefinition`.
 
 ## Resource versus field
 
 A resource is semantic.
 
-A field is storage-facing metadata.
-
-A workspace allocation is concrete native storage.
-
-Example:
-
-```text id="dsfq70"
-ResourceDefinition
-  Height
-
-FieldDefinition
-  Height as cell-grid float field
-
-GenerationWorkspace
-  NativeArray<float> allocated for Height field in this run
-```
-
-These are separate concepts because the same semantic resource may need different storage representation under different execution profiles.
-
-## Why resources do not own storage metadata
-
-`ResourceDefinition` must stay independent from storage metadata because resource identity is stable semantic architecture.
-
-Storage can vary by:
-
-```text id="vz491c"
-execution profile
-target platform
-debug versus release mode
-artifact capture requirements
-memory budget
-scheduler implementation
-precision policy
-ECS integration strategy
-```
-
-Changing a storage representation must not change the semantic identity of the generated value.
-
-## Field lifetime
-
-Field lifetime is planned execution metadata.
-
-Expected future lifetime categories include:
-
-```text id="6w94jr"
-canonical field
-stage-transient field
-diagnostic field
-payload field
-external field
-```
-
-These categories are not current Runtime behavior.
-
-They belong to future field definition and workspace execution design.
-
-## Canonical field
-
-A canonical field is planned architecture.
-
-It represents authoritative generated map truth for a semantic resource.
-
-Example:
-
-```text id="nrmqqg"
-Height -> canonical height field
-Land   -> canonical land mask field
-Ocean  -> canonical ocean mask field
-```
-
-Canonical fields are future execution/storage concepts.
-
-The current Runtime expresses these values only as semantic resources and contracts.
-
-## Stage-transient field
-
-A stage-transient field is planned architecture.
-
-It represents workspace data shared across operations inside a bounded stage or stage group.
-
-A stage-transient field is not a public semantic resource unless it is explicitly modeled as one.
-
-It is not default artifact output.
-
-## Diagnostic field
-
-A diagnostic field is planned architecture.
-
-It represents validation, debugging, visualization, or tooling data.
-
-Diagnostic capture should be controlled by execution profile or artifact policy.
-
-Diagnostic data must not become semantic generation truth unless promoted to a resource intentionally.
-
-## Payload field
-
-A payload field is planned architecture.
-
-It represents consumer-facing derived data.
-
-A payload field may be exported or consumed by downstream systems. It is not necessarily canonical generation truth.
-
-## External field
-
-An external field is planned architecture.
-
-It represents caller-provided, importer-provided, or tooling-provided field data bound into a generation run.
-
-External field binding must be explicit.
-
-External data must not appear implicitly through global state, Unity scene lookup, asset paths, or scheduler-side discovery.
-
-## Field shape
-
-Field shape is planned architecture.
-
-It describes the structural shape of a future field.
-
-Possible examples:
-
-```text id="ohgu43"
-cell-grid field
-scalar field
-sparse field
-region field
-edge field
-payload-specific field
-```
-
-A field shape is not a resource symbol and not native storage by itself.
-
-## Value kind
-
-Value kind is planned architecture.
-
-It describes the stored value category of a future field.
-
-Possible examples:
-
-```text id="p30dk1"
-float
-int
-byte
-bool mask
-region id
-vector
-structured value
-```
-
-A value kind is not a C# container allocation by itself.
-
-The future workspace decides concrete native storage.
-
-## Execution profile
-
-Execution profile is planned architecture.
-
-An execution profile may select storage representation, precision, capture behavior, scheduler binding, or implementation-specific execution options.
+A field is storage-facing.
 
 Examples:
 
-```text id="wq6o32"
-authoring debug profile
-deterministic production profile
-low-memory profile
-high-detail profile
-artifact-capture profile
+| Resource question | Field question |
+| --- | --- |
+| What generated value is this? | How is it represented for execution? |
+| Is this `BaseElevation`? | Is this a dense cell-grid `float` field? |
+| Which contracts require it? | Which workspace allocation stores it? |
+| Which artifact name should identify it? | Which native container layout is used? |
+
+Correct planned relationship:
+
+```text
+ResourceDefinition BaseElevation
+  -> FieldDefinition BaseElevationField
+  -> workspace allocation
 ```
 
-Execution profiles must not change resource identity.
+Incorrect current relationship:
 
-They may change how a resource is represented or captured during execution.
+```text
+ResourceDefinition BaseElevation
+  -> NativeArray<float>
+```
 
 ## FieldDefinitionSet
 
-`FieldDefinitionSet` is planned architecture.
+`FieldDefinitionSet` is planned accepted field metadata.
 
-It is the accepted collection of field definitions available to future runnable plan compilation.
+It will group field definitions used by runnable plan compilation.
 
-It should validate:
+A field definition set may validate:
 
-```text id="twggz3"
-unique field identities
-resource binding consistency
-profile compatibility
-shape and value-kind consistency
-capture policy consistency
+```text
+each field references a known resource
+each required plan resource has a field definition
+field symbols are unique
+field resource mappings are unique when required
+execution profile compatibility
+storage representation compatibility
 ```
 
-It must not allocate native memory or schedule jobs.
+A field definition set must not replace catalog validation.
 
-## Runnable plan compilation boundary
+Catalogs own semantic definition graphs.
 
-Future runnable plan compilation maps managed semantic plans to executable metadata.
+Field definition sets own planned storage-facing metadata.
 
-Conceptual future flow:
+## Execution profiles
 
-```text id="m9wm9j"
+Execution profiles are planned policy inputs.
+
+An execution profile may influence:
+
+```text
+which fields are captured
+which fields are temporary
+which fields are diagnostic
+which storage representation is selected
+which implementation variant is selected
+which scheduler policy is used
+```
+
+Execution profiles must not change semantic resource identity.
+
+Correct:
+
+```text
+BaseElevation remains BaseElevation under all profiles.
+```
+
+Incorrect:
+
+```text
+BaseElevation means a different resource under a debug profile.
+```
+
+## RunnablePlanCompiler
+
+`RunnablePlanCompiler` is planned architecture.
+
+It is the bridge from managed semantic planning to executable metadata.
+
+It uses:
+
+```text
 GenerationPlan
-        +
 FieldDefinitionSet
-        +
-Scheduler bindings
-        |
-        v
-RunnablePlanCompiler
-        |
-        v
+execution profiles
+```
+
+It produces:
+
+```text
 RunnablePlan
 ```
 
 The runnable compiler may bind:
 
-```text id="qi3pyi"
-ResourceDefinition -> FieldDefinition
-OperationImplementationDefinition -> SchedulerBinding
-OperationPlanNode -> RunnableOperation
+```text
+resources to field definitions
+operations to runnable operation metadata
+stage plan nodes to runnable stage metadata
+operation plan nodes to scheduler bindings
+execution profiles to capture and storage policy
 ```
 
-It must not allocate workspace storage or schedule jobs.
+It must not mutate the `GenerationPlan`.
 
-## Workspace boundary
+It must not allocate workspace storage.
 
-`GenerationWorkspace` is planned architecture.
+It must not schedule jobs.
 
-The workspace owns native storage for one generation run.
+## RunnablePlan
 
-The workspace may allocate and expose:
+`RunnablePlan` is planned immutable executable metadata.
 
-```text id="90t1cu"
-NativeArray<T>
-NativeList<T>
-NativeHashMap<TKey, TValue>
-NativeReference<T>
-field handles
-scratch allocations
+A runnable plan may contain:
+
+```text
+runnable stages
+runnable operations
+field bindings
+scheduler bindings
+workspace allocation requirements
+execution profile decisions
+artifact capture declarations
+diagnostic capture declarations
 ```
 
-The workspace owns disposal.
+A runnable plan must not own native storage lifetime.
 
-The workspace must not own semantic planning.
+Storage lifetime belongs to `GenerationWorkspace`.
 
-## Resource versus workspace
+## GenerationWorkspace
 
-A resource is stable semantic identity.
+`GenerationWorkspace` is planned native storage ownership for one generation run.
 
-A workspace allocation is per-run native storage.
+A workspace may own:
 
-Example boundary:
-
-```text id="dgse20"
-ResourceDefinition.Height
-  -> semantic generated value
-
-FieldDefinition.HeightFloatGrid
-  -> future storage-facing metadata
-
-GenerationWorkspace allocation
-  -> NativeArray<float> for this run
+```text
+canonical field storage
+temporary field storage
+external field bindings
+diagnostic field storage
+operation scratch storage
+native allocation lifetime
+disposal
 ```
 
-The resource can exist without a workspace.
+A workspace must not own:
 
-The workspace allocation cannot be interpreted correctly without accepted execution metadata.
-
-## Scheduler boundary
-
-An operation scheduler is planned architecture.
-
-A scheduler owns execution control flow for one runnable operation.
-
-A scheduler may:
-
-```text id="d2b54c"
-request workspace field access
-allocate operation scratch
-schedule jobs
-combine JobHandle dependencies
-apply iteration or termination policy
-report execution failure
+```text
+semantic resource identity
+catalog validation
+recipe selection
+request descriptor resolution
+managed plan compilation
+runnable plan compilation
+operation implementation selection
 ```
 
-A scheduler must not:
+The workspace allocates and exposes execution storage. It does not decide what the generation run means.
 
-```text id="rkk8lm"
-resolve symbols
-inspect recipes
-modify catalogs
-reinterpret request descriptors
-decide semantic resource identity
-own resource definitions
-```
+## Field handles
 
-## Job boundary
+Field handles are planned execution-time references to workspace-owned storage.
 
-Jobs are planned execution architecture.
+A field handle should be valid only within the workspace and runnable plan context that created it.
 
-A job receives native containers and unmanaged values.
+Field handles must not appear in current Runtime domain objects.
 
-A job must not know:
+Do not add field handles to:
 
-```text id="oavf6a"
-Symbol
-DisplayName
-GenerationCatalog
+```text
+ResourceDefinition
+StageContract
+OperationContract
 GenerationRecipeDefinition
 GenerationRequestDescriptor
 GenerationRequest
 GenerationPlan
+StagePlanNode
+OperationPlanNode
+```
+
+## OperationScheduler
+
+`OperationScheduler` is planned execution control flow.
+
+A scheduler may own:
+
+```text
+workspace access
+dependency wiring
+job scheduling
+operation scratch allocation
+iteration policy
+termination policy
+execution failure policy
+```
+
+A scheduler must not own:
+
+```text
+catalog lookup
+symbol resolution
+recipe selection
+request resolution
+managed plan compilation
+semantic resource identity
+```
+
+A scheduler receives resolved executable metadata and workspace access. It does not reinterpret semantic planning data.
+
+## Jobs
+
+Jobs are planned deterministic transforms over native data.
+
+Jobs receive native containers and unmanaged values.
+
+Correct planned job inputs:
+
+```text
+NativeArray<float> baseElevation
+NativeArray<byte> landMask
+int width
+int depth
+uint seed
+```
+
+Incorrect planned job inputs:
+
+```text
+ResourceDefinition resource
+GenerationCatalog catalog
+GenerationPlan plan
+GenerationWorkspace workspace
+OperationScheduler scheduler
+ScriptableObject settings
+```
+
+Jobs must not know symbols, catalogs, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.
+
+## Artifacts
+
+Artifacts are planned captured outputs.
+
+Artifacts may be produced from workspace-owned data according to execution profile and capture policy.
+
+Artifacts must not be owned by `ResourceDefinition`, contracts, recipes, requests, or managed plans.
+
+Correct planned flow:
+
+```text
+workspace field data
+  -> artifact capture policy
+  -> artifact output
+```
+
+Incorrect current flow:
+
+```text
+ResourceDefinition owns artifact data.
+GenerationPlan owns artifact buffers.
+OperationContract writes artifact files.
+```
+
+## Diagnostics
+
+Current Runtime diagnostics are managed validation failures.
+
+Examples:
+
+```text
+exceptions
+GenerationRequestResolutionError
+```
+
+Planned execution diagnostics may include:
+
+```text
+captured diagnostic fields
+scheduler timings
+job execution diagnostics
+artifact summaries
+workspace allocation diagnostics
+```
+
+Execution diagnostics must not leak into current semantic Runtime objects.
+
+## External fields
+
+External fields are planned caller-provided or tooling-provided inputs.
+
+An external field may bind external data to a field definition during runnable execution.
+
+External field binding must happen after semantic request and plan validation.
+
+Correct planned boundary:
+
+```text
+GenerationPlan
+  -> RunnablePlanCompiler
+  -> external field binding validation
+  -> GenerationWorkspace
+```
+
+Incorrect current boundary:
+
+```text
+GenerationRequestDescriptor contains NativeArray<T>.
+ResourceDefinition stores external data pointer.
+```
+
+## Temporary fields
+
+Temporary fields are planned intermediate execution storage.
+
+Temporary fields may support operation chains, staging, and diagnostics.
+
+Temporary fields are not semantic resources unless explicitly represented by a `ResourceDefinition`.
+
+Temporary fields must not be introduced into current contracts as raw storage concepts.
+
+## Canonical fields
+
+Canonical fields are planned authoritative generated outputs for semantic resources.
+
+A canonical field may be captured as an artifact or consumed by later operations.
+
+The semantic identity remains the `ResourceDefinition`.
+
+The storage representation is the planned field definition and workspace allocation.
+
+## Current valid model
+
+Current Runtime model:
+
+```text
 ResourceDefinition
-FieldDefinition
-GenerationWorkspace
-OperationScheduler
+  used by StageContract
+  used by OperationContract
+  owned by GenerationCatalog
+  selected through GenerationRecipeDefinition
+  carried through GenerationRequest
+  carried through GenerationPlan
 ```
 
-A job should only execute a deterministic transform over already-resolved data.
+This model is managed and semantic.
 
-## Artifact capture boundary
+It does not allocate storage.
 
-Artifact capture is future architecture.
+## Planned execution model
 
-Resources define semantic values.
+Planned execution model:
 
-Field definitions may define capture eligibility.
-
-Execution profiles may define capture policy.
-
-Workspace storage provides the data.
-
-Schedulers and artifact systems coordinate when data can be captured.
-
-Do not put artifact capture policy into `ResourceDefinition` unless the policy is semantic and invariant across all execution profiles.
-
-## Correct current model
-
-Current managed architecture should model resource flow like this:
-
-```text id="mtu79w"
-ResourceDefinition
-  -> StageContract
-  -> OperationContract
-  -> GenerationRecipeDefinition
-  -> GenerationRequest
-  -> GenerationPlan
+```text
+GenerationPlan
+  + FieldDefinitionSet
+  + ExecutionProfile
+    -> RunnablePlanCompiler
+    -> RunnablePlan
+    -> GenerationWorkspace
+    -> OperationScheduler
+    -> Jobs
 ```
 
-This is sufficient for semantic planning.
+This model is execution-facing.
 
-## Incorrect current model
+It owns storage, bindings, scheduling, and job execution.
 
-Do not add these dependencies to current managed planning objects:
+## Invalid boundary crossings
 
-```text id="4vx9xq"
-ResourceDefinition -> FieldDefinition
-ResourceDefinition -> NativeArray<T>
-StageContract -> FieldHandle
-OperationContract -> SchedulerBinding
-GenerationPlan -> GenerationWorkspace
-OperationPlanNode -> JobHandle
-OperationImplementationDefinition -> Burst job struct
-GenerationCatalog -> native storage allocation
-GenerationRecipeDefinition -> execution profile storage policy
+Do not implement these:
+
+```text
+ResourceDefinition.FieldDefinition
+ResourceDefinition.NativeArray
+StageContract.FieldHandle
+OperationContract.NativeArray<T>
+GenerationRecipeDefinition.GenerationWorkspace
+GenerationRequestDescriptor.ExternalNativeArray
+GenerationRequest.FieldHandle
+GenerationPlan.RunnableOperation
+StagePlanNode.JobHandle
+OperationPlanNode.Schedule()
+Job receives ResourceDefinition
+Job receives GenerationPlan
 ```
 
-These dependencies collapse planning and execution boundaries.
+Each item crosses the semantic/execution boundary too early.
 
-## Code placement
+## Data structure selection
 
-Current resource-definition code belongs in Runtime managed architecture.
+Data structures are selected by data shape, ownership, and determinism requirements.
 
-Expected current areas:
+Dense raster data uses row-major one-dimensional storage.
 
-```text id="7sois8"
-Runtime/Resources/
-Runtime/Stages/
-Runtime/Operations/
-Runtime/Catalog/
-Runtime/Recipes/
-Runtime/Requests/
-Runtime/Plans/
-Runtime/Generation/
-```
+Fixed-degree topology uses direct computation or fixed-stride arrays.
 
-Future field/workspace/scheduler/job code should be placed behind explicit execution-oriented boundaries when implemented.
+Variable one-to-many topology uses frozen compressed sparse layouts.
 
-It should not be introduced into catalog, recipe, request, or plan types as hidden state.
+Mutable topology builders may use streams, unsafe lists, or native multi-hash maps during construction, but must freeze into deterministic arrays before becoming canonical.
 
-## Naming boundary
+Connectivity labeling uses union-find, deterministic flood-fill frontiers, or another explicitly ordered labeling algorithm.
 
-Use `ResourceDefinition` for semantic generated values.
+Priority propagation uses deterministic heaps, bucket queues, radix-style queues, or another priority structure with explicit tie-breaking.
 
-Use `FieldDefinition` only for future storage-facing metadata.
+Spatial lookup uses chunk buckets before trees. Trees are reserved for editor tooling, rendering, LOD, sparse spatial acceleration, or cases where chunk buckets are proven insufficient.
 
-Use `GenerationWorkspace` only for future per-run native storage ownership.
+Canonical graph state uses arrays of nodes, edges, offsets, counts, and values.
 
-Use `OperationScheduler` only for future execution control flow.
+Atlas does not use managed object graphs as canonical generation data.
 
-Do not use these names interchangeably:
+## Checklist
 
-```text id="6ifhxk"
-resource
-field
-workspace
-scheduler
-job
-artifact
-payload
-```
+Before adding resource, field, or workspace code, verify:
 
-Each name represents a different architecture boundary.
+```text
+Is this semantic identity?
+Use ResourceDefinition.
 
-## Validation boundary
+Is this storage-facing metadata?
+Use planned FieldDefinition.
 
-Validation is split by ownership.
+Is this executable metadata?
+Use planned RunnablePlan.
 
-| Validation                                | Owner                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| Resource symbol and display name validity | `ResourceDefinition` constructor/factory                           |
-| Resource schema reference validity        | `ResourceDefinition` local invariants and catalog graph validation |
-| Resource uniqueness                       | `GenerationCatalog`                                                |
-| Contract resource null/duplicate rules    | `StageContract` / `OperationContract`                              |
-| Contract resource catalog ownership       | `GenerationCatalog`                                                |
-| Resource-to-field binding                 | Future runnable plan compiler                                      |
-| Field storage metadata validity           | Future field definition model                                      |
-| Native allocation validity                | Future workspace                                                   |
-| Job dependency validity                   | Future scheduler                                                   |
+Is this native storage lifetime?
+Use planned GenerationWorkspace.
 
-Do not make a low-level object validate a boundary it does not own.
+Is this operation control flow or job scheduling?
+Use planned OperationScheduler.
 
-## Determinism boundary
+Is this deterministic transform code?
+Use planned jobs.
 
-Resource identity participates in deterministic planning through stable symbols and accepted object ordering.
+Does current Runtime object contain future execution state?
+Move it after GenerationPlan.
 
-Future field allocation must not introduce nondeterminism into semantic generation.
+Does a contract describe storage?
+Move storage metadata to planned field definitions.
 
-Do not base resource or field identity on:
-
-```text id="35eyk7"
-managed object allocation order
-dictionary enumeration order
-Unity object instance ID
-Unity asset path
-display name
-native memory address
-scheduler execution order
-thread timing
-```
-
-When ordering is required, it must be explicit in accepted metadata or deterministic compiler output.
-
-## Design checklist
-
-Use this checklist when deciding where a concept belongs.
-
-It belongs to `ResourceDefinition` when it answers:
-
-```text id="gn6y4r"
-What generated value is this?
-Which schema owns the value?
-What stable symbol identifies it?
-What human-readable display name describes it?
-```
-
-It belongs to future `FieldDefinition` when it answers:
-
-```text id="sq2sfy"
-How should this resource be represented for execution?
-What shape does the data have?
-What value kind does it store?
-What lifetime category does it use?
-What profile-specific storage metadata applies?
-```
-
-It belongs to future `GenerationWorkspace` when it answers:
-
-```text id="uw3kx3"
-Which native container stores this field for this run?
-Who allocates it?
-Who disposes it?
-How is storage accessed safely?
-What temporary native memory exists for execution?
-```
-
-It belongs to a future scheduler when it answers:
-
-```text id="bjp5ny"
-Which jobs run?
-In what dependency order?
-What scratch memory is needed?
-How are repeated job chains controlled?
-How are execution failures reported?
-```
-
-It belongs to a future job when it answers:
-
-```text id="wl9u4k"
-How does this native input transform into this native output?
-What unmanaged parameters does the transform need?
-What deterministic per-element or per-region algorithm runs?
+Does a job know semantic metadata?
+Resolve metadata before scheduling the job.
 ```
 
 ## Summary
 
-`ResourceDefinition` is the current semantic contract boundary for generated values.
+`ResourceDefinition` is current semantic metadata.
 
-`FieldDefinition` is future storage-facing metadata.
+`FieldDefinition` is planned storage-facing metadata.
 
-`GenerationWorkspace` is future native storage ownership.
+`RunnablePlanCompiler` is the planned bridge from managed plans to executable metadata.
 
-Schedulers are future execution control flow.
+`GenerationWorkspace` is planned native storage ownership.
 
-Jobs are future deterministic transforms over native data.
+`OperationScheduler` is planned execution control flow.
 
-Current catalog, recipe, request, and plan code must stay on the semantic side of this boundary.
+Jobs are planned deterministic native transforms.
 
-```
+Keep semantic planning and execution ownership separate.

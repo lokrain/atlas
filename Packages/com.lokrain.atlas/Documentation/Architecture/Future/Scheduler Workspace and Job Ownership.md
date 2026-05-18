@@ -1,1134 +1,719 @@
 # Scheduler, workspace, and job ownership
 
-This document defines planned architecture.
+This document describes planned architecture.
 
-`GenerationWorkspace`, `OperationScheduler`, operation scratch, field handles, job dependencies, and Burst jobs are future execution concepts. They are not current Runtime behavior unless corresponding code exists.
+`GenerationWorkspace`, `OperationScheduler`, operation scratch, runnable execution, native storage, jobs, artifacts, diagnostics, and ECS execution integration are not current Runtime behavior unless corresponding Runtime code exists.
+
+Current Runtime architecture ends at `GenerationPlan`.
 
 ## Purpose
 
-The current managed architecture ends at `GenerationPlan`.
+Scheduler and workspace architecture separates executable metadata, native storage ownership, execution control flow, and deterministic job code.
 
-Future execution requires a strict ownership split between executable metadata, native storage, orchestration, and jobs.
-
-The planned boundary is:
+The planned execution flow is:
 
 ```text
-RunnablePlan
-    -> GenerationWorkspace
-    -> OperationScheduler
-    -> Jobs
-````
-
-Each layer owns one responsibility:
-
-| Layer                 | Owns                                                                         |
-| --------------------- | ---------------------------------------------------------------------------- |
-| `RunnablePlan`        | Immutable executable metadata.                                               |
-| `GenerationWorkspace` | Native storage allocation, access, lifetime, and disposal.                   |
-| `OperationScheduler`  | Operation execution control flow, dependencies, scratch, and job scheduling. |
-| Jobs                  | Deterministic transforms over native containers and unmanaged values.        |
-
-## Non-goals
-
-Workspace code must not resolve request descriptors.
-
-Workspace code must not choose recipes, routes, or operation implementations.
-
-Workspace code must not compile managed plans.
-
-Scheduler code must not perform catalog lookup.
-
-Scheduler code must not reinterpret resource identity.
-
-Scheduler code must not mutate the catalog, request, managed plan, or runnable plan.
-
-Jobs must not know managed domain metadata.
-
-Jobs must not inspect symbols, catalogs, recipes, requests, plans, resources, field definitions, workspaces, or schedulers.
-
-## Current versus future boundary
-
-Current implemented flow:
-
-```text
-GenerationRequestDescriptor
-        +
-GenerationCatalog
-        |
-        v
-GenerationRequestResolver
-        |
-        v
-GenerationRequest
-        |
-        v
-GenerationPlanCompiler
-        |
-        v
 GenerationPlan
+  -> RunnablePlanCompiler
+  -> RunnablePlan
+  -> GenerationWorkspace
+  -> OperationScheduler
+  -> Jobs
 ```
 
-Future execution flow:
+Each layer owns a different responsibility.
+
+## Ownership summary
+
+| Concept | Status | Owns |
+| --- | --- | --- |
+| `GenerationPlan` | Current | Managed semantic plan. |
+| `RunnablePlan` | Planned | Immutable executable metadata. |
+| `GenerationWorkspace` | Planned | Native storage allocation, access, lifetime, and disposal. |
+| `OperationScheduler` | Planned | Execution control flow, dependency wiring, scratch, and job scheduling. |
+| Jobs | Planned | Deterministic transforms over native containers and unmanaged values. |
+| Artifacts | Planned | Captured outputs from execution data. |
+| Diagnostics | Planned | Validation, execution, and tooling data. |
+
+## Current boundary
+
+Current Runtime does not include:
 
 ```text
-GenerationPlan
-        |
-        v
-RunnablePlanCompiler
-        |
-        v
-RunnablePlan
-        |
-        v
 GenerationWorkspace
-        |
-        v
 OperationScheduler
-        |
-        v
-Jobs
+OperationScratch
+NativeArray<T>
+NativeList<T>
+NativeHashMap<TKey, TValue>
+JobHandle
+Burst job structs
+field handles
+scheduler bindings
+artifact buffers
+execution diagnostics
+ECS entities
 ```
 
-Future execution starts after a runnable plan exists.
+Do not add these to current managed semantic objects.
+
+Invalid current placements:
+
+```text
+GenerationPlan.JobHandle
+GenerationPlan.FieldHandle
+StagePlanNode.OperationScheduler
+OperationPlanNode.NativeArray<T>
+OperationContract.FieldHandle
+ResourceDefinition.NativeArray<T>
+GenerationRecipeDefinition.GenerationWorkspace
+```
 
 ## RunnablePlan boundary
 
-`RunnablePlan` is future immutable executable metadata.
+`RunnablePlan` is planned immutable executable metadata.
 
-It may contain:
+A runnable plan may contain:
 
 ```text
 runnable stages
 runnable operations
-resource-to-field bindings
-operation-to-scheduler bindings
-field access metadata
-dependency metadata
-scratch metadata
-artifact capture metadata
-external input metadata
-execution profile metadata
+field bindings
+scheduler bindings
+storage requirements
+capture declarations
+diagnostic declarations
+external binding requirements
 ```
 
-It must not contain:
+A runnable plan must not own native storage lifetime.
+
+A runnable plan must not schedule jobs.
+
+Correct:
 
 ```text
-NativeArray<T>
-NativeList<T>
-NativeHashMap<TKey, TValue>
-allocated field storage
-operation scratch storage
-running scheduler instances
-JobHandle state
-completed job results
-Unity scene objects
-Unity editor objects
+RunnablePlan describes what execution requires.
+GenerationWorkspace allocates where execution stores data.
+OperationScheduler controls how execution runs.
 ```
 
-The runnable plan describes execution. It does not execute.
+Incorrect:
+
+```text
+RunnablePlan owns NativeArray<T>.
+RunnablePlan schedules JobHandle.
+RunnablePlan disposes workspace memory.
+```
 
 ## GenerationWorkspace
 
-`GenerationWorkspace` is future per-run native storage ownership.
+`GenerationWorkspace` is planned native storage ownership for one generation run.
 
 A workspace owns:
 
 ```text
-field storage allocation
-field storage access
-field handle mapping
-external field binding
-operation scratch allocation when delegated by scheduler policy
-native container disposal
-workspace lifetime
-storage safety validation
+canonical field storage
+temporary field storage
+external field bindings
+diagnostic field storage
+operation scratch storage when scratch is workspace-scoped
+native allocation lifetime
+field handle validity
+disposal
 ```
 
-A workspace does not own:
+A workspace must not own:
 
 ```text
-catalog lookup
-request descriptor resolution
+symbol resolution
+catalog validation
 recipe selection
+request resolution
 managed plan compilation
 runnable plan compilation
-operation semantic meaning
-scheduler policy
-job algorithm logic
+semantic resource identity
+operation implementation selection
 ```
 
-The workspace is storage ownership, not generation intelligence.
+A workspace is execution storage. It is not semantic inventory.
 
 ## Workspace lifetime
 
-A workspace belongs to one generation execution scope.
+A workspace lifetime is tied to one generation run or one explicit execution session.
 
-Expected lifecycle:
-
-```text
-create workspace from runnable plan
-bind external inputs
-allocate required fields
-execute scheduler sequence
-capture requested artifacts
-dispose workspace storage
-```
-
-The workspace must make disposal explicit.
-
-Native storage must not leak into catalog, request, plan, or module static state.
-
-## Workspace allocation
-
-The workspace allocates native storage from runnable metadata.
-
-Allocation may use:
+The workspace must define:
 
 ```text
-field shape
-value kind
-storage policy
-field lifetime
-execution profile
-grid dimensions
-external input bindings
-scratch requirements
-capture requirements
+allocation ownership
+read/write access rules
+disposal ownership
+handle validity lifetime
+external binding lifetime
+diagnostic storage lifetime
+temporary storage lifetime
 ```
 
-The workspace must not infer semantic meaning by parsing symbols.
-
-The runnable plan compiler should already have resolved semantic resources to field metadata.
+Workspace-owned storage must not outlive the workspace unless exported as an artifact or copied into another explicit owner.
 
 ## Field handles
 
-A field handle is future execution-time addressing for workspace-owned storage.
+Field handles are planned execution-time references to workspace-owned field storage.
 
-A field handle is valid only within the workspace that created it.
+A field handle must be valid only within the workspace context that created it.
 
-A field handle is not:
+A field handle should not be stable package identity.
 
-```text
-Symbol
-ResourceDefinition
-FieldDefinition
-NativeArray<T>
-catalog identity
-artifact identity
-global ID
-```
+Use resource and field symbols for identity.
 
-A field handle must not be persisted as semantic identity.
+Use field handles for execution access.
 
-Field handles may be stable within a run if the workspace defines stable assignment rules.
+Do not store field handles in current managed objects.
 
-## Field access
+## Storage categories
 
-Workspace access APIs should expose storage through explicit access intent.
+A workspace may allocate or bind several storage categories.
 
-Possible future access modes:
+### Canonical storage
+
+Canonical storage is authoritative generated data for a semantic resource.
+
+Example:
 
 ```text
-Read
-Write
-ReadWrite
-Append
-ExternalRead
-DiagnosticWrite
-PayloadWrite
+BaseElevation cell-grid field
 ```
 
-Access intent should be derived from runnable operation metadata.
+### Temporary storage
 
-The workspace should not allow arbitrary mutation without access validation when safety policy requires validation.
+Temporary storage is intermediate execution data.
 
-## External storage binding
+Temporary storage may be discarded after the consuming operation or stage.
 
-External field data must be bound explicitly.
+### External storage
 
-External binding may include:
+External storage is provided by a caller, importer, editor tool, or integration layer.
 
-```text
-field identity
-source identity
-native container ownership policy
-shape validation
-value-kind validation
-lifetime policy
-disposal ownership
-read/write access policy
-```
+The workspace validates and binds external storage according to runnable metadata.
 
-The workspace must not discover external data through:
+### Diagnostic storage
 
-```text
-Unity scene search
-current editor selection
-asset path guessing
-global mutable registry
-static current context
-scheduler-side symbol lookup
-```
+Diagnostic storage supports debugging, validation, visualization, or tooling.
 
-External storage ownership must be explicit.
+Diagnostic capture depends on execution profile policy.
 
-## Workspace and artifacts
+### Scratch storage
 
-Artifact capture is future architecture.
+Scratch storage supports scheduler or operation-local computation.
 
-The workspace may provide native data for artifact capture.
-
-The workspace does not decide semantic capture policy by itself.
-
-Capture policy may come from:
-
-```text
-execution profile
-field definition metadata
-runnable plan capture metadata
-artifact system request
-```
-
-The workspace owns safe access to data. Artifact systems own artifact creation.
+Scratch storage must not be treated as canonical generated output.
 
 ## OperationScheduler
 
-`OperationScheduler` is future execution orchestration for one runnable operation or operation family.
+`OperationScheduler` is planned execution control flow.
 
 A scheduler owns:
 
 ```text
-operation execution control flow
+operation execution lifecycle
+workspace access for one runnable operation
 dependency wiring
-workspace field access requests
-operation scratch allocation policy
 job scheduling
-job chain composition
+scratch allocation
 iteration policy
 termination policy
-execution failure policy
-profiling hooks when designed
+failure policy
+diagnostic emission
 ```
 
-A scheduler does not own:
+A scheduler must not own:
 
 ```text
-symbol resolution
 catalog lookup
+symbol resolution
 recipe selection
 request resolution
 managed plan compilation
-resource identity
-field definition identity
-workspace lifetime
-artifact semantic policy
+runnable plan compilation
+semantic resource identity
+workspace lifetime outside its assigned scope
 ```
 
-A scheduler translates runnable operation metadata into scheduled work.
+The scheduler receives resolved executable metadata. It does not reinterpret the domain model.
 
 ## Scheduler binding
 
-A scheduler binding maps selected implementation metadata to a scheduler.
+A scheduler binding is metadata in the runnable plan.
 
-Planned binding:
+It tells execution which scheduler is responsible for one runnable operation and what policy applies.
 
-```text
-OperationImplementationDefinition -> SchedulerBinding
-```
-
-A scheduler binding may identify:
+A scheduler binding may describe:
 
 ```text
 scheduler type
-scheduler factory
-supported execution profiles
-supported field shapes
-supported value kinds
+input and output field bindings
 scratch requirements
-dependency behavior
+dependency requirements
+iteration policy
+termination policy
+failure policy
+diagnostic policy
 ```
 
 The binding is metadata.
 
-The scheduler instance or schedule call owns execution.
-
-## Scheduler input
-
-A scheduler should receive accepted execution inputs.
-
-Possible future scheduler input:
-
-```text
-RunnableOperation
-GenerationWorkspace
-input dependencies
-execution profile
-run settings
-scheduler-local options
-allocator policy
-```
-
-A scheduler must not receive:
-
-```text
-GenerationRequestDescriptor
-GenerationCatalog
-GenerationRecipeDefinition as lookup source
-unresolved symbols
-Unity scene state
-Editor state
-```
-
-The runnable operation should already contain resolved executable metadata.
-
-## Scheduler output
-
-A scheduler may return execution state.
-
-Possible future output:
-
-```text
-JobHandle
-operation execution result
-produced dependency handle
-diagnostic metadata
-scheduled artifact capture marker
-failure result
-```
-
-The exact output model is future design.
-
-The scheduler output should not mutate managed semantic objects.
-
-## Job dependencies
-
-Job dependency handles belong to scheduler/workspace execution.
-
-They must not appear in:
-
-```text
-GenerationCatalog
-GenerationRecipeDefinition
-GenerationRequestDescriptor
-GenerationRequest
-GenerationPlan
-StagePlanNode
-OperationPlanNode
-ResourceDefinition
-StageContract
-OperationContract
-```
-
-A managed plan can imply semantic order. It must not carry actual `JobHandle` state.
-
-## Dependency wiring
-
-Schedulers own actual dependency wiring.
-
-Dependency wiring may consider:
-
-```text
-runnable operation order
-field read/write access
-producer/consumer relationships
-stage boundaries
-external input availability
-scratch dependencies
-artifact capture points
-```
-
-Dependency wiring must be deterministic.
-
-Schedulers must not derive dependencies from nondeterministic collection enumeration, thread timing, or job completion race order.
+The scheduler performs execution.
 
 ## Operation scratch
 
-Operation scratch is future scheduler-owned temporary native storage.
+Operation scratch is temporary execution storage used by a scheduler or operation.
 
-Scratch exists to support execution of one operation or bounded job chain.
+Scratch may be used for:
 
-Scratch is not:
+```text
+frontiers
+work queues
+temporary labels
+temporary region lists
+priority queues
+intermediate reductions
+```
+
+Scratch ownership must be explicit.
+
+Allowed owners:
+
+```text
+OperationScheduler
+GenerationWorkspace
+specialized execution allocator
+```
+
+Disallowed owners:
 
 ```text
 ResourceDefinition
-FieldDefinition
-canonical field
-payload field
-artifact output
-catalog definition
-request setting
-managed plan node
+OperationContract
+GenerationRecipeDefinition
+GenerationRequest
+GenerationPlan
+OperationPlanNode
+Job struct beyond its scheduled execution lifetime
 ```
 
-Scratch memory should be private to the scheduler unless explicitly promoted to a modeled field.
+Scratch must not become canonical output unless explicitly copied into canonical storage.
 
-## Scratch lifetime
+## Jobs
 
-Scratch lifetime should be explicit.
+Jobs are planned deterministic transforms over native data.
 
-Possible future scratch lifetimes:
+Jobs receive:
 
 ```text
-single job
-single operation
-operation iteration
-stage execution
-scheduler chain
+native containers
+unmanaged values
+explicit dimensions
+explicit seeds
+explicit configuration values
 ```
 
-Scratch should be disposed or released by the owner that allocates it.
-
-If the scheduler requests workspace-managed scratch, ownership and disposal must be explicit.
-
-## Repeated job chains
-
-Some operations may require repeated scheduling.
-
-Examples:
-
-```text
-flood fill
-region growth
-constraint relaxation
-erosion iterations
-normalization passes
-```
-
-The scheduler owns repeated job-chain control.
-
-Jobs execute one deterministic step or batch.
-
-Jobs must not schedule additional jobs.
-
-Jobs must not control high-level termination unless that control is explicitly modeled as unmanaged data passed by the scheduler.
-
-## Termination policy
-
-Schedulers own termination policy for repeated or conditional execution.
-
-Termination policy may use:
-
-```text
-fixed iteration count
-convergence threshold
-maximum pass count
-work queue exhaustion
-profile-defined limit
-operation-specific deterministic condition
-```
-
-Termination must be deterministic for the same accepted inputs.
-
-Do not use wall-clock time, frame count, thread timing, or nondeterministic completion order as generation semantics.
-
-## Failure policy
-
-Schedulers own operation execution failure policy.
-
-Failure categories may include:
-
-```text
-workspace access failure
-missing field handle
-scratch allocation failure
-job scheduling failure
-job validation failure
-iteration limit exceeded
-unsupported profile
-unsupported field shape
-artifact capture dependency failure
-```
-
-The exact error model is future design.
-
-Execution failures should not be reported as request-resolution failures.
-
-## Job boundary
-
-Jobs are deterministic transforms over native data.
-
-A job may receive:
-
-```text
-NativeArray<T>
-NativeSlice<T>
-NativeList<T>
-NativeHashMap<TKey, TValue>
-NativeReference<T>
-unmanaged structs
-primitive values
-grid dimensions as primitive values
-seed values as primitive values
-```
-
-A job must not receive:
+Jobs must not receive:
 
 ```text
 Symbol
 DisplayName
 GenerationCatalog
-GenerationSchemaDefinition
-ResourceDefinition
-StageDefinition
-OperationDefinition
-OperationImplementationDefinition
 GenerationRecipeDefinition
 GenerationRequestDescriptor
 GenerationRequest
 GenerationPlan
-RunnablePlan
-RunnableOperation
+ResourceDefinition
 FieldDefinition
+RunnablePlan
 GenerationWorkspace
 OperationScheduler
 UnityEngine.Object
-UnityEditor types
-managed collections
-managed delegates
+UnityEditor object
 ```
 
-The scheduler converts metadata into job-safe inputs before scheduling.
+If a job needs data, the scheduler resolves that data before scheduling and passes it as native containers or unmanaged parameters.
 
-## Job ownership
+## Job responsibility
 
-A job owns only its algorithmic transform.
+A job owns computation for one scheduled unit of work.
 
-A job can define:
+A job does not own:
 
 ```text
-input native data
-output native data
-unmanaged parameters
-per-element execution logic
-parallel execution strategy
-deterministic math
+resource identity
+field identity
+workspace lifetime
+scheduler policy
+catalog lookup
+request resolution
+plan compilation
+artifact capture policy
 ```
 
-A job cannot define:
+Correct planned job responsibility:
 
 ```text
-which recipe is selected
-which implementation is selected
-which resource is semantic truth
-which field lifetime exists
-which artifact is captured
-which operation runs next
-how the workspace is disposed
+Read input arrays.
+Write output arrays.
+Use explicit dimensions.
+Use explicit seed or deterministic parameters.
+Return through native output data.
 ```
 
-Those decisions belong to earlier or higher execution layers.
-
-## Burst compatibility
-
-Future jobs should be Burst-compatible unless a specific scheduler intentionally supports managed execution.
-
-Burst-compatible job code should avoid:
+Incorrect job responsibility:
 
 ```text
-managed allocations
-managed object references
-virtual dispatch
-exceptions as normal control flow
-string usage
-LINQ
-UnityEngine.Object access
-static mutable state
-nondeterministic global random state
+Look up ResourceDefinition by Symbol.
+Open a catalog.
+Choose an implementation.
+Allocate persistent workspace memory.
+Write artifact files.
 ```
 
-Burst compatibility is an execution concern. It must not affect current managed catalog/request/plan object design.
+## Dependency wiring
 
-## Native container ownership
+The scheduler owns job dependency wiring.
 
-Native containers must have one clear owner.
+Dependencies must be explicit and deterministic.
+
+Do not rely on:
+
+```text
+thread timing
+implicit Unity scheduling order
+hash-map enumeration order
+object allocation order
+scene hierarchy order
+```
+
+Correct:
+
+```text
+scheduler schedules job B after job A's JobHandle
+```
+
+Incorrect:
+
+```text
+job B assumes job A finished because it was scheduled earlier from another system
+```
+
+## Iteration and termination
+
+Some operations may require iterative execution.
+
+The scheduler owns iteration policy.
+
+Iteration policy may define:
+
+```text
+maximum iteration count
+convergence condition
+frontier exhaustion
+fixed pass count
+failure behavior
+diagnostic capture
+```
+
+Jobs perform individual deterministic steps.
+
+Schedulers decide whether another step is needed.
+
+## Failure policy
+
+Execution failure policy is planned.
+
+Expected execution failures should be represented with structured execution results or diagnostics.
+
+Invalid API usage should throw.
+
+Examples of expected execution failures:
+
+```text
+external field missing
+workspace allocation failed according to policy
+operation did not converge
+diagnostic validation failed
+scheduler policy rejected execution
+```
+
+Examples of invalid API usage:
+
+```text
+null runnable plan
+disposed workspace
+field handle used with wrong workspace
+scheduler invoked with incompatible runnable operation
+```
+
+## Artifact ownership
+
+Artifacts are planned captured outputs.
+
+Artifacts may be created from workspace data after or during execution according to policy.
+
+Artifact ownership must be explicit.
 
 Possible owners:
 
 ```text
-GenerationWorkspace for field storage
-OperationScheduler for operation scratch
-external caller for externally bound input when policy says caller-owned
-artifact system for captured output buffers
+artifact capture service
+execution result
+caller-provided artifact sink
+editor tooling adapter
 ```
 
-Jobs borrow native containers. They do not own disposal.
-
-Catalogs, recipes, requests, and managed plans must not own native containers.
-
-## Disposal ownership
-
-The owner that allocates native memory owns disposal unless an explicit transfer policy exists.
-
-Correct:
+Invalid owners:
 
 ```text
-workspace allocates field storage
-workspace disposes field storage
-
-scheduler allocates private scratch
-scheduler disposes private scratch
-
-caller provides external native input as caller-owned
-caller disposes after agreed lifetime
+ResourceDefinition
+GenerationRecipeDefinition
+GenerationRequestDescriptor
+GenerationRequest
+GenerationPlan
+OperationContract
 ```
 
-Incorrect:
+## Diagnostics ownership
+
+Diagnostics may be managed validation diagnostics or execution diagnostics.
+
+Current managed diagnostics:
 
 ```text
-job disposes workspace field storage
-managed plan disposes NativeArray<T>
-catalog holds persistent native container
-scheduler disposes caller-owned external input without policy
+exceptions
+GenerationRequestResolutionError
 ```
 
-## Workspace and scheduler interaction
-
-The scheduler should request field access from the workspace using resolved runnable metadata.
-
-Correct future interaction:
+Planned execution diagnostics:
 
 ```text
-scheduler receives RunnableOperation
-scheduler requests input/output field access from workspace
-workspace returns native container access or typed handles
-scheduler schedules jobs with native containers and unmanaged values
-scheduler returns dependency/output execution state
+scheduler timings
+workspace allocation summaries
+captured diagnostic fields
+job validation summaries
+artifact metadata
+operation failure diagnostics
 ```
 
-Incorrect interaction:
+Execution diagnostics must not be stored in current semantic definitions, requests, or plans.
+
+## ECS integration
+
+ECS integration is planned and must remain an adapter or execution integration boundary.
+
+Current managed Runtime objects must not depend on ECS:
 
 ```text
-scheduler parses resource symbols
-scheduler searches catalog
-scheduler creates fields not described by runnable metadata
-workspace selects operation implementation
-job asks workspace for a field by symbol
+Entity
+IComponentData
+IBufferElementData
+ISystem
+SystemBase
+EntityQuery
+EntityCommandBuffer
+World
 ```
 
-## Typed access
-
-Future APIs should avoid unsafe untyped access when practical.
-
-Good direction:
+Correct planned boundary:
 
 ```text
-workspace resolves typed field access before job scheduling
-scheduler validates expected value kind and shape
-job receives typed native containers
+Runnable execution output
+  -> ECS integration adapter
+  -> ECS world data
 ```
 
-Avoid:
+Incorrect current boundary:
 
 ```text
-job casts opaque field storage
-scheduler guesses value type from string
-workspace exposes object-typed native storage to jobs
+GenerationPlan stores Entity.
+OperationContract references IComponentData.
+ResourceDefinition references EntityQuery.
+GenerationRecipeDefinition depends on ISystem.
 ```
 
-Typed access should be compatible with Burst and Unity safety restrictions.
+## Unity object boundary
 
-## ECS boundary
-
-Future ECS integration should be an adapter or execution backend.
-
-The core workspace/scheduler model should not require an ECS `World` for semantic correctness.
-
-Possible ECS integration:
-
-```text
-ECS system drives execution of a runnable plan
-ECS components reference execution handles
-ECS graphics consumes payload artifacts
-```
-
-Invalid ECS coupling:
-
-```text
-ResourceDefinition stores Entity
-GenerationPlan stores SystemHandle
-Job reads GenerationCatalog through ECS singleton
-Catalog identity depends on ECS World
-```
-
-ECS is an integration surface, not the catalog/request/plan domain model.
-
-## Unity boundary
-
-Workspace and scheduler code may use Unity Collections, Jobs, Burst, and Mathematics when they are part of execution.
-
-Workspace and scheduler code must not use Unity scene/editor state as domain truth.
+Execution code may run inside Unity, but Unity object identity must not become domain identity.
 
 Do not use:
 
 ```text
-GameObject.Find
-Object.FindObjectsByType
-Resources.Load for runtime domain lookup
-AssetDatabase
-current selection
-scene hierarchy order
-MonoBehaviour names as symbols
+GameObject.name
+UnityEngine.Object.GetInstanceID()
+asset path
+scene hierarchy index
+ScriptableObject reference identity
+editor selection state
 ```
 
-Unity-facing adapters may prepare accepted execution inputs. Execution systems consume them explicitly.
+as deterministic generation identity.
 
-## Thread safety
+Use package-owned symbols and accepted definitions for identity.
 
-Future workspace and scheduler APIs must define thread-safety expectations.
+## Native container policy
 
-Workspace mutation during scheduling must be controlled.
+Use standard Unity native containers by default.
 
-Schedulers must respect Unity job safety rules.
+Use lower-level unsafe APIs only when the data shape or performance requirement justifies them.
 
-Native containers must not be accessed concurrently in conflicting ways without dependencies or safety mechanisms.
+Valid reasons may include:
 
-Thread safety must not depend on undocumented call order or editor-only behavior.
+```text
+specific memory layout
+explicit lifetime control
+topology construction
+controlled aliasing
+memory-range operations
+interop
+artifact layout
+measured target workload performance
+```
+
+Unsafe code must be isolated in execution infrastructure.
+
+Unsafe code must not leak into current semantic Runtime layers.
+
+## Data structure policy
+
+Choose data structures by data shape.
+
+Dense raster data uses row-major one-dimensional storage.
+
+Fixed-degree topology uses direct computation or fixed-stride arrays.
+
+Variable one-to-many topology uses frozen compressed sparse layouts.
+
+Mutable topology builders may use streams, unsafe lists, or native multi-hash maps during construction, but must freeze into deterministic arrays before canonical use.
+
+Connectivity labeling uses union-find, deterministic flood-fill frontiers, or another explicitly ordered labeling algorithm.
+
+Priority propagation uses deterministic heaps, bucket queues, radix-style queues, or another priority structure with explicit tie-breaking.
+
+Spatial lookup uses chunk buckets before trees.
+
+Canonical graph state uses arrays of nodes, edges, offsets, counts, and values.
+
+Atlas does not use managed object graphs as canonical generation data.
 
 ## Determinism
 
-Execution must be deterministic for the same accepted inputs and execution profile.
+Execution must be deterministic for the same accepted input and execution profile.
+
+Deterministic execution requires:
+
+```text
+explicit ordering
+explicit tie-breaking
+stable seeds
+stable dimensions
+stable data layout
+stable dependency wiring
+stable capture policy
+```
 
 Do not use:
 
 ```text
 current time
-frame count
-wall-clock duration
-thread completion race order
-native memory address
-hash map enumeration order
-unordered parallel writes
 global random state
+thread timing
+hash-map enumeration order
 Unity object instance ID
-```
-
-Use explicit deterministic inputs:
-
-```text
-Grid
-Seed
-GenerationRunSettings
-RunnablePlan order
-field binding order
-scheduler-defined deterministic iteration order
-stable unmanaged random streams derived from Seed
-```
-
-Parallel jobs must avoid nondeterministic write conflicts.
-
-## Randomness
-
-Randomness must be derived from accepted seed data.
-
-A scheduler may derive per-operation or per-job seeds from:
-
-```text
-run seed
-operation identity
-route-step identity
-iteration index
-stable worker partition index
-```
-
-Do not use:
-
-```text
-UnityEngine.Random global state
-System.Random shared mutable instance
-current time
-thread ID as generation identity
-job execution order
-```
-
-Seed derivation must be stable and documented by the owner.
-
-## Ordering
-
-Execution ordering must be explicit.
-
-Possible ordering sources:
-
-```text
-runnable stage order
-runnable operation order
-field dependency graph
-resource producer/consumer graph
-scheduler-local deterministic partition order
-profile-defined ordering
-```
-
-Avoid ordering from:
-
-```text
-dictionary enumeration
-hash set enumeration
-native hash map enumeration
-parallel completion order
-Unity scene order
 asset import order
+scene hierarchy order
+managed object allocation order
 ```
 
-When a scheduler introduces parallelism, the final output must not depend on nondeterministic completion order.
+for deterministic output.
 
-## Error handling
+## Disposal
 
-Invalid API usage should throw.
+Workspace-owned native storage must be disposed by the workspace or by an explicit owner declared by the workspace.
 
-Examples:
+Schedulers must not leak native allocations.
+
+Jobs must not retain references beyond their valid scheduled lifetime.
+
+External bindings must document whether the workspace owns disposal or only borrows access.
+
+## Testing expectations
+
+When implemented, tests should verify:
 
 ```text
-null workspace
-null runnable operation
-invalid scheduler configuration
-requesting field access with incompatible value kind
-using a disposed workspace
+workspace rejects invalid allocation requests
+workspace owns and disposes native storage
+field handles cannot be used with the wrong workspace
+runnable plan does not allocate storage
+scheduler rejects incompatible runnable operations
+scheduler wires dependencies deterministically
+jobs receive only native containers and unmanaged values
+scratch storage is not exposed as canonical output
+artifact capture follows policy
+diagnostics follow policy
+disposed workspace access fails predictably
 ```
 
-Expected execution failure should use the future execution result/error model.
+## Invalid boundary crossings
 
-Examples:
+Do not implement these:
 
 ```text
-missing field handle
-unsupported scheduler binding
-scratch allocation failure
-job scheduling failure
-iteration limit exceeded
-external input unavailable
-artifact capture failed
+GenerationPlan.Schedule()
+GenerationPlan.JobHandle
+StagePlanNode.NativeBuffer
+OperationPlanNode.Execute()
+OperationPlanNode.FieldHandle
+OperationContract.NativeArray<T>
+ResourceDefinition.FieldHandle
+GenerationRecipeDefinition.OperationScheduler
+GenerationRequest.GenerationWorkspace
+Job receives GenerationPlan
+Job receives ResourceDefinition
+Job reads Symbol
 ```
 
-Execution failure is not request-resolution failure.
+Each item mixes semantic planning with execution ownership.
 
-## Logging
+## Checklist
 
-Workspace and scheduler code should not rely on logging as the primary failure mechanism.
-
-Correct:
+Before implementing scheduler, workspace, or job code, verify:
 
 ```text
-scheduler returns execution failure
-workspace throws for invalid API usage
-artifact system returns capture failure
-```
-
-Incorrect:
-
-```text
-scheduler logs missing field and continues with default
-workspace logs allocation failure and returns invalid handle
-job silently skips invalid data
-```
-
-Logs may supplement structured errors. They must not replace them.
-
-## Artifact capture
-
-Artifact capture is future architecture.
-
-A scheduler may coordinate capture timing.
-
-The workspace may provide data access.
-
-The artifact system owns artifact construction.
-
-Capture must not require jobs to know artifact policy.
-
-Correct:
-
-```text
-runnable metadata defines capture point
-scheduler ensures dependencies are complete
-workspace exposes data safely
-artifact system captures output
-```
-
-Incorrect:
-
-```text
-job writes editor artifact directly
-ResourceDefinition owns capture file path
-GenerationPlan stores texture output
-scheduler guesses capture from display name
-```
-
-## Profiling and diagnostics
-
-Profiling and diagnostics are execution concerns.
-
-Schedulers may expose profiling hooks when designed.
-
-Diagnostics should not affect deterministic generation output unless explicitly modeled.
-
-Diagnostic fields should be profile-controlled.
-
-Do not make diagnostic behavior part of resource identity unless it is semantic generation truth.
-
-## Memory budgeting
-
-Memory budgeting belongs to future execution configuration.
-
-Workspace allocation may use:
-
-```text
-execution profile
-field definitions
-storage policies
-run grid size
-artifact capture policy
-external input policy
-```
-
-Memory budgeting must not mutate semantic resource identity or managed plan structure.
-
-If a memory budget cannot satisfy a runnable plan, execution preparation should fail through the future execution error model.
-
-## Implementation placement
-
-Future workspace/scheduler/job code should live in explicit execution-oriented folders.
-
-Possible folders:
-
-```text
-Runtime/Execution/
-Runtime/Execution/Workspaces/
-Runtime/Execution/Schedulers/
-Runtime/Execution/Jobs/
-Runtime/Execution/Scratch/
-Runtime/Execution/Artifacts/
-```
-
-Do not place workspace, scheduler, or job ownership code inside:
-
-```text
-Runtime/Catalog/
-Runtime/Recipes/
-Runtime/Requests/
-Runtime/Plans/
-Runtime/Resources/
-Runtime/Stages/
-Runtime/Operations/
-```
-
-except for references required by accepted metadata.
-
-## Public API naming
-
-Use precise execution names.
-
-Recommended future names:
-
-```text
-GenerationWorkspace
-FieldHandle
-FieldAccess
-OperationScheduler
-SchedulerBinding
-OperationScratch
-ExecutionResult
-ExecutionError
-ExecutionErrorCode
-```
-
-Use `Job` only for actual job structs or job-like execution units.
-
-Avoid vague names:
-
-```text
-ExecutionManager
-WorkspaceContext
-JobProcessor
-DataRunner
-NativeStuff
-OperationHandler
-```
-
-A name must reveal ownership.
-
-## Testing guidance
-
-Future workspace tests should verify:
-
-```text
-field allocation from runnable metadata
-field handle validity
-external input binding validation
-native disposal
-disposed workspace rejection
-deterministic handle assignment
-shape and value-kind access validation
-```
-
-Future scheduler tests should verify:
-
-```text
-dependency wiring
-workspace access requests
-scratch allocation and disposal
-job scheduling inputs
-deterministic ordering
-failure handling
-no catalog/request/plan mutation
-```
-
-Future job tests should verify:
-
-```text
-deterministic native transforms
-Burst compatibility where required
-no managed metadata dependencies
-no allocations in hot paths
-safe parallel writes
-stable seed derivation
-```
-
-## Documentation guidance
-
-Current architecture documents may mention workspace, scheduler, and jobs only as future concepts.
-
-Future documents must clearly mark them as not implemented until code exists.
-
-Do not describe jobs as current operation implementations.
-
-Do not describe `GenerationPlan` as executable job data.
-
-Do not describe resource definitions as native storage.
-
-Do not describe schedulers as catalog or resolver components.
-
-## Review checklist
-
-Before accepting future execution architecture, verify:
-
-```text
-RunnablePlan remains immutable executable metadata.
-GenerationWorkspace owns native allocation, access, and disposal.
-OperationScheduler owns execution control flow and dependency wiring.
-Jobs receive only native containers and unmanaged values.
-Jobs do not know symbols, catalogs, resources, requests, plans, fields, workspaces, or schedulers.
-Native containers are not stored in catalog, recipe, request, or managed plan objects.
-JobHandle state is not stored in managed semantic plans.
-External inputs are explicit.
-Scratch memory is not modeled as a resource unless intentionally promoted.
-Disposal ownership is explicit.
-Ordering is deterministic.
-Parallel writes are safe and deterministic.
-Execution errors are not request-resolution errors.
-Unity scene/editor state is not domain truth.
+Does the runnable plan own only metadata?
+Does the workspace own native storage lifetime?
+Does the scheduler own dependency wiring and job scheduling?
+Do jobs receive only native containers and unmanaged values?
+Is scratch ownership explicit?
+Is canonical storage separate from scratch and temporary storage?
+Are artifacts captured by an explicit artifact owner?
+Are diagnostics separated from current semantic objects?
+Does ECS integration stay outside current Runtime planning objects?
+Is disposal ownership explicit?
+Is deterministic ordering explicit?
+Are unsafe APIs isolated in execution infrastructure?
 ```
 
 ## Summary
 
-`RunnablePlan` describes executable metadata.
+`GenerationWorkspace` is planned native storage ownership.
 
-`GenerationWorkspace` owns native storage.
+`OperationScheduler` is planned execution control flow.
 
-`OperationScheduler` owns orchestration, dependencies, scratch, and job scheduling.
+Jobs are planned deterministic native transforms.
 
-Jobs own only deterministic transforms over native containers and unmanaged values.
+Runnable plans describe execution metadata.
 
-Native memory, job handles, schedulers, and execution failure policy belong after managed plan compilation.
+Workspaces allocate storage.
 
-Catalog, recipe, request, and managed plan objects must stay free of execution state.
+Schedulers schedule work.
 
-```
+Jobs transform data.
+
+Current managed Runtime objects remain semantic and stop at `GenerationPlan`.
